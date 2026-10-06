@@ -9,7 +9,7 @@
 
 #define SDA 4
 #define SCL 15
-#define _VERSION 0.06
+#define _VERSION 0.07
 #define BLE_SERVICE_NAME "WR S4BL3"
 #define SerialDebug Serial
 #define BATPIN 33
@@ -115,7 +115,7 @@ void initBLE() {
 
   pCharacteristic24->setValue("4");
   pCharacteristic25->setValue("0000");
-  pCharacteristic26->setValue("0.06");
+  pCharacteristic26->setValue("0.07");
   pCharacteristic27->setValue("2.2BLE");
   pCharacteristic28->setValue("4.3");
   pCharacteristic29->setValue("Waterrower");

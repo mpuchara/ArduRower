@@ -11,8 +11,8 @@ int main() {
   m.reset(0);
   for (uint32_t n=1; n<=200; ++n) m.pulse(n*100000);
   printf("speed=%f seconds=%f pulses=%u\n",m.speed,m.seconds(),m.pulses);
-  assert(m.pulses == 200 && near(m.distance(),200/3.156f));
-  assert(near(m.speed,10/3.156f,0.01f));
+  assert(m.pulses == 200 && near(m.distance(),41.19138f));
+  assert(near(m.speed,2.059569f,0.01f));
   assert(m.strokes == 0); // Constant frequency must not generate strokes.
   assert(near(m.seconds(),19.9f));
   assert(near(m.averagePace(),500*m.seconds()/m.distance()));
@@ -42,5 +42,14 @@ int main() {
   m.reset(0);
   for (uint32_t n=1;n<=300;++n) m.pulse(n*100000);
   assert(m.averageEquivalentPower() > 0 && m.averageEquivalentPower() < m.equivalentPower());
+  // Regression examples for provisional v0.07 scale. Keep time/cadence independent.
+  assert(near(DISTANCE_SCALE,0.65f));
+  RowerMetrics reference; reference.speed = (20.0f/3.6f)*DISTANCE_SCALE;
+  assert(near(reference.speed*3.6f,13.0f));
+  assert(near(reference.pace(),138.46154f));
+  assert(near(reference.equivalentPower(),131.8587f,0.01f));
+  reference.speed = 15.0f/3.6f;
+  assert(near(reference.pace(),120.0f));
+  assert(near(reference.equivalentPower(),202.5463f,0.01f));
   puts("PASS: distance, measured sampling time, steady speed, pause/resume, rollover, detector holdoff/cadence, reset, zero-gap safety, power integration");
 }

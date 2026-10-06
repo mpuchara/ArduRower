@@ -3,10 +3,14 @@
 #include <math.h>
 
 // One FALLING edge per magnet crossing, in either direction on the strap reel.
-// Calibration preserves the previous 3.156 pulses/m, including handle recovery.
+// Historical baseline: 3.156 pulses/m, including handle recovery.
 // This is a virtual distance, not the circumference or measured rotor travel.
 static const uint8_t MAGNETS_PER_REVOLUTION = 4;
 static const float METERS_PER_REVOLUTION = 4.0f / 3.156f;
+// Provisional scale chosen after implausibly high readings during easy rowing.
+// Not a measured calibration: reed pulses contain no force/load information.
+// Distance and speed scale linearly; Concept2-equivalent watts scale cubically.
+static const float DISTANCE_SCALE = 0.65f;
 static const uint32_t SENSOR_DEBOUNCE_US = 15000;
 static const uint32_t PAUSE_AFTER_US = 5000000;
 
@@ -84,7 +88,7 @@ public:
     ++pulses; started = true; paused = false; lastPulse = now;
   }
 
-  static float metersPerPulse() { return METERS_PER_REVOLUTION / MAGNETS_PER_REVOLUTION; }
+  static float metersPerPulse() { return METERS_PER_REVOLUTION / MAGNETS_PER_REVOLUTION * DISTANCE_SCALE; }
   float distance() const { return pulses * metersPerPulse(); }
   float seconds() const { return activeUs / 1000000.0; }
   float averageStrokeRate() const { return activeUs ? strokes * 60000000.0 / activeUs : 0; }

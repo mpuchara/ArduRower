@@ -1,5 +1,17 @@
 # ArduRower
 
+## Zmiana skali w v0.07
+
+Po obserwacji nadmiernie wysokich wskazań przy lekkim wiosłowaniu wprowadzono **wstępny współczynnik `DISTANCE_SCALE = 0.65`**. Dystans i prędkość wynoszą 65% wskazań v0.06. Moc nadal wynika z tego samego wzoru Concept2, więc wynosi około 27.5% poprzedniej wartości. Czas i wykrywanie ruchów pozostają niezależne od współczynnika.
+
+| Wskazanie v0.06 | Wskazanie v0.07 dla tych samych impulsów |
+|---|---|
+| 50 m | 32.5 m |
+| 20 km/h | 13 km/h, około 2:18/500 m |
+| około 480 W przy 20 km/h | około 132 W |
+
+**To przybliżenie wybrane na podstawie zgłoszonej obserwacji, nie zmierzona kalibracja względem Concept2.** Opis kondycji nie pozwala ustalić rzeczywistej mocy. Jeden czujnik ruchu taśmy bez pomiaru siły nie pozwala zapewnić zgodności wysiłku z Concept2. Współczynnik można zmienić w `ArduRower/RowerMetrics.h`; `1.0` przywraca skalę v0.06. Nie zmieniaj osobno stałej `2.8` dla watów, jeśli chcesz zachować zgodność prędkości, tempa i mocy w skali Concept2.
+
 Komputer do wodnego ergometru wioślarskiego na **Heltec WiFi Kit 32**, z ekranem OLED 128×64 i transmisją BLE FTMS. Projekt oparty na [zpukr/ArduRower](https://github.com/zpukr/ArduRower).
 
 ![Widok główny](docs/ekran.png)
@@ -46,18 +58,19 @@ Przesyłane pola: kadencja, licznik ruchów, średnia kadencja, dystans, tempo b
 
 ## Kalibracja i granice pomiaru
 
-Jeden kontaktron nie rozróżnia kierunku. Impulsy obejmują pociągnięcie i powrót uchwytu. Zachowana skala historyczna wynosi **3.156 impulsu na wirtualny metr**:
+Jeden kontaktron nie rozróżnia kierunku. Impulsy obejmują pociągnięcie i powrót uchwytu. Skala bazowa historycznie wynosiła **3.156 impulsu na wirtualny metr**. W v0.07 stosuje się dodatkowy współczynnik 0.65:
 
 ```
 MAGNETS_PER_REVOLUTION = 4
 METERS_PER_REVOLUTION = 4 / 3.156
-dystans = impulsy × METERS_PER_REVOLUTION / MAGNETS_PER_REVOLUTION
+DISTANCE_SCALE = 0.65
+dystans = impulsy × METERS_PER_REVOLUTION / MAGNETS_PER_REVOLUTION × DISTANCE_SCALE
 ```
 
 Nie dziel tej skali dodatkowo przez cztery ani automatycznie przez dwa. Jej bezwzględna dokładność nie jest potwierdzona. Przy porównaniu z niezależnym monitorem:
 
 ```
-nowa stała = stara stała × dystans referencyjny / dystans ArduRower
+nowy DISTANCE_SCALE = stary DISTANCE_SCALE × dystans referencyjny / dystans ArduRower
 ```
 
 Porównaj kilka dłuższych odcinków przy różnych rytmach i długościach pociągnięć. Jeśli potrzebny współczynnik zależy od sposobu wiosłowania, pojedyncza stała nie wystarczy.
