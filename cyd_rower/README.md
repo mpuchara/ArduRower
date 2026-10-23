@@ -73,3 +73,9 @@ Wzorce są próbkowane co 2 sekundy (dystans w decymetrach), odtwarzane z interp
 **UWAGA przy instalowaniu nowego firmware**: Nie wybieraj pełnego kasowania pamięci flash, jeżeli chcesz zachować rekordy w NVS. Zwykłe wgranie aplikacji i bootloadera nie musi kasować NVS, ale funkcja „erase all flash” usuwa rekordy. Starsza wersja firmware nie posiadała funkcji wyścigów, więc nie ma wcześniejszych rekordów do zachowania.
 
 Współpraca Garmin Connect IQ i format BLE FTMS pozostają niezmienione. Testy w CI obejmują odtwarzanie ducha, kontrolę uszkodzonych rekordów, przerwy, przewagę, przepełnienie czasu i reset liczników, ale nie zastępują testu na fizycznym ekranie i zegarku.
+
+## Ghost Race v0.08.1 — poprawka samoczynnego restartu
+
+W v0.08 pamięć bufora napisów `previousField[12]` była za mała dla pól `textPatch(12–20)` z trybu wyścigu. Nadpisywało to sąsiednie dane, powodując możliwy restart ESP32 (ekran powitalny, po nim domyślny dashboard). W v0.08.1 oba bufory korzystają z jednej stałej długości 24, w funkcjach rysowania są kontrole granic, a skrypt `tests/cyd_text_cache_test.py` weryfikuje wszystkie użyte identyfikatory pól. Kod nie zmienia Garmin BLE ani sposobu zapisywania rekordów.
+
+Aby sprawdzić, czy wystąpił **rzeczywisty restart płytki**, podłącz micro-USB do komputera, uruchom monitor szeregowy 115200 (np. `pio device monitor -p COM4 -b 115200`, dobierz odpowiedni port COM) i obserwuj linię `ArduRower CYD Ghost Race v0.08.1 | reset reason=... | heap=...`. Jeśli linia pojawia się ponownie przy przejściu do wyścigu, skopiuj również komunikat bezpośrednio przed restartem oraz `rst:...`. Jeśli ekran tylko zmienia widoki bez tej linii, będzie to problem nawigacji/dotyku, nie restart ESP32.
