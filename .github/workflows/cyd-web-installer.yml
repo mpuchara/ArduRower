@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/cyd-rower-dashboard-20261023
+      - feature/cyd-ghost-race-20261023
     paths:
       - "cyd_rower/**"
       - "ArduRower/RowerMetrics.h"
@@ -37,40 +37,47 @@ jobs:
         run: |
           python3 tests/cyd_ble_contract_test.py
           python3 tests/cyd_display_refresh_test.py
+          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
+          /tmp/ghost_race_test
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
-      - name: Install PlatformIO and esptool for complete flash images
-        run: python -m pip install --disable-pip-version-check platformio "esptool>=4.8,<5"
+      - name: Install PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio
 
       - name: Compile confirmed ST7789/GPIO21 display profile
         run: |
           set -euo pipefail
           pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21
 
-      - name: Merge bootloader, partition table, boot_app0 and application
+      - name: Publish separate flash images while preserving NVS records
         run: python web/build_site.py
 
-      - name: Check all manifests resolve to ESP32 full flash images
+      - name: Check manifest ranges never overwrite NVS
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           base = Path("site")
           assert (base / "index.html").is_file()
-          for slug in ("st7789-gpio21",):
-              manifest = json.loads((base / "manifests" / (slug + ".json")).read_text())
-              part = manifest["builds"][0]["parts"][0]
-              assert manifest["builds"][0]["chipFamily"] == "ESP32"
-              assert part["offset"] == 0
-              merged = base / "firmware" / (slug + ".bin")
-              assert merged.stat().st_size > 0x10000
-              with merged.open("rb") as f:
-                  f.seek(0x1000)
-                  assert f.read(1) == b'\xe9', "ESP32 bootloader magic not found at 0x1000"
-                  f.seek(0x10000)
-                  assert f.read(1) == b'\xe9', "Application magic not found at 0x10000"
-              print(slug, merged.stat().st_size, "bytes OK")
+          manifest = json.loads((base / "manifests/st7789-gpio21.json").read_text())
+          build = manifest["builds"][0]
+          assert build["chipFamily"] == "ESP32"
+          assert manifest["new_install_prompt_erase"] is False
+          parts = build["parts"]
+          assert [p["offset"] for p in parts] == [0x1000, 0x8000, 0xE000, 0x10000]
+          for part in parts:
+              bin_file = (base / "manifests" / part["path"]).resolve()
+              assert bin_file.is_file()
+              length = bin_file.stat().st_size
+              assert length > 0
+              begin, end = part["offset"], part["offset"] + length
+              assert end <= 0x400000
+              assert not (begin < 0xE000 and end > 0x9000), "NVS would be overwritten"
+              if begin in (0x1000, 0x10000):
+                  with bin_file.open("rb") as f:
+                      assert f.read(1) == b'\xe9', "Invalid ESP32 image magic"
+          print("PASS: ESP Web Tools segments preserve NVS/ghost best records")
           PY
 
       - name: Save a backup copy of the flashable site

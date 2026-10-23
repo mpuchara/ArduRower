@@ -60,3 +60,16 @@ W oryginalnym Heltec GPIO33 służyło do odczytu baterii. W CYD GPIO33 steruje 
 ## Weryfikacja
 Testy obliczeń z repo: \`g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o metrics_test && ./metrics_test\`.
 Na CI/platformie programisty dodatkowo należy wykonać kompilację wszystkich trzech środowisk oraz test długiego obciążenia BLE/TFT. Samo istnienie źródeł w repo **nie potwierdza** jeszcze fizycznej kompatybilności danego LCD lub Garmina.
+
+
+## Tryb GHOST RACE (v0.08)
+
+**Swipe poziomo w lewo lub w prawo** na ekranie ST7789/GPIO21 przełącza pomiędzy obecnym dashboardem (z dwoma widokami) i **GHOST RACE**. Wejście do Ghost Race otwiera menu 500 m / 1000 m / 2000 m. Wybierz dystans dotykając całego wiersza. Jeśli nie ma kalibracji dotyku, przy pierwszym wejściu pojawią się trzy krzyżyki do dotknięcia; działająca kalibracja UBox CYD zostanie użyta automatycznie, jeśli zachowała się w NVS. Alternatywnie **krótki BOOT** przeskakuje między pozycjami menu, a **BOOT >1,5 s** wybiera dystans.
+
+Po wyborze urządzenie czeka na pierwszy impuls kontaktronu, którym rozpoczyna się zegar wyścigu. Czas wyścigu biegnie także podczas przerwy, niezależnie od dotychczasowego treningowego czasu aktywnego i od protokołu BLE. Równolegle widać dwa paski dystansu (TY i DUCH), przewagę w metrach i sekundach, moc oraz prędkość z wykresami. Jeśli nie ma rekordu, pierwszy ukończony przejazd zostaje wzorcem; kolejne przejazdy ścigają się z najlepszym ukończonym rekordem. Przesunięcie z powrotem do dashboardu nie przerywa aktywnego wyścigu. Długie przytrzymanie BOOT podczas wyścigu anuluje próbę (rekord pozostaje). Po ukończeniu dotknięcie ekranu pokazuje menu; po wyjściu i powrocie do zakończonego trybu również pojawi się menu.
+
+Wzorce są próbkowane co 2 sekundy (dystans w decymetrach), odtwarzane z interpolacją, zapisane w ESP32 NVS **wyłącznie po poprawie rekordu**. Każdy rekord jest walidowany sumą kontrolną i skojarzony z dystansem, wersją zapisu oraz aktualnym współczynnikiem skali 0,65. Limit pojedynczego wyścigu do zapisu wynosi około 34 minuty; po przekroczeniu limitu wynik nie jest zapisywany. Przed zmianą skali dystansu należy świadomie zarchiwizować/stworzyć na nowo rekordy; starsze zapisy o innej kalibracji zostaną odrzucone.
+
+**UWAGA przy instalowaniu nowego firmware**: Nie wybieraj pełnego kasowania pamięci flash, jeżeli chcesz zachować rekordy w NVS. Zwykłe wgranie aplikacji i bootloadera nie musi kasować NVS, ale funkcja „erase all flash” usuwa rekordy. Starsza wersja firmware nie posiadała funkcji wyścigów, więc nie ma wcześniejszych rekordów do zachowania.
+
+Współpraca Garmin Connect IQ i format BLE FTMS pozostają niezmienione. Testy w CI obejmują odtwarzanie ducha, kontrolę uszkodzonych rekordów, przerwy, przewagę, przepełnienie czasu i reset liczników, ale nie zastępują testu na fizycznym ekranie i zegarku.

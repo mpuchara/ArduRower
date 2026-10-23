@@ -12,14 +12,14 @@ Bez działania workflow instalator celowo pokazuje informację o braku binariów
 
 ## Co zostanie wgrane
 
-web/build_site.py łączy dla **profilu ST7789/GPIO21** cztery obrazy:
+GitHub Pages publikuje **cztery niezależne pliki BIN** i manifest ESP Web Tools:
 
-- bootloader: **0x1000**
-- tabela partycji: **0x8000**
-- boot_app0: **0xe000**
-- firmware: **0x10000**
+- bootloader: `0x1000`
+- tablica partycji: `0x8000`
+- boot_app0: `0xE000`
+- aplikacja: `0x10000`
 
-Następnie tworzy site/firmware/*.bin (pełne obrazy flash, adres 0) oraz site/manifests/*.json dla ESP Web Tools. GitHub Actions sprawdza nagłówki obrazów oraz granicę 4 MB. **Nie można wgrać samego firmware.bin pod adresem 0**. Manifest wskazuje bezpośrednio na statyczne pliki z GitHub Pages.
+**Dlaczego nie jeden scalony obraz firmware?** Scalenie plików z wypełnieniem 0xFF i wgranie go pod offset 0 mogłoby nadpisać obszar NVS `0x9000–0xDFFF`, kasując rekordy Ghost Race. Rozdzielone pliki omijają NVS. Przy kolejnych instalacjach NIE wybieraj pełnego erase flash. Spójność zakresów i obrazów jest sprawdzana w GitHub Actions.
 
 **Jedyny profil:** ST7789 z podświetleniem GPIO21, potwierdzony na docelowej płytce.
 
@@ -45,3 +45,10 @@ Następnie tworzy site/firmware/*.bin (pełne obrazy flash, adres 0) oraz site/m
 ## Odświeżanie LCD
 
 Poprawiony firmware nie czyści całego ekranu co pół sekundy. Zachowuje nieruchome ramki i podpisy, aktualizuje tylko zmienione liczby (2 Hz) i wykresy (1 Hz), w mniejszych buforowanych prostokątach. Test fizyczny potwierdzający brak migania pozostaje do wykonania po instalacji aktualizacji.
+
+
+## Ghost Race v0.08 — instalacja/aktualizacja
+
+Nowy tryb zawiera wybór wyścigu 500, 1000 lub 2000 metrów i zapis najlepszego przejazdu. Przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów; ponowny swipe wraca do dotychczasowego dashboardu. Jeżeli ekran poprosi o kalibrację, dotknij po kolei trzech żółtych znaków +. Dotyk wybiera dystans; BOOT krótko wybiera kolejną pozycję, przytrzymanie >1,5 s uruchamia wyścig. Start czasu następuje na pierwszym impulsie kontaktronu. Zegar wyścigu nie zatrzymuje się przy odpoczynku. Wartości są estymowane jak dotychczas.
+
+Na ekranie wyścigu dwie belki pokazują dystans aktualny i zapisany, przewagę w metrach i sekundach oraz moc/prędkość z miniwykresami. Rekord zapisuje się tylko po ukończeniu dystansu szybciej od poprzedniego wyniku. Podczas aktualizacji **nie zaznaczaj pełnego erase flash**, aby zachować rekordy Ghost Race w NVS. Interfejs BLE FTMS nie jest modyfikowany.
