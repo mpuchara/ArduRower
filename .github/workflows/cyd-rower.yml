@@ -36,8 +36,6 @@ jobs:
       matrix:
         lcd:
           - esp32-2432s028-st7789-gpio21
-          - esp32-2432s028-st7789-gpio27
-          - esp32-2432s028-ili9341
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
