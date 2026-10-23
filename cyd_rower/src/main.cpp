@@ -443,11 +443,19 @@ void updateTouch(uint32_t now) {
     touchedLast=false;
     const uint32_t held=now-touchPressedAt;
     const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
-    // Touch is on a separate SPI and may swap raw axes with screen rotation.
-    // Both physical horizontal directions enter the same other main mode,
-    // hence axis polarity is irrelevant. Short taps never trigger navigation.
-    if(held>75 && held<1750 && max(dx,dy)>700 &&
-       max(dx,dy)>min(dx,dy)*1.6f) {
+    // Use calibrated screen coordinates so ONLY horizontal swipes navigate.
+    // Before first calibration, accept a dominant long raw-axis swipe to
+    // reach the calibration wizard without depending on the touch orientation.
+    bool horizontalSwipe=false;
+    if(touchCalibrated) {
+      const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+      const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+      horizontalSwipe=fabsf(deltaX)>55.0f &&
+                      fabsf(deltaX)>fabsf(deltaY)*1.45f;
+    } else {
+      horizontalSwipe=max(dx,dy)>700 && max(dx,dy)>min(dx,dy)*1.6f;
+    }
+    if(held>75 && held<1750 && horizontalSwipe) {
       toggleMode();
     } else if(held>=60 && held<750 && max(dx,dy)<500) {
       touchTap(rawEndX,rawEndY);
