@@ -13,6 +13,7 @@
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <Preferences.h>
+#include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
@@ -77,8 +78,17 @@ uint16_t backgroundColor, panelColor, faintColor, gridColor;
 uint16_t powerColor, speedColor, labelColor, whiteColor;
 uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
 bool pageRendered = false, displayedDetails = false;
-String previousField[12];
-bool previousValid[24] = {};
+// Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
+// 12-element String array was indexed at 12..20 in race mode, overwriting
+// adjacent global memory and causing spontaneous ESP32 resets.
+static constexpr uint8_t kTextSlotCount = 24;
+static constexpr uint8_t kMaxAssignedTextSlot = 20;
+static_assert(kTextSlotCount > kMaxAssignedTextSlot, "Ghost Race fields exceed text cache");
+String previousField[kTextSlotCount];
+bool previousValid[kTextSlotCount] = {};
+static_assert(sizeof(previousField) / sizeof(previousField[0]) ==
+              sizeof(previousValid) / sizeof(previousValid[0]),
+              "Text cache and validity flags must have matching sizes");
 // Race mode has independent elapsed time, including stationary intervals.
 enum class Mode : uint8_t { Dashboard, Race };
 Mode activeMode = Mode::Dashboard;
@@ -509,11 +519,17 @@ float historyMax(bool power) {
 // fillScreen() is used only when switching pages, NEVER on the 500-ms tick.
 static constexpr int16_t BUFFER_W = 160, BUFFER_H = 55;
 void resetRenderCache() {
-  for (uint8_t i = 0; i < 24; i++) previousValid[i] = false;
+  for (uint8_t i = 0; i < kTextSlotCount; i++) previousValid[i] = false;
   plottedRevision = UINT32_MAX;
 }
 void textPatch(uint8_t slot, int x, int y, int w, int h, String text,
                uint16_t fg, uint16_t bg, uint8_t font, bool right = false) {
+  // Guard even if a future feature accidentally uses a new slot ID.
+  if (slot >= kTextSlotCount) {
+    Serial.printf("UI textPatch: invalid slot %u (max %u)\n",
+                  (unsigned)slot, (unsigned)(kTextSlotCount-1));
+    return;
+  }
   if (previousValid[slot] && previousField[slot] == text) return;
   previousValid[slot] = true; previousField[slot] = text;
   if (scratchReady) {
@@ -533,6 +549,10 @@ void textPatch(uint8_t slot, int x, int y, int w, int h, String text,
   }
 }
 void cardValue(uint8_t slot, int x, bool power) {
+  if (slot >= kTextSlotCount) {
+    Serial.printf("UI cardValue: invalid slot %u\n", (unsigned)slot);
+    return;
+  }
   const float val = power ? metrics.equivalentPower() : metrics.speed * 3.6f;
   const String txt = power ? "~" + String((int)roundf(val)) : String(val, 1);
   if (previousValid[slot] && previousField[slot] == txt) return;
@@ -872,6 +892,8 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.printf("\nArduRower CYD Ghost Race v0.08.1 | reset reason=%d | heap=%u\n",
+                (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
   initDisplay();
