@@ -651,6 +651,173 @@ void updateUI() {
     tft.drawString("!",298,224,2);
   }
 }
+// Ghost UI: page changes perform one clear; every live field is replaced by
+// the existing cropped offscreen sprite renderer. Never redraw the entire
+// screen at 2 Hz: that previously caused severe flicker on ST7789/GPIO21.
+String raceTime(uint32_t ms) {
+  const uint32_t sec=(ms+500)/1000;
+  char buf[17];
+  snprintf(buf,sizeof(buf),"%lu:%02lu",(unsigned long)(sec/60),
+           (unsigned long)(sec%60));
+  return String(buf);
+}
+uint8_t desiredRaceScreen() {
+  if(ghost.phase==ghostrace::Phase::Idle) return 0;
+  if(ghost.phase==ghostrace::Phase::Finished ||
+     ghost.phase==ghostrace::Phase::Cancelled) return 2;
+  return 1; // Armed or Running
+}
+void paintRaceLayout(uint8_t screen) {
+  tft.fillScreen(backgroundColor); // only once on view change
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(0,0,320,25,panelColor);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawString("GHOST RACE",9,4,2);
+  tft.setTextColor(labelColor,panelColor);
+  tft.drawRightString("SWIPE: DASHBOARD",313,6,1);
+  if(screen==0) {
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("WYBIERZ DYSTANS",11,31,2);
+    for(uint8_t i=0;i<3;i++) {
+      const int yy=53+i*59;
+      tft.fillRoundRect(10,yy,300,52,8,panelColor);
+      tft.drawRoundRect(10,yy,300,52,8,gridColor);
+      tft.setTextColor(whiteColor,panelColor);
+      tft.drawString(String(raceDistances[i])+" m",23,yy+8,4);
+      tft.setTextColor(labelColor,panelColor);
+      const String pb=personalBestMs[i] ? "REKORD "+raceTime(personalBestMs[i]) :
+                             "PIERWSZY WYSCIG";
+      tft.drawRightString(pb,297,yy+17,2);
+    }
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("DOTKNIJ DYSTANS, BY ZACZAC",10,230,1);
+  } else if(screen==1) {
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString("TY",12,33,2);
+    tft.setTextColor(speedColor,backgroundColor);
+    tft.drawString("DUCH",12,84,2);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("MOC ~W",15,174,1);
+    tft.drawString("km/h",174,174,1);
+    tft.drawString("BOOT 1.5s: anuluj",9,228,1);
+    tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
+  } else {
+    tft.setTextColor(ghost.personalBest && !recordSaveFailed ?
+                     speedColor : whiteColor,backgroundColor);
+    tft.drawString(recordSaveFailed?"BLAD ZAPISU!" :
+                   ghost.overflow?"LIMIT 34 MIN" :
+                   ghost.phase==ghostrace::Phase::Cancelled?"ANULOWANO" :
+                   ghost.personalBest?"NOWY REKORD!":"META!",20,38,4);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("DYSTANS",20,90,2);
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString(String(ghost.targetMeters)+" m",20,112,4);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("CZAS",176,90,2);
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString(ghost.phase==ghostrace::Phase::Finished ?
+      raceTime(ghost.endMs) : "--:--",176,112,4);
+    if(ghost.hasBest) {
+      tft.setTextColor(labelColor,backgroundColor);
+      tft.drawString("POPRZEDNI REKORD",20,164,2);
+      tft.setTextColor(powerColor,backgroundColor);
+      tft.drawString(raceTime(ghost.best.finishMs),20,184,4);
+    } else {
+      tft.setTextColor(labelColor,backgroundColor);
+      tft.drawString("BRAK POPRZEDNIEGO REKORDU",20,174,2);
+    }
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString("DOTKNIJ: WYBIERZ DYSTANS",20,226,2);
+  }
+  resetRenderCache();
+  raceLayoutReady=true;
+  displayedRaceScreen=screen;
+}
+void drawRaceSelection() {
+  // BOOT short press can select without a calibrated touch screen.
+  static uint8_t lastSelected=255;
+  if(!raceLayoutReady || displayedRaceScreen!=0) lastSelected=255;
+  if(lastSelected==selectedDistance)return;
+  for(int i=0;i<3;i++){
+    const int yy=53+i*59;
+    tft.drawRoundRect(10,yy,300,52,8,i==selectedDistance?speedColor:gridColor);
+    tft.drawRoundRect(11,yy+1,298,50,7,i==selectedDistance?speedColor:panelColor);
+  }
+  lastSelected=selectedDistance;
+}
+void paintProgress(int y, float value, uint16_t fillInk) {
+  const int x=16,w=288,h=13;
+  const float portion=ghost.targetMeters ? constrain(value/ghost.targetMeters,0.0f,1.0f):0;
+  const int fillWidth=(int)lroundf(w*portion);
+  for(int start=0;start<w;start+=BUFFER_W){
+    const int n=min(BUFFER_W,w-start);
+    if(scratchReady){
+      scratch.fillRect(0,0,n,h,faintColor);
+      const int local=constrain(fillWidth-start,0,n);
+      if(local>0)scratch.fillRect(0,0,local,h,fillInk);
+      scratch.pushSprite(x+start,y,0,0,n,h);
+    } else {
+      tft.fillRect(x+start,y,n,h,faintColor);
+      const int local=constrain(fillWidth-start,0,n);
+      if(local>0)tft.fillRect(x+start,y,local,h,fillInk);
+    }
+  }
+}
+void renderRaceUI() {
+  const uint8_t screen=desiredRaceScreen();
+  if(!raceLayoutReady||displayedRaceScreen!=screen)
+    paintRaceLayout(screen);
+  if(screen==0) {
+    drawRaceSelection();
+    return;
+  }
+  if(screen==2)return; // result is fully static and drawn once
+  const uint32_t now=millis();
+  const bool armed=ghost.phase==ghostrace::Phase::Armed;
+  textPatch(12,153,29,158,22,
+            String((uint32_t)roundf(ghost.meters))+" m",
+            whiteColor,backgroundColor,4,true);
+  textPatch(13,153,80,158,22,
+            ghost.hasBest ?
+              String((uint32_t)roundf(ghost.ghostMeters(now)))+" m" : "-- m",
+            speedColor,backgroundColor,4,true);
+  if(armed) {
+    textPatch(14,12,122,157,26,"CZEKAM NA RUCH",
+              powerColor,backgroundColor,2);
+    textPatch(15,175,122,135,26,"START NA CZUJNIK",
+              labelColor,backgroundColor,1);
+  } else if(!ghost.hasBest) {
+    textPatch(14,12,122,157,26,"PIERWSZY WYSCIG",
+              speedColor,backgroundColor,2);
+    textPatch(15,175,122,135,26,"ZAPIS REKORDU",
+              labelColor,backgroundColor,1);
+  } else {
+    const float lead=ghost.meterLead(now);
+    textPatch(14,12,122,157,26,lead>=0?"PROWADZISZ":"TRACISZ",
+              lead>=0?speedColor:powerColor,backgroundColor,2);
+    textPatch(15,175,122,135,26,
+              String(lead>=0?"+":"")+String(lead,1)+" m",
+              lead>=0?speedColor:powerColor,backgroundColor,2,true);
+  }
+  textPatch(16,12,149,145,25,
+            "~"+String((int)roundf(metrics.equivalentPower()))+" W",
+            powerColor,backgroundColor,4);
+  textPatch(17,165,149,148,25,
+            String(metrics.speed*3.6f,1)+" km/h",
+            speedColor,backgroundColor,4);
+  textPatch(18,180,2,83,20,deviceConnected?"BLE OK":"BLE ...",
+            deviceConnected?speedColor:labelColor,panelColor,2);
+  textPatch(19,267,3,50,20,armed?"--:--":raceTime(ghost.elapsed(now)),
+            labelColor,panelColor,2,true);
+  paintProgress(56,ghost.meters,powerColor);
+  paintProgress(106,ghost.ghostMeters(now),speedColor);
+  if(plottedRevision!=historyRevision) {
+    plot(15,189,132,28,true);
+    plot(173,189,132,28,false);
+    plottedRevision=historyRevision;
+  }
+}
+
 void initDisplay() {
   // Critical fix from HA_UBOX_bridge: turn on TFT backlight BEFORE initializing
   // anything that can block, then re-enable AFTER TFT init (3.x LEDC API).
