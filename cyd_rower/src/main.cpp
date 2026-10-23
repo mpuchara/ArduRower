@@ -12,6 +12,8 @@
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
+#include <Preferences.h>
+#include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
@@ -44,6 +46,11 @@ XPT2046_Touchscreen touch(33, 36);
 bool touchReady = false;
 bool touchedLast = false;
 uint32_t touchPressedAt = 0;
+int16_t rawStartX = 0, rawStartY = 0, rawEndX = 0, rawEndY = 0;
+float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
+bool touchCalibrated=false, pendingCalibration=false;
+uint8_t touchRotation=DEFAULT_ROTATION;
+
 RowerMetrics metrics;
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
@@ -71,7 +78,18 @@ uint16_t powerColor, speedColor, labelColor, whiteColor;
 uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
 bool pageRendered = false, displayedDetails = false;
 String previousField[12];
-bool previousValid[12] = {};
+bool previousValid[24] = {};
+// Race mode has independent elapsed time, including stationary intervals.
+enum class Mode : uint8_t { Dashboard, Race };
+Mode activeMode = Mode::Dashboard;
+ghostrace::Race ghost;
+ghostrace::Record storedGhost;
+uint32_t personalBestMs[3] = {};
+uint8_t selectedDistance=0;
+bool raceLayoutReady=false;
+uint8_t displayedRaceScreen=255;
+uint32_t lastRacePaintMs=0;
+bool recordSaveFailed=false;
 
 class MyServerCallbacks : public BLEServerCallbacks {
  public:
@@ -228,26 +246,211 @@ void resetWorkout() {
   ++historyRevision;
 }
 
+// Persistent reference runs (not rewritten each second). The NVS blob is
+// versioned/checksummed and accepted only for the same distance/calibration.
+void resetRenderCache();
+void renderRaceUI();
+const uint16_t raceDistances[3] = {500, 1000, 2000};
+const char *raceKeys[3] = {"g500", "g1000", "g2000"};
+bool loadBest(uint8_t index, ghostrace::Record &out) {
+  Preferences p;
+  if (!p.begin("rower-races", true)) return false;
+  const size_t n = p.getBytesLength(raceKeys[index]);
+  const size_t read = (n == sizeof(out)) ?
+      p.getBytes(raceKeys[index], &out, sizeof(out)) : 0;
+  p.end();
+  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index]);
+}
+bool saveBest(uint8_t index, const ghostrace::Record &record) {
+  if (!ghostrace::valid(record, raceDistances[index])) return false;
+  Preferences p;
+  if (!p.begin("rower-races", false)) return false;
+  const bool ok = p.putBytes(raceKeys[index], &record, sizeof(record)) == sizeof(record);
+  p.end();
+  return ok;
+}
+void loadBestTimes() {
+  for (int i=0;i<3;++i)
+    personalBestMs[i] = loadBest(i, storedGhost) ? storedGhost.finishMs : 0;
+}
+void startRace(uint8_t index) {
+  if (index >= 3) return;
+  selectedDistance = index;
+  const bool found = loadBest(index, storedGhost);
+  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr);
+  // Start a fresh interval, so race distance is not polluted by earlier
+  // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
+  resetWorkout();
+  activeMode = Mode::Race;
+  raceLayoutReady = false;
+  lastRacePaintMs = 0;
+  recordSaveFailed=false;
+}
+void openRaceMenu() {
+  if (ghost.phase == ghostrace::Phase::Running ||
+      ghost.phase == ghostrace::Phase::Armed) ghost.cancel();
+  ghost.phase = ghostrace::Phase::Idle;
+  loadBestTimes();
+  raceLayoutReady=false;
+}
+void toggleMode() {
+  if (activeMode == Mode::Dashboard) {
+    activeMode=Mode::Race;
+    if (ghost.phase == ghostrace::Phase::Idle)
+      loadBestTimes();
+    raceLayoutReady=false;
+    if (touchReady && !touchCalibrated) pendingCalibration=true;
+  } else {
+    activeMode=Mode::Dashboard;
+    pageRendered=false;
+  }
+  resetRenderCache();
+}
 void updateButton(uint32_t now) {
   const bool down = digitalRead(BUTTONSPIN) == LOW;
-  if (down != rawButtonDown) { rawButtonDown = down; buttonChangedMs = now; }
+  if (down != rawButtonDown) { rawButtonDown=down; buttonChangedMs=now; }
   if (now - buttonChangedMs >= 30 && down != buttonDown) {
-    buttonDown = down;
-    if (down) { buttonPressedMs = now; longPressDone = false; }
-    else if (!longPressDone) detailPage = !detailPage;
+    buttonDown=down;
+    if (down) { buttonPressedMs=now; longPressDone=false; }
+    else if (!longPressDone) {
+      if (activeMode == Mode::Dashboard) detailPage=!detailPage;
+      else if (ghost.phase == ghostrace::Phase::Idle)
+        selectedDistance=(selectedDistance+1)%3;
+      else if (ghost.phase == ghostrace::Phase::Finished ||
+               ghost.phase == ghostrace::Phase::Cancelled) openRaceMenu();
+    }
   }
-  if (buttonDown && !longPressDone && now - buttonPressedMs >= 1500) {
-    resetWorkout();
-    longPressDone = true;
+  if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
+    longPressDone=true;
+    if (activeMode == Mode::Dashboard) resetWorkout();
+    else if (ghost.phase == ghostrace::Phase::Idle) startRace(selectedDistance);
+    else if (ghost.phase == ghostrace::Phase::Running ||
+             ghost.phase == ghostrace::Phase::Armed) openRaceMenu();
+    else openRaceMenu();
   }
 }
+bool mappedTouch(int16_t rawX,int16_t rawY,int16_t &x,int16_t &y) {
+  if (!touchCalibrated) return false;
+  float fx=touchA*rawX+touchB*rawY+touchC;
+  float fy=touchD*rawX+touchE*rawY+touchF;
+  if (touchRotation!=DEFAULT_ROTATION) {fx=319-fx;fy=239-fy;}
+  if (!isfinite(fx)||!isfinite(fy)||fx < -18||fx >337||fy < -18||fy >257)
+    return false;
+  x=constrain((int)lroundf(fx),0,319);
+  y=constrain((int)lroundf(fy),0,239);
+  return true;
+}
+void readTouchCalibration() {
+  Preferences p;
+  // Prefer the calibration from the previously working UBox CYD firmware.
+  for (const char *area : {"rower-touch","ubox-cyd"}) {
+    if (!p.begin(area,true)) continue;
+    if (p.getBool("tc_ok",false)) {
+      touchA=p.getFloat("tc_a",0);touchB=p.getFloat("tc_b",0);
+      touchC=p.getFloat("tc_c",0);touchD=p.getFloat("tc_d",0);
+      touchE=p.getFloat("tc_e",0);touchF=p.getFloat("tc_f",0);
+      touchRotation=p.getUChar("tc_rot",DEFAULT_ROTATION);
+      touchCalibrated=isfinite(touchA)&&isfinite(touchB)&&
+        isfinite(touchC)&&isfinite(touchD)&&isfinite(touchE)&&isfinite(touchF) &&
+        (fabsf(touchA)+fabsf(touchB)>.01f) &&
+        (fabsf(touchD)+fabsf(touchE)>.01f);
+    }
+    p.end();
+    if (touchCalibrated) break;
+  }
+}
+bool readCalPoint(int x,int y,int &rx,int &ry,int index) {
+  tft.fillScreen(backgroundColor);
+  tft.setTextDatum(TL_DATUM);tft.setTextColor(whiteColor,backgroundColor);
+  tft.drawString("KALIBRACJA DOTYKU",10,10,2);
+  tft.drawString(String(index)+"/3: dotknij zolty +",10,37,2);
+  tft.drawFastHLine(x-13,y,27,powerColor);
+  tft.drawFastVLine(x,y-13,27,powerColor);
+  const uint32_t began=millis();
+  while (millis()-began<15000UL) {
+    if (touch.touched()) {
+      long xx=0,yy=0;int n=0;
+      const uint32_t hold=millis();
+      while (touch.touched() && millis()-hold<650UL) {
+        const TS_Point pt=touch.getPoint();
+        if(pt.z>100){xx+=pt.x;yy+=pt.y;n++;}
+        delay(25);
+      }
+      while (touch.touched()&&millis()-hold<1500UL)delay(25);
+      if(n>=2){rx=xx/n;ry=yy/n;return true;}
+    }
+    delay(25);
+  }
+  return false;
+}
+bool calibrateRaceTouch() {
+  const int tx[3]={25,295,25}, ty[3]={65,65,210};
+  int rx[3],ry[3];
+  for(int i=0;i<3;i++)
+    if(!readCalPoint(tx[i],ty[i],rx[i],ry[i],i+1)) return false;
+  const float ux=rx[1]-rx[0],uy=ry[1]-ry[0];
+  const float vx=rx[2]-rx[0],vy=ry[2]-ry[0];
+  const float det=ux*vy-uy*vx;
+  if(fabsf(det)<80000.0f)return false;
+  touchA=270.0f*vy/det;touchB=-270.0f*vx/det;
+  touchD=-145.0f*uy/det;touchE=145.0f*ux/det;
+  touchC=25.0f-touchA*rx[0]-touchB*ry[0];
+  touchF=65.0f-touchD*rx[0]-touchE*ry[0];
+  touchRotation=DEFAULT_ROTATION;touchCalibrated=true;
+  Preferences p;
+  if(p.begin("rower-touch",false)){
+    p.putBool("tc_ok",true);p.putUChar("tc_rot",DEFAULT_ROTATION);
+    p.putFloat("tc_a",touchA);p.putFloat("tc_b",touchB);
+    p.putFloat("tc_c",touchC);p.putFloat("tc_d",touchD);
+    p.putFloat("tc_e",touchE);p.putFloat("tc_f",touchF);
+    p.end();
+  }
+  return true;
+}
+void touchTap(int16_t rx,int16_t ry) {
+  if(activeMode==Mode::Dashboard){detailPage=!detailPage;return;}
+  if(ghost.phase==ghostrace::Phase::Finished ||
+     ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
+  if(ghost.phase!=ghostrace::Phase::Idle)return;
+  int16_t x,y;
+  if(!mappedTouch(rx,ry,x,y)) {pendingCalibration=true;return;}
+  // Three entire rows are large touch targets with no small hitbox.
+  if(y>=53 && y<105) startRace(0);
+  else if(y>=112 && y<164) startRace(1);
+  else if(y>=171 && y<223) startRace(2);
+}
 void updateTouch(uint32_t now) {
-  if (!touchReady) return;
-  const bool down = touch.touched();
-  if (down && !touchedLast) touchPressedAt = now;
-  if (!down && touchedLast && now - touchPressedAt >= 50 && now - touchPressedAt < 850)
-    detailPage = !detailPage; // tap anywhere; no coordinate/calibration required
-  touchedLast = down;
+  if(!touchReady)return;
+  const bool down=touch.touched();
+  if(down) {
+    const TS_Point pt=touch.getPoint();
+    if(!touchedLast){
+      touchedLast=true;touchPressedAt=now;
+      rawStartX=rawEndX=pt.x;
+      rawStartY=rawEndY=pt.y;
+    } else {
+      rawEndX=pt.x;rawEndY=pt.y;
+    }
+  } else if(touchedLast) {
+    touchedLast=false;
+    const uint32_t held=now-touchPressedAt;
+    const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
+    // Touch is on a separate SPI and may swap raw axes with screen rotation.
+    // Both physical horizontal directions enter the same other main mode,
+    // hence axis polarity is irrelevant. Short taps never trigger navigation.
+    if(held>75 && held<1750 && max(dx,dy)>700 &&
+       max(dx,dy)>min(dx,dy)*1.6f) {
+      toggleMode();
+    } else if(held>=60 && held<750 && max(dx,dy)<500) {
+      touchTap(rawEndX,rawEndY);
+    } else if(held>=1200 && max(dx,dy)<500 &&
+              activeMode==Mode::Race &&
+              (ghost.phase==ghostrace::Phase::Running ||
+               ghost.phase==ghostrace::Phase::Armed)) {
+      int16_t x,y;
+      if(mappedTouch(rawEndX,rawEndY,x,y) && y>=218)openRaceMenu();
+    }
+  }
 }
 
 String formatTime(uint32_t seconds) {
@@ -290,7 +493,7 @@ float historyMax(bool power) {
 // fillScreen() is used only when switching pages, NEVER on the 500-ms tick.
 static constexpr int16_t BUFFER_W = 160, BUFFER_H = 55;
 void resetRenderCache() {
-  for (uint8_t i = 0; i < 12; i++) previousValid[i] = false;
+  for (uint8_t i = 0; i < 24; i++) previousValid[i] = false;
   plottedRevision = UINT32_MAX;
 }
 void textPatch(uint8_t slot, int x, int y, int w, int h, String text,
@@ -405,6 +608,7 @@ void pageLayout() {
   resetRenderCache();
 }
 void updateUI() {
+  if (activeMode == Mode::Race) { renderRaceUI(); return; }
   if (!pageRendered || detailPage != displayedDetails) pageLayout();
   textPatch(0,155,3,85,20,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
@@ -489,6 +693,7 @@ void setup() {
   touchSPI.begin(25, 39, 32, 33);
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
+  if(touchReady)readTouchCalibration();
   Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
   initBLE();
   // Allocate after BLE so the BLE stack keeps its working heap.
@@ -501,6 +706,7 @@ void setup() {
   Serial.printf("UI sprite: %s, depth %d, heap %u\n", scratchReady?"OK":"fallback",
                 scratch.getColorDepth(), (unsigned)ESP.getFreeHeap());
   resetWorkout();
+  loadBestTimes();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
   updateUI();
 }
@@ -526,6 +732,22 @@ void loop() {
   const uint32_t now = millis();
   updateButton(now);
   updateTouch(now);
+  if (pendingCalibration && activeMode==Mode::Race &&
+      touchReady && !touchCalibrated) {
+    pendingCalibration=false;
+    if(!calibrateRaceTouch())Serial.println("Touch calibration unavailable: BOOT menu works");
+    raceLayoutReady=false;
+    pageRendered=false;
+    touchedLast=false;
+  }
+  if (ghost.phase==ghostrace::Phase::Armed && metrics.started)
+    ghost.start(now);
+  if (ghost.phase==ghostrace::Phase::Running) {
+    if (ghost.advance(now,metrics.distance())) {
+      if (!saveBest(selectedDistance,ghost.attempt))recordSaveFailed=true;
+      else personalBestMs[selectedDistance]=ghost.endMs;
+    }
+  }
   if (!deviceConnected && oldDeviceConnected) pServer->startAdvertising();
   oldDeviceConnected = deviceConnected;
   if (deviceConnected && now - lastBleMs >= 1000) {
