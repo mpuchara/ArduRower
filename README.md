@@ -1,5 +1,11 @@
 # ArduRower
 
+## Instalator przez przeglądarkę — CYD ESP32-2432S028
+
+**[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).
+
+Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). **Dotychczasowa współpraca BLE z polem Garmin Connect IQ nie jest zmieniana.** Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
+
 ## Zmiana skali w v0.07
 
 Po obserwacji nadmiernie wysokich wskazań przy lekkim wiosłowaniu wprowadzono **wstępny współczynnik `DISTANCE_SCALE = 0.65`**. Dystans i prędkość wynoszą 65% wskazań v0.06. Moc nadal wynika z tego samego wzoru Concept2, więc wynosi około 27.5% poprzedniej wartości. Czas i wykrywanie ruchów pozostają niezależne od współczynnika.

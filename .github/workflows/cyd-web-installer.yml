@@ -1,0 +1,103 @@
+name: ArduRower CYD - Pages installer
+
+on:
+  push:
+    branches:
+      - main
+      - feature/cyd-rower-dashboard-20261023
+    paths:
+      - "cyd_rower/**"
+      - "ArduRower/RowerMetrics.h"
+      - "ArduRower/ArduRower.ino"
+      - "index.html"
+      - "web/**"
+      - "tests/**"
+      - ".github/workflows/cyd-web-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "ardurower-cyd-pages"
+  cancel-in-progress: false
+
+jobs:
+  build-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Keep previous Garmin Connect IQ BLE contract
+        run: |
+          python3 tests/cyd_ble_contract_test.py
+          g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
+          /tmp/metrics_test
+
+      - name: Install PlatformIO and esptool for complete flash images
+        run: python -m pip install --disable-pip-version-check platformio "esptool>=4.8,<5"
+
+      - name: Compile all CYD display profiles
+        run: |
+          set -euo pipefail
+          pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21
+          pio run -d cyd_rower -e esp32-2432s028-st7789-gpio27
+          pio run -d cyd_rower -e esp32-2432s028-ili9341
+
+      - name: Merge bootloader, partition table, boot_app0 and application
+        run: python web/build_site.py
+
+      - name: Check all manifests resolve to ESP32 full flash images
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = Path("site")
+          assert (base / "index.html").is_file()
+          for slug in ("st7789-gpio21", "st7789-gpio27", "ili9341-gpio21"):
+              manifest = json.loads((base / "manifests" / (slug + ".json")).read_text())
+              part = manifest["builds"][0]["parts"][0]
+              assert manifest["builds"][0]["chipFamily"] == "ESP32"
+              assert part["offset"] == 0
+              merged = base / "firmware" / (slug + ".bin")
+              assert merged.stat().st_size > 0x10000
+              with merged.open("rb") as f:
+                  f.seek(0x1000)
+                  assert f.read(1) == b'\xe9', "ESP32 bootloader magic not found at 0x1000"
+                  f.seek(0x10000)
+                  assert f.read(1) == b'\xe9', "Application magic not found at 0x10000"
+              print(slug, merged.stat().st_size, "bytes OK")
+          PY
+
+      - name: Save a backup copy of the flashable site
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardurower-cyd-web-installer
+          path: site/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload installer site to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build-site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy from tested build artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
