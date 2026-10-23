@@ -47,3 +47,9 @@ jobs:
         run: pip install platformio
       - name: Compile CYD (${{ matrix.lcd }})
         run: pio run -d cyd_rower -e ${{ matrix.lcd }}
+      - name: Publish compiled firmware BIN
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardurower-cyd-${{ matrix.lcd }}
+          path: cyd_rower/.pio/build/${{ matrix.lcd }}/firmware.bin
+          if-no-files-found: error
