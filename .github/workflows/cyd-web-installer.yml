@@ -37,6 +37,8 @@ jobs:
         run: |
           python3 tests/cyd_ble_contract_test.py
           python3 tests/cyd_display_refresh_test.py
+          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
+          /tmp/ghost_race_test
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
