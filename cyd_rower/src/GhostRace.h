@@ -12,7 +12,7 @@ static constexpr uint16_t kIntervalMs = 2000;
 static constexpr uint16_t kSamples = 1024; // 34m 8s; 0.1m encoded as uint16
 static constexpr uint32_t kMagic = 0x47525731UL; // GRW1
 static constexpr uint16_t kVersion = 1;
-static constexpr uint32_t kScaleMilli = static_cast<uint32_t>(DISTANCE_SCALE * 1000.0f + 0.5f);
+static const uint32_t kScaleMilli = static_cast<uint32_t>(DISTANCE_SCALE * 1000.0f + 0.5f);
 
 struct Record {
   uint32_t magic;
