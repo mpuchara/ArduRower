@@ -757,7 +757,7 @@ void paintProgress(int y, float value, uint16_t fillInk) {
   const float portion=ghost.targetMeters ? constrain(value/ghost.targetMeters,0.0f,1.0f):0;
   const int fillWidth=(int)lroundf(w*portion);
   for(int start=0;start<w;start+=BUFFER_W){
-    const int n=min(BUFFER_W,w-start);
+    const int n=min((int)BUFFER_W,w-start);
     if(scratchReady){
       scratch.fillRect(0,0,n,h,faintColor);
       const int local=constrain(fillWidth-start,0,n);
