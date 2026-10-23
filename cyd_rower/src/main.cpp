@@ -90,6 +90,7 @@ bool raceLayoutReady=false;
 uint8_t displayedRaceScreen=255;
 uint32_t lastRacePaintMs=0;
 bool recordSaveFailed=false;
+uint8_t lastRaceSelection=255;
 
 class MyServerCallbacks : public BLEServerCallbacks {
  public:
@@ -322,7 +323,11 @@ void updateButton(uint32_t now) {
   }
   if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
     longPressDone=true;
-    if (activeMode == Mode::Dashboard) resetWorkout();
+    if (activeMode == Mode::Dashboard) {
+      if(ghost.phase==ghostrace::Phase::Running ||
+         ghost.phase==ghostrace::Phase::Armed)ghost.cancel();
+      resetWorkout();
+    }
     else if (ghost.phase == ghostrace::Phase::Idle) startRace(selectedDistance);
     else if (ghost.phase == ghostrace::Phase::Running ||
              ghost.phase == ghostrace::Phase::Armed) openRaceMenu();
@@ -730,20 +735,19 @@ void paintRaceLayout(uint8_t screen) {
     tft.drawString("DOTKNIJ: WYBIERZ DYSTANS",20,226,2);
   }
   resetRenderCache();
+  lastRaceSelection=255;
   raceLayoutReady=true;
   displayedRaceScreen=screen;
 }
 void drawRaceSelection() {
   // BOOT short press can select without a calibrated touch screen.
-  static uint8_t lastSelected=255;
-  if(!raceLayoutReady || displayedRaceScreen!=0) lastSelected=255;
-  if(lastSelected==selectedDistance)return;
+  if(lastRaceSelection==selectedDistance)return;
   for(int i=0;i<3;i++){
     const int yy=53+i*59;
     tft.drawRoundRect(10,yy,300,52,8,i==selectedDistance?speedColor:gridColor);
     tft.drawRoundRect(11,yy+1,298,50,7,i==selectedDistance?speedColor:panelColor);
   }
-  lastSelected=selectedDistance;
+  lastRaceSelection=selectedDistance;
 }
 void paintProgress(int y, float value, uint16_t fillInk) {
   const int x=16,w=288,h=13;
@@ -795,9 +799,13 @@ void renderRaceUI() {
     const float lead=ghost.meterLead(now);
     textPatch(14,12,122,157,26,lead>=0?"PROWADZISZ":"TRACISZ",
               lead>=0?speedColor:powerColor,backgroundColor,2);
-    textPatch(15,175,122,135,26,
+    textPatch(15,175,121,135,18,
               String(lead>=0?"+":"")+String(lead,1)+" m",
               lead>=0?speedColor:powerColor,backgroundColor,2,true);
+    const float leadSeconds=ghost.timeLeadMs(now)/1000.0f;
+    textPatch(20,175,139,135,10,
+              String(leadSeconds>=0?"+":"")+String(leadSeconds,1)+" s",
+              leadSeconds>=0?speedColor:powerColor,backgroundColor,1,true);
   }
   textPatch(16,12,149,145,25,
             "~"+String((int)roundf(metrics.equivalentPower()))+" W",
