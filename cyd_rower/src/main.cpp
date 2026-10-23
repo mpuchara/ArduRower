@@ -381,8 +381,9 @@ void initDisplay() {
   tft.init();
   tft.setRotation(DEFAULT_ROTATION); // 320x240; no software x/y remap
   digitalWrite(BACKLIGHT_PIN, HIGH);
-  if (ledcAttach(BACKLIGHT_PIN, 5000, 8)) ledcWrite(BACKLIGHT_PIN, 255);
-  else digitalWrite(BACKLIGHT_PIN, HIGH);
+  // Full brightness is deliberate here. Avoid core-2.x vs core-3.x LEDC API
+  // differences until manual brightness adjustment is explicitly added.
+  digitalWrite(BACKLIGHT_PIN, HIGH);
   backgroundColor = tft.color565(7, 13, 23);
   panelColor = tft.color565(15, 26, 42);
   faintColor = tft.color565(42, 57, 72);
