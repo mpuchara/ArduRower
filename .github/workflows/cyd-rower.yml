@@ -26,6 +26,10 @@ jobs:
         run: python3 tests/cyd_ble_contract_test.py
       - name: Assert flicker-free renderer and single LCD profile
         run: python3 tests/cyd_display_refresh_test.py
+      - name: Test ghost racing, record integrity and timing
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
+          /tmp/ghost_race_test
       - name: Test unchanged rowing calculations
         run: |
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
