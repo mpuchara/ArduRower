@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build GitHub Pages bundle with *complete* ESP32 serial-flash images.
 
-Run after building the three PlatformIO environments (pio run -d cyd_rower -e ...).
+Run after building the confirmed ST7789/GPIO21 PlatformIO environment (pio run -d cyd_rower -e ...).
 Do not publish app-only firmware.bin at offset 0.
 """
 import json
@@ -15,8 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
-    "st7789-gpio27": "esp32-2432s028-st7789-gpio27",
-    "ili9341-gpio21": "esp32-2432s028-ili9341",
 }
 VERSION = "0.07-cyd-" + os.environ.get("GITHUB_SHA", "local")[:7]
 

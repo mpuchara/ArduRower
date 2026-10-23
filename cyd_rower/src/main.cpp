@@ -37,6 +37,8 @@ static constexpr bool LOG_SENSOR_PULSES = false;
 #define DEVICE_INFORMATION 0x180A
 
 TFT_eSPI tft;
+TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
+bool scratchReady = false;
 SPIClass touchSPI(HSPI);
 XPT2046_Touchscreen touch(33, 36);
 bool touchReady = false;
@@ -66,6 +68,10 @@ uint8_t historyHead = 0;
 uint8_t historyCount = 0;
 uint16_t backgroundColor, panelColor, faintColor, gridColor;
 uint16_t powerColor, speedColor, labelColor, whiteColor;
+uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
+bool pageRendered = false, displayedDetails = false;
+String previousField[12];
+bool previousValid[12] = {};
 
 class MyServerCallbacks : public BLEServerCallbacks {
  public:
@@ -219,6 +225,7 @@ void resetWorkout() {
   historyCount = 0;
   memset(history, 0, sizeof(history));
   lastHistoryMs = millis();
+  ++historyRevision;
 }
 
 void updateButton(uint32_t now) {
@@ -262,6 +269,7 @@ void recordHistory() {
   history[historyHead] = {metrics.equivalentPower(), metrics.speed * 3.6f};
   historyHead = (historyHead + 1) % HISTORY_LENGTH;
   if (historyCount < HISTORY_LENGTH) ++historyCount;
+  ++historyRevision;
 }
 const HistorySample &getHistory(uint8_t chronologicalIndex) {
   const uint8_t oldest = (historyHead + HISTORY_LENGTH - historyCount) % HISTORY_LENGTH;
@@ -278,100 +286,166 @@ float historyMax(bool power) {
   return result * 1.12f;
 }
 
-void drawSeries(int x, int y, int w, int h, bool power) {
-  const uint16_t ink = power ? powerColor : speedColor;
-  tft.drawFastHLine(x, y + h - 1, w, gridColor);
-  tft.drawFastHLine(x, y + h / 2, w, gridColor);
-  if (historyCount == 0) return;
-  const float top = historyMax(power);
-  int priorX = 0, priorY = 0;
-  // Horizontal scale is fixed at 120 s: incoming samples enter on the right,
-  // and shorter sessions occupy the right edge (no artificial stretching).
-  for (uint8_t i = 0; i < historyCount; ++i) {
-    const int px = x + w - 1 - ((historyCount - 1 - i) * (w - 1) / (HISTORY_LENGTH - 1));
-    const float value = constrain(sampleValue(i, power), 0.0f, top);
-    const int py = y + h - 1 - (int)roundf(value / top * (h - 1));
-    if (i > 0) tft.drawLine(priorX, priorY, px, py, ink);
-    else tft.fillCircle(px, py, 1, ink);
-    priorX = px;
-    priorY = py;
-  }
+// ST7789 refresh: build changing regions off-screen and crop-push them to TFT.
+// fillScreen() is used only when switching pages, NEVER on the 500-ms tick.
+static constexpr int16_t BUFFER_W = 160, BUFFER_H = 55;
+void resetRenderCache() {
+  for (uint8_t i = 0; i < 12; i++) previousValid[i] = false;
+  plottedRevision = UINT32_MAX;
 }
-void drawHeader() {
-  tft.fillRect(0, 0, 320, 25, panelColor);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(whiteColor, panelColor);
-  tft.drawString("ARDUROWER", 8, 4, 2);
-  tft.setTextColor(deviceConnected ? speedColor : labelColor, panelColor);
-  tft.drawString(deviceConnected ? "BLE OK" : "BLE ...", 158, 4, 2);
-  if (metrics.paused) {
-    tft.setTextColor(powerColor, panelColor);
-    tft.drawRightString("PAUZA", 313, 4, 2);
+void textPatch(uint8_t slot, int x, int y, int w, int h, String text,
+               uint16_t fg, uint16_t bg, uint8_t font, bool right = false) {
+  if (previousValid[slot] && previousField[slot] == text) return;
+  previousValid[slot] = true; previousField[slot] = text;
+  if (scratchReady) {
+    scratch.fillSprite(bg);
+    scratch.setTextColor(fg, bg);
+    scratch.setTextDatum(right ? TR_DATUM : TL_DATUM);
+    if (right) scratch.drawRightString(text, w - 2, 0, font);
+    else scratch.drawString(text, 0, 0, font);
+    scratch.pushSprite(x, y, 0, 0, w, h);
   } else {
+    // In the unlikely event of low heap, update only a small rectangle.
+    tft.fillRect(x, y, w, h, bg);
+    tft.setTextColor(fg, bg);
+    tft.setTextDatum(right ? TR_DATUM : TL_DATUM);
+    if (right) tft.drawRightString(text, x+w-2, y, font);
+    else tft.drawString(text, x, y, font);
+  }
+}
+void cardValue(uint8_t slot, int x, bool power) {
+  const float val = power ? metrics.equivalentPower() : metrics.speed * 3.6f;
+  const String txt = power ? "~" + String((int)roundf(val)) : String(val, 1);
+  if (previousValid[slot] && previousField[slot] == txt) return;
+  previousValid[slot] = true; previousField[slot] = txt;
+  const int left = x+8, y=60, w=133, h=33;
+  const uint16_t fg = power ? powerColor : speedColor;
+  if (scratchReady) {
+    scratch.fillSprite(panelColor);
+    scratch.setTextDatum(TL_DATUM);
+    scratch.setTextColor(fg, panelColor);
+    scratch.drawString(txt, 0, 0, 4);
+    scratch.setTextColor(labelColor, panelColor);
+    scratch.drawRightString(power ? "W" : "km/h", w-1, 11, 2);
+    scratch.pushSprite(left, y, 0, 0, w, h);
+  } else {
+    tft.fillRect(left, y, w, h, panelColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(fg, panelColor);
+    tft.drawString(txt, left, y, 4);
     tft.setTextColor(labelColor, panelColor);
-    tft.drawRightString(formatTime((uint32_t)metrics.seconds()), 313, 4, 2);
+    tft.drawRightString(power ? "W" : "km/h", left+w-1, y+11, 2);
   }
 }
-void drawCard(int x, bool power) {
-  const int y = 32, w = 149, h = 123;
-  tft.fillRoundRect(x, y, w, h, 6, panelColor);
-  tft.drawRoundRect(x, y, w, h, 6, gridColor);
-  const uint16_t ink = power ? powerColor : speedColor;
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(labelColor, panelColor);
-  tft.drawString(power ? "MOC SZACOWANA" : "PREDKOSC", x + 9, y + 6, 2);
-  const float value = power ? metrics.equivalentPower() : metrics.speed * 3.6f;
-  const String shown = power ? "~" + String((int)roundf(value)) : String(value, 1);
-  tft.setTextColor(ink, panelColor);
-  tft.drawString(shown, x + 8, y + 29, 4);
-  tft.setTextColor(labelColor, panelColor);
-  tft.drawRightString(power ? "W" : "km/h", x + w - 8, y + 38, 2);
-  tft.drawString(power ? "W / 120 s" : "km/h / 120 s", x + 9, y + 62, 2);
-  drawSeries(x + 10, y + 81, w - 20, 32, power);
-}
-void drawStat(int x, int y, const String &label, const String &value) {
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(labelColor, backgroundColor);
-  tft.drawString(label, x, y, 2);
-  tft.setTextColor(whiteColor, backgroundColor);
-  tft.drawString(value, x, y + 15, 4);
-}
-void drawDashboard() {
-  tft.fillScreen(backgroundColor);
-  drawHeader();
-  drawCard(8, true);
-  drawCard(163, false);
-  drawStat(8, 159, "CZAS", formatTime((uint32_t)metrics.seconds()));
-  drawStat(115, 159, "DYSTANS", String((uint32_t)metrics.distance()) + " m");
-  drawStat(225, 159, "SPM~", String((uint32_t)roundf(metrics.strokeRate)));
-  drawStat(8, 198, "TEMPO / 500m", formatPace(metrics.pace()));
-  drawStat(115, 198, "SR. ~W", String((uint32_t)roundf(metrics.averageEquivalentPower())));
-  drawStat(225, 198, "RUCHY~", String(metrics.strokes));
-  if (droppedPulses) {
-    tft.fillRect(290, 225, 23, 14, TFT_RED);
-    tft.setTextColor(TFT_WHITE, TFT_RED);
-    tft.drawString("!", 298, 224, 2);
+void plot(int x, int y, int w, int h, bool power) {
+  const uint16_t bg = w > 200 ? backgroundColor : panelColor;
+  const uint16_t fg = power ? powerColor : speedColor;
+  const float peak = historyCount ? historyMax(power) : 1.0f;
+  // A large 302x54 plot is split into two 151-pixel portions. One small
+  // reusable sprite avoids PSRAM, frame tearing and heap fragmentation.
+  for (int left = 0; left < w; left += BUFFER_W) {
+    const int part = min(BUFFER_W, (int16_t)(w-left));
+    if (scratchReady) scratch.fillSprite(bg);
+    else tft.fillRect(x+left, y, part, h, bg);
+    if (scratchReady) {
+      scratch.drawFastHLine(0, h-1, part, gridColor);
+      scratch.drawFastHLine(0, h/2, part, gridColor);
+    } else {
+      tft.drawFastHLine(x+left, y+h-1, part, gridColor);
+      tft.drawFastHLine(x+left, y+h/2, part, gridColor);
+    }
+    int prevX=0, prevY=0;
+    for (uint8_t i=0; i<historyCount; ++i) {
+      const int px = w-1 - (historyCount-1-i)*(w-1)/(HISTORY_LENGTH-1);
+      const int py = h-1 - (int)roundf(constrain(sampleValue(i,power), 0.0f, peak)/peak*(h-1));
+      if (i == 0) {
+        if (px>=left && px<left+part) {
+          if (scratchReady) scratch.fillCircle(px-left,py,1,fg);
+          else tft.fillCircle(x+px,y+py,1,fg);
+        }
+      } else if (max(prevX,px)>=left && min(prevX,px)<left+part) {
+        if (scratchReady) scratch.drawLine(prevX-left,prevY,px-left,py,fg);
+        else tft.drawLine(x+prevX,y+prevY,x+px,y+py,fg);
+      }
+      prevX=px; prevY=py;
+    }
+    if (scratchReady) scratch.pushSprite(x+left,y,0,0,part,h);
   }
 }
-void drawHistoryPage() {
-  tft.fillScreen(backgroundColor);
-  drawHeader();
-  tft.setTextColor(powerColor, backgroundColor);
-  tft.drawString("MOC ~W", 8, 29, 2);
-  tft.setTextColor(labelColor, backgroundColor);
-  tft.drawRightString("MAX " + String((int)roundf(historyMax(true))) + " W",
-                      310, 29, 2);
-  drawSeries(9, 53, 302, 54, true);
-  tft.setTextColor(speedColor, backgroundColor);
-  tft.drawString("PREDKOSC km/h", 8, 119, 2);
-  tft.setTextColor(labelColor, backgroundColor);
-  tft.drawRightString("MAX " + String(historyMax(false), 1) + " km/h",
-                      310, 119, 2);
-  drawSeries(9, 143, 302, 54, false);
-  tft.setTextColor(labelColor, backgroundColor);
-  tft.drawString("OSTATNIE 120 s", 8, 207, 2);
-  tft.drawRightString("Dotknij, by wrocic", 311, 207, 2);
-  tft.drawString("BOOT: krotko = widok; >1.5 s = reset", 8, 225, 1);
+void pageLayout() {
+  tft.fillScreen(backgroundColor);  // only at startup or on explicit view change
+  tft.fillRect(0,0,320,25,panelColor);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawString("ARDUROWER",8,4,2);
+  if (!detailPage) {
+    for (int i=0;i<2;i++) {
+      const int x=i?163:8, y=32, w=149, h=123;
+      tft.fillRoundRect(x,y,w,h,6,panelColor);
+      tft.drawRoundRect(x,y,w,h,6,gridColor);
+      tft.setTextColor(labelColor,panelColor);
+      tft.drawString(i?"PREDKOSC":"MOC SZACOWANA",x+9,y+6,2);
+      tft.drawString(i?"km/h / 120 s":"W / 120 s",x+9,y+62,2);
+    }
+    const int pos[3]={8,115,225};
+    const char* names[6]={"CZAS","DYSTANS","SPM~","TEMPO / 500m","SR. ~W","RUCHY~"};
+    tft.setTextColor(labelColor,backgroundColor);
+    for (int i=0;i<6;i++) tft.drawString(names[i],pos[i%3],i<3?156:198,2);
+  } else {
+    tft.setTextColor(powerColor,backgroundColor);
+    tft.drawString("MOC ~W",8,29,2);
+    tft.setTextColor(speedColor,backgroundColor);
+    tft.drawString("PREDKOSC km/h",8,119,2);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("OSTATNIE 120 s",8,207,2);
+    tft.drawRightString("Dotknij, by wrocic",311,207,2);
+    tft.drawString("BOOT: krotko = widok; >1.5 s = reset",8,225,1);
+  }
+  pageRendered=true; displayedDetails=detailPage;
+  resetRenderCache();
+}
+void updateUI() {
+  if (!pageRendered || detailPage != displayedDetails) pageLayout();
+  textPatch(0,155,3,85,20,deviceConnected?"BLE OK":"BLE ...",
+            deviceConnected?speedColor:labelColor,panelColor,2);
+  textPatch(1,244,3,76,20,metrics.paused?"PAUZA":formatTime((uint32_t)metrics.seconds()),
+            metrics.paused?powerColor:labelColor,panelColor,2,true);
+  if (!detailPage) {
+    cardValue(2,8,true);
+    cardValue(3,163,false);
+    textPatch(4,8,172,99,26,formatTime((uint32_t)metrics.seconds()),
+              whiteColor,backgroundColor,4);
+    textPatch(5,115,172,105,26,String((uint32_t)metrics.distance())+" m",
+              whiteColor,backgroundColor,4);
+    textPatch(6,225,172,92,26,String((uint32_t)roundf(metrics.strokeRate)),
+              whiteColor,backgroundColor,4);
+    textPatch(7,8,214,99,26,formatPace(metrics.pace()),
+              whiteColor,backgroundColor,4);
+    textPatch(8,115,214,105,26,String((uint32_t)roundf(metrics.averageEquivalentPower())),
+              whiteColor,backgroundColor,4);
+    textPatch(9,225,214,92,26,String(metrics.strokes),
+              whiteColor,backgroundColor,4);
+  } else {
+    textPatch(10,176,29,143,18,"MAX "+String((int)roundf(historyMax(true)))+" W",
+              labelColor,backgroundColor,2,true);
+    textPatch(11,165,119,154,18,"MAX "+String(historyMax(false),1)+" km/h",
+              labelColor,backgroundColor,2,true);
+  }
+  if (plottedRevision != historyRevision) {
+    if (detailPage) {
+      plot(9,53,302,54,true);
+      plot(9,143,302,54,false);
+    } else {
+      plot(18,113,129,32,true);
+      plot(173,113,129,32,false);
+    }
+    plottedRevision=historyRevision;
+  }
+  if (!detailPage && droppedPulses) {
+    tft.fillRect(290,225,23,14,TFT_RED);
+    tft.setTextColor(TFT_WHITE,TFT_RED);
+    tft.drawString("!",298,224,2);
+  }
 }
 void initDisplay() {
   // Critical fix from HA_UBOX_bridge: turn on TFT backlight BEFORE initializing
@@ -417,9 +491,18 @@ void setup() {
   touch.setRotation(0);
   Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
   initBLE();
+  // Allocate after BLE so the BLE stack keeps its working heap.
+  scratch.setColorDepth(16);
+  scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
+  if (!scratchReady) {
+    scratch.setColorDepth(8);
+    scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
+  }
+  Serial.printf("UI sprite: %s, depth %d, heap %u\n", scratchReady?"OK":"fallback",
+                scratch.getColorDepth(), (unsigned)ESP.getFreeHeap());
   resetWorkout();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
-  drawDashboard();
+  updateUI();
 }
 void loop() {
   uint32_t pulseTime;
@@ -455,8 +538,7 @@ void loop() {
   }
   if (now - lastDisplayMs >= DISPLAY_INTERVAL_MS) {
     lastDisplayMs = now;
-    if (detailPage) drawHistoryPage();
-    else drawDashboard();
+    updateUI();
   }
   delay(1);
 }

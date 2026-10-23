@@ -26,12 +26,12 @@ Dystans, prędkość i SPM pozostają heurystykami z v0.07; domyślny \`DISTANCE
 [HA_UBOX_bridge/firmware/cyd_monitor](https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor).
 Parametry: TFT SCK14/MOSI13/MISO12/CS15/DC2, dotyk XPT2046 na 25/39/32/33/36, obrót landscape \`3\`, jasność **100% przy starcie** (przed inicjalizacją BLE i dotyku). Brak Wi-Fi ani konfiguratora Home Assistant w tym firmware.
 
-Dostępne profile:
-- \`esp32-2432s028-st7789-gpio21\` — startowy dla wielu płytek dual-USB;
-- \`esp32-2432s028-st7789-gpio27\` — drugi wariant ST7789;
-- \`esp32-2432s028-ili9341\` — starszy/alternatywny ILI9341 z GPIO21.
+**Jedyny potwierdzony profil sprzętowy:** `esp32-2432s028-st7789-gpio21` (ST7789, podświetlenie GPIO21).
+Usunięto inne środowiska PlatformIO i ich obrazy. Na oryginalnym CYD użytkownik potwierdził działający obraz z tym sterownikiem.
 
-**Wybierz profil, który działał na tym samym egzemplarzu płytki w HA_UBOX_bridge.** Jeśli ekran jest czarny, najpierw sprawdź pin podświetlenia; jeśli widać pasy, przekłamane kolory albo śmieci, zmień odpowiednio sterownik. Port nie został jeszcze sprawdzony na fizycznej płytce ani zegarku.
+### Płynne odświeżanie — poprawka migania
+
+Poprzednia implementacja uruchamiała `fillScreen()` co 500 ms i rysowała ekran od góry na nowo, co powodowało widoczny czarny błysk. Nowy renderer utrzymuje statyczną makietę ekranu; aktualizuje tylko zmienione liczby oraz wykresy. Do renderowania używa jednego bufora `TFT_eSprite` 160×55 px, z 16-bitową paletą i awaryjną 8-bitową. Bufor jest przekazywany do LCD przez `pushSprite(..., crop)`. Widok jest czyszczony w całości wyłącznie przy zmianie strony lub po uruchomieniu. Wykresy mają kadencję 1 Hz, liczby 2 Hz i nie migają w trakcie aktualizacji. **Zmianę trzeba potwierdzić na fizycznej płytce**.
 
 ## Build i flash (PlatformIO)
 

@@ -24,6 +24,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assert Connect IQ / FTMS compatibility
         run: python3 tests/cyd_ble_contract_test.py
+      - name: Assert flicker-free renderer and single LCD profile
+        run: python3 tests/cyd_display_refresh_test.py
       - name: Test unchanged rowing calculations
         run: |
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
@@ -36,8 +38,6 @@ jobs:
       matrix:
         lcd:
           - esp32-2432s028-st7789-gpio21
-          - esp32-2432s028-st7789-gpio27
-          - esp32-2432s028-ili9341
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

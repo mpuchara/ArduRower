@@ -56,46 +56,25 @@
   </section>
 
   <section class="card">
-    <h2>1. Wybierz wyświetlacz</h2>
-    <p class="muted">Wybierz ten sam wariant, który działał na tej konkretnej płytce w projekcie HA_UBOX_bridge. Wersje różnią się sterownikiem panelu i/lub GPIO podświetlenia.</p>
-    <div class="grid" role="group" aria-label="Wariant panelu LCD">
-      <label class="variant"><span><input type="radio" name="profile" value="st7789-gpio21" checked> <b>ST7789 · GPIO21</b></span><small>Domyślny wybór testowy dla części płytek dual-USB.</small></label>
-      <label class="variant"><span><input type="radio" name="profile" value="st7789-gpio27"> <b>ST7789 · GPIO27</b></span><small>Wariant dual-USB z innym pinem podświetlenia.</small></label>
-      <label class="variant"><span><input type="radio" name="profile" value="ili9341-gpio21"> <b>ILI9341 · GPIO21</b></span><small>Alternatywny sterownik LCD. Zastosuj tylko dla zgodnego panelu.</small></label>
-    </div>
-    <p class="notice">Po instalacji widzisz czarny ekran? Sprawdź drugi pin podświetlenia. Obraz ma złe kolory albo pasy? Zweryfikuj typ ST7789/ILI9341. Nie zmienia się od tego protokół BLE dla Garmina.</p>
+    <h2>Wyświetlacz potwierdzony: ST7789 / GPIO21</h2>
+    <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
+    <p class="notice">Nowa wersja eliminuje miganie ekranu: nie czyści go cyklicznie. Statyczne obszary pozostają na miejscu, a zmienione liczby i wykresy są aktualizowane za pomocą niewielkiego bufora w RAM.</p>
   </section>
 
   <section class="card">
     <h2>2. Podłącz płytkę i zainstaluj</h2>
     <ol class="steps">
       <li>Podłącz <b>micro-USB</b> do komputera, na którym działa Chrome lub Edge. Wybierz działający port COM (np. COM4, ale numer może być inny).</li>
-      <li>Sprawdź wybrany wariant ekranu. Kliknij <b>Połącz i zainstaluj</b>.</li>
+      <li>Kliknij <b>Połącz i zainstaluj</b>. Firmware jest przeznaczony wyłącznie dla ST7789/GPIO21.</li>
       <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. Jeżeli pojawi się pytanie o kasowanie pamięci, pamiętaj, że usunie ono poprzednią konfigurację.</li>
       <li>Po wgraniu płytka powinna uruchomić dashboard ArduRower. Następnie sprawdź odbiór przez dotychczasowe pole Connect IQ w Garminie.</li>
     </ol>
     <div id="install-ready">
-      <div class="action" data-profile="st7789-gpio21">
+      <div class="action">
         <p>Wybrano: <b>ST7789 / podświetlenie GPIO21</b></p>
         <esp-web-install-button manifest="./manifests/st7789-gpio21.json">
           <button slot="activate" type="button">Połącz i zainstaluj</button>
           <span slot="unsupported" class="bad">Przeglądarka nie obsługuje Web Serial. Użyj Chrome lub Edge na komputerze.</span>
-          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
-        </esp-web-install-button>
-      </div>
-      <div class="action" data-profile="st7789-gpio27" hidden>
-        <p>Wybrano: <b>ST7789 / podświetlenie GPIO27</b></p>
-        <esp-web-install-button manifest="./manifests/st7789-gpio27.json">
-          <button slot="activate" type="button">Połącz i zainstaluj</button>
-          <span slot="unsupported" class="bad">Użyj Chrome lub Edge na komputerze.</span>
-          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
-        </esp-web-install-button>
-      </div>
-      <div class="action" data-profile="ili9341-gpio21" hidden>
-        <p>Wybrano: <b>ILI9341 / podświetlenie GPIO21</b></p>
-        <esp-web-install-button manifest="./manifests/ili9341-gpio21.json">
-          <button slot="activate" type="button">Połącz i zainstaluj</button>
-          <span slot="unsupported" class="bad">Użyj Chrome lub Edge na komputerze.</span>
           <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
         </esp-web-install-button>
       </div>
@@ -109,7 +88,7 @@
   <section class="card">
     <h2>3. Podłączenie wioślarza i zegarka</h2>
     <p>Kontaktron: <code>GPIO22</code> + <code>GND</code> (nie GPIO2 — zajmuje go TFT). Sprawdź fizycznie pinout złącza P3 swojej rewizji płytki. Garmin: pozostaje dotychczasowa nazwa <code>WR S4BL3</code>, usługa FTMS i format danych BLE, kompatybilny z dotychczasowym polem Connect IQ.</p>
-    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Nowego firmware nie testowano jeszcze end-to-end na sprzęcie.</p>
+    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Poprawkę odświeżania należy potwierdzić na fizycznej płytce.</p>
     <p><a href="https://github.com/mpuchara/ArduRower/tree/main/cyd_rower">Instrukcja i dokumentacja firmware</a> ·
        <a href="https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor">Sterownik LCD z HA_UBOX_bridge</a> ·
        <a href="https://github.com/mpuchara/ArduRower/actions">Status kompilacji</a></p>
@@ -117,15 +96,6 @@
   <footer>ArduRower CYD · instalator korzysta z ESP Web Tools i portu szeregowego w Twojej przeglądarce. Dane BLE do zegarka nie są zmieniane. <span id="build-label"></span></footer>
 </main>
 <script>
-  const choices = document.querySelectorAll('input[name="profile"]');
-  const active = document.querySelectorAll('[data-profile]');
-  function showProfile() {
-    const selected = document.querySelector('input[name="profile"]:checked').value;
-    for (const panel of active) panel.hidden = panel.dataset.profile !== selected;
-  }
-  for (const radio of choices) radio.addEventListener('change', showProfile);
-  showProfile();
-
   async function checkPublished() {
     const status = document.getElementById('status');
     const ready = document.getElementById('install-ready');
@@ -137,7 +107,10 @@
       ]);
       if (!responses.every(r => r.ok)) throw new Error('brak manifestów');
       const manifest = await responses[1].json();
-      if (!manifest.builds?.[0]?.parts?.[0]) throw new Error('niepoprawny manifest');
+      if (!manifest.builds?.[0]?.parts?.[0] ||
+          !manifest.builds[0].parts[0].path.includes('st7789-gpio21')) {
+        throw new Error('niepoprawny manifest');
+      }
       ready.hidden = false;
       missing.hidden = true;
       status.textContent = 'Obrazy firmware zostały opublikowane. Można rozpocząć instalację.';

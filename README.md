@@ -4,7 +4,7 @@
 
 **[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).
 
-Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). **Dotychczasowa współpraca BLE z polem Garmin Connect IQ nie jest zmieniana.** Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
+Jedyny aktywny profil: **ST7789 / GPIO21**, potwierdzony na docelowej płytce. Poprawka renderera eliminuje cykliczne `fillScreen()`, aktualizując tylko zmienione obszary za pomocą off-screen sprite. Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). **Dotychczasowa współpraca BLE z polem Garmin Connect IQ nie jest zmieniana.** Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
 
 ## Zmiana skali w v0.07
 
