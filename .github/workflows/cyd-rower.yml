@@ -1,0 +1,49 @@
+name: ArduRower CYD portability
+
+on:
+  push:
+    paths:
+      - "cyd_rower/**"
+      - "ArduRower/RowerMetrics.h"
+      - "ArduRower/ArduRower.ino"
+      - "tests/**"
+      - ".github/workflows/cyd-rower.yml"
+  pull_request:
+    paths:
+      - "cyd_rower/**"
+      - "ArduRower/RowerMetrics.h"
+      - "ArduRower/ArduRower.ino"
+      - "tests/**"
+      - ".github/workflows/cyd-rower.yml"
+  workflow_dispatch:
+
+jobs:
+  test-ble-and-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert Connect IQ / FTMS compatibility
+        run: python3 tests/cyd_ble_contract_test.py
+      - name: Test unchanged rowing calculations
+        run: |
+          g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
+          /tmp/metrics_test
+
+  build-cyd:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lcd:
+          - esp32-2432s028-st7789-gpio21
+          - esp32-2432s028-st7789-gpio27
+          - esp32-2432s028-ili9341
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Compile CYD (${{ matrix.lcd }})
+        run: pio run -d cyd_rower -e ${{ matrix.lcd }}
