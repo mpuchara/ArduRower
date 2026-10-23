@@ -5,13 +5,14 @@
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
+#include "../../ArduRower/RowerMetrics.h" // one source of truth for distance calibration
 
 namespace ghostrace {
 static constexpr uint16_t kIntervalMs = 2000;
 static constexpr uint16_t kSamples = 1024; // 34m 8s; 0.1m encoded as uint16
 static constexpr uint32_t kMagic = 0x47525731UL; // GRW1
 static constexpr uint16_t kVersion = 1;
-static constexpr uint32_t kScaleMilli = 650; // ArduRower DISTANCE_SCALE == 0.65
+static constexpr uint32_t kScaleMilli = static_cast<uint32_t>(DISTANCE_SCALE * 1000.0f + 0.5f);
 
 struct Record {
   uint32_t magic;
