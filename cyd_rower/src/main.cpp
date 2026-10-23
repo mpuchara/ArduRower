@@ -297,7 +297,10 @@ void openRaceMenu() {
 void toggleMode() {
   if (activeMode == Mode::Dashboard) {
     activeMode=Mode::Race;
-    if (ghost.phase == ghostrace::Phase::Idle)
+    if (ghost.phase == ghostrace::Phase::Finished ||
+        ghost.phase == ghostrace::Phase::Cancelled)
+      openRaceMenu();
+    else if (ghost.phase == ghostrace::Phase::Idle)
       loadBestTimes();
     raceLayoutReady=false;
     if (touchReady && !touchCalibrated) pendingCalibration=true;
