@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Build GitHub Pages bundle with *complete* ESP32 serial-flash images.
+"""Build a GitHub Pages ESP Web Tools bundle without erasing NVS.
 
-Run after building the confirmed ST7789/GPIO21 PlatformIO environment (pio run -d cyd_rower -e ...).
-Do not publish app-only firmware.bin at offset 0.
+IMPORTANT: do not flash a merged image at address 0. The padding between
+partition table 0x8000 and boot_app0 0xe000 includes NVS at 0x9000. Flashing
+that padding on every update would erase the user's saved Ghost Race records.
+Instead flash only the four actual binary parts at their respective offsets.
 """
 import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
@@ -21,7 +21,7 @@ VERSION = "0.08-ghost-" + os.environ.get("GITHUB_SHA", "local")[:7]
 
 def require(path):
     if not path.is_file() or path.stat().st_size == 0:
-        raise FileNotFoundError(f"Missing compiled ESP32 flash image: {path}")
+        raise FileNotFoundError(f"Missing firmware component: {path}")
     return path
 
 
@@ -40,39 +40,38 @@ def main():
 
     for slug, env in ENVIRONMENTS.items():
         build = ROOT / "cyd_rower/.pio/build" / env
-        bootloader = require(build / "bootloader.bin")
-        partitions = require(build / "partitions.bin")
-        app = require(build / "firmware.bin")
-        output = SITE / "firmware" / f"{slug}.bin"
-        # PlatformIO's standard Arduino ESP32 address map; merged image is flashed at 0x0.
-        cmd = [
-            sys.executable, "-m", "esptool", "--chip", "esp32", "merge_bin",
-            "--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "4MB",
-            "-o", str(output),
-            "0x1000", str(bootloader),
-            "0x8000", str(partitions),
-            "0xe000", str(boot_app0),
-            "0x10000", str(app),
+        parts = [
+            (0x1000, "bootloader", require(build / "bootloader.bin")),
+            (0x8000, "partitions", require(build / "partitions.bin")),
+            (0xE000, "boot_app0", boot_app0),
+            (0x10000, "firmware", require(build / "firmware.bin")),
         ]
-        subprocess.run(cmd, check=True)
-        require(output)
-        if output.stat().st_size > 4 * 1024 * 1024:
-            raise RuntimeError(f"{output} exceeds target 4MB flash")
+        manifest_parts = []
+        for offset, name, source in parts:
+            destination = SITE / "firmware" / f"{slug}-{name}.bin"
+            shutil.copyfile(source, destination)
+            if offset + destination.stat().st_size > 0x400000:
+                raise ValueError(f"Flash component exceeds 4 MB: {source}")
+            manifest_parts.append({"path": f"../firmware/{destination.name}", "offset": offset})
+        # NVS lives between 0x9000 and 0xDFFF. Neither the component ranges
+        # nor full-flash erasure should touch that region in regular upgrades.
+        assert all((part["offset"] >= 0xE000 or
+                    part["offset"] + parts[i][2].stat().st_size <= 0x9000)
+                   for i, part in enumerate(manifest_parts))
         manifest = {
-            "name": "ArduRower CYD " + slug,
+            "name": "ArduRower CYD Ghost Race " + slug,
             "version": VERSION,
-            "new_install_prompt_erase": False,  # preserve Ghost Race records in NVS during updates
-            "new_install_improv_wait_time": 0,
+            "new_install_prompt_erase": False,
             "builds": [{
                 "chipFamily": "ESP32",
                 "improv": False,
-                "parts": [{"path": f"../firmware/{slug}.bin", "offset": 0}],
+                "parts": manifest_parts,
             }],
         }
         (SITE / "manifests" / f"{slug}.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
-        print(f"{env}: {output.stat().st_size} bytes; ESP32 @ offset 0; {VERSION}")
+        print(f"{env}: {len(manifest_parts)} separate parts, preserving NVS; {VERSION}")
     print("Pages bundle ready:", SITE)
 
 
