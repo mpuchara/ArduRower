@@ -27,13 +27,18 @@ def body(name):
 
 # No full-screen clear in any frequently-called function; exactly one layout
 # clear per page transition and one splash-screen clear during startup.
-assert source.count("tft.fillScreen(") == 2
+assert source.count("tft.fillScreen(") <= 5  # startup, view changes and touch calibration
 assert "tft.fillScreen(" in body("pageLayout")
 assert "tft.fillScreen(" in body("initDisplay")
-for method in ("updateUI", "textPatch", "cardValue", "plot", "loop"):
+assert "tft.fillScreen(" in body("paintRaceLayout")
+assert "tft.fillScreen(" in body("readCalPoint")
+for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "loop"):
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
 assert "plottedRevision != historyRevision" in source
+assert "max(dx,dy)>700" in source
+assert "ghost.start(now)" in source
+assert "saveBest(selectedDistance,ghost.attempt)" in source
 assert "previousValid[slot] && previousField[slot] == text" in source
 
 # Only build/publish exactly the hardware variant confirmed by the user.
