@@ -390,7 +390,7 @@ void pageLayout() {
     const int pos[3]={8,115,225};
     const char* names[6]={"CZAS","DYSTANS","SPM~","TEMPO / 500m","SR. ~W","RUCHY~"};
     tft.setTextColor(labelColor,backgroundColor);
-    for (int i=0;i<6;i++) tft.drawString(names[i],pos[i%3],i<3?159:198,2);
+    for (int i=0;i<6;i++) tft.drawString(names[i],pos[i%3],i<3?156:198,2);
   } else {
     tft.setTextColor(powerColor,backgroundColor);
     tft.drawString("MOC ~W",8,29,2);
@@ -413,17 +413,17 @@ void updateUI() {
   if (!detailPage) {
     cardValue(2,8,true);
     cardValue(3,163,false);
-    textPatch(4,8,174,99,24,formatTime((uint32_t)metrics.seconds()),
+    textPatch(4,8,172,99,26,formatTime((uint32_t)metrics.seconds()),
               whiteColor,backgroundColor,4);
-    textPatch(5,115,174,105,24,String((uint32_t)metrics.distance())+" m",
+    textPatch(5,115,172,105,26,String((uint32_t)metrics.distance())+" m",
               whiteColor,backgroundColor,4);
-    textPatch(6,225,174,92,24,String((uint32_t)roundf(metrics.strokeRate)),
+    textPatch(6,225,172,92,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
-    textPatch(7,8,213,99,26,formatPace(metrics.pace()),
+    textPatch(7,8,214,99,26,formatPace(metrics.pace()),
               whiteColor,backgroundColor,4);
-    textPatch(8,115,213,105,26,String((uint32_t)roundf(metrics.averageEquivalentPower())),
+    textPatch(8,115,214,105,26,String((uint32_t)roundf(metrics.averageEquivalentPower())),
               whiteColor,backgroundColor,4);
-    textPatch(9,225,213,92,26,String(metrics.strokes),
+    textPatch(9,225,214,92,26,String(metrics.strokes),
               whiteColor,backgroundColor,4);
   } else {
     textPatch(10,176,29,143,18,"MAX "+String((int)roundf(historyMax(true)))+" W",
