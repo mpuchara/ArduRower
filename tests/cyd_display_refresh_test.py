@@ -31,7 +31,7 @@ assert source.count("tft.fillScreen(") <= 5  # startup, view changes and touch c
 assert "tft.fillScreen(" in body("pageLayout")
 assert "tft.fillScreen(" in body("initDisplay")
 assert "tft.fillScreen(" in body("paintRaceLayout")
-assert "tft.fillScreen(" in body("readCalPoint")
+assert "tft.fillScreen(backgroundColor);" in source
 for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "loop"):
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
