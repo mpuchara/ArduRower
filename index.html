@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111a29">
+  <meta name="description" content="ArduRower CYD: instalacja firmware ESP32-2432S028 z przeglądarki przez USB.">
+  <title>ArduRower — instalator CYD</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      background:#0a111e; color:#ebf1fa; }
+    * { box-sizing:border-box; }
+    body { margin:0; line-height:1.5; }
+    .wrap { max-width:940px; margin:0 auto; padding:36px 20px 70px; }
+    .kicker { text-transform:uppercase; font-size:12px; font-weight:800; letter-spacing:.15em; color:#7eb6ff; }
+    h1 { font-size:clamp(32px,6vw,54px); margin:6px 0 8px; letter-spacing:-.04em; }
+    h2 { margin:0 0 12px; font-size:22px; }
+    .lead { font-size:17px; color:#afbed0; max-width:740px; margin:0 0 27px; }
+    .card { background:#121e30; border:1px solid #32435a; border-radius:18px;
+      padding:24px; margin:17px 0; box-shadow:0 8px 30px #0002; }
+    .alert { background:#26301a; border-color:#6c8741; }
+    .alert strong { color:#d5efa3; }
+    .notice { color:#ccd7e6; background:#1b2940; border-left:4px solid #5d9fef;
+      border-radius:8px; padding:12px 16px; margin:15px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+    .variant { display:flex; flex-direction:column; gap:5px; cursor:pointer; padding:16px;
+      background:#15243a; border:2px solid #324560; border-radius:12px; }
+    .variant:has(input:checked) { background:#193353; border-color:#72b3ff; }
+    .variant input { accent-color:#72b3ff; width:18px; height:18px; vertical-align:middle; margin-right:8px; }
+    .variant small { color:#aebfd2; padding-left:27px; }
+    .action { text-align:center; padding:24px 15px; border-radius:14px; background:#0b1524; }
+    .action[hidden], [hidden] { display:none !important; }
+    esp-web-install-button { --esp-tools-button-color:#3398ed; --esp-tools-button-text-color:#061424;
+      --esp-tools-button-border-radius:10px; }
+    esp-web-install-button button { border:0; background:#65b2ff; color:#041324; font-weight:800;
+      padding:14px 25px; font-size:17px; border-radius:10px; cursor:pointer; }
+    esp-web-install-button button:focus-visible { outline:3px solid white; outline-offset:3px; }
+    a { color:#8fc2ff; } a:focus-visible { outline:2px solid #8fc2ff; }
+    .steps { padding-left:25px; margin:10px 0; } .steps li { padding:6px 0; }
+    code { background:#293750; padding:2px 5px; border-radius:4px; white-space:nowrap; }
+    .muted { color:#aab9cd; font-size:14px; }
+    .bad { color:#ffb5a9; } .ok { color:#b8e3ac; }
+    footer { margin-top:27px; color:#93a4b9; font-size:13px; }
+  </style>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+<main class="wrap">
+  <div class="kicker">ESP32-2432S028 · 2,8″ · BLE FTMS</div>
+  <h1>ArduRower <span style="color:#79baff">CYD</span></h1>
+  <p class="lead">Wgraj firmware do żółtej płytki ESP32 z wyświetlaczem 320 × 240 i wykresami mocy oraz prędkości. Bez Arduino IDE — wystarczy Chrome lub Edge na komputerze i kabel micro-USB do transmisji danych.</p>
+
+  <section class="card alert">
+    <strong>Ważne przed wgraniem</strong>
+    <div>Instalacja zastąpi program obecnie działający na płytce (np. UBox). Nie wgrywaj, jeśli nie możesz później przywrócić starego firmware. Nie odłączaj kabla podczas zapisu. To wciąż eksperymentalny port — nie był jeszcze zweryfikowany na fizycznym CYD z zegarkiem.</div>
+  </section>
+
+  <section class="card">
+    <h2>1. Wybierz wyświetlacz</h2>
+    <p class="muted">Wybierz ten sam wariant, który działał na tej konkretnej płytce w projekcie HA_UBOX_bridge. Wersje różnią się sterownikiem panelu i/lub GPIO podświetlenia.</p>
+    <div class="grid" role="group" aria-label="Wariant panelu LCD">
+      <label class="variant"><span><input type="radio" name="profile" value="st7789-gpio21" checked> <b>ST7789 · GPIO21</b></span><small>Domyślny wybór testowy dla części płytek dual-USB.</small></label>
+      <label class="variant"><span><input type="radio" name="profile" value="st7789-gpio27"> <b>ST7789 · GPIO27</b></span><small>Wariant dual-USB z innym pinem podświetlenia.</small></label>
+      <label class="variant"><span><input type="radio" name="profile" value="ili9341-gpio21"> <b>ILI9341 · GPIO21</b></span><small>Alternatywny sterownik LCD. Zastosuj tylko dla zgodnego panelu.</small></label>
+    </div>
+    <p class="notice">Po instalacji widzisz czarny ekran? Sprawdź drugi pin podświetlenia. Obraz ma złe kolory albo pasy? Zweryfikuj typ ST7789/ILI9341. Nie zmienia się od tego protokół BLE dla Garmina.</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Podłącz płytkę i zainstaluj</h2>
+    <ol class="steps">
+      <li>Podłącz <b>micro-USB</b> do komputera, na którym działa Chrome lub Edge. Wybierz działający port COM (np. COM4, ale numer może być inny).</li>
+      <li>Sprawdź wybrany wariant ekranu. Kliknij <b>Połącz i zainstaluj</b>.</li>
+      <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. Jeżeli pojawi się pytanie o kasowanie pamięci, pamiętaj, że usunie ono poprzednią konfigurację.</li>
+      <li>Po wgraniu płytka powinna uruchomić dashboard ArduRower. Następnie sprawdź odbiór przez dotychczasowe pole Connect IQ w Garminie.</li>
+    </ol>
+    <div id="install-ready">
+      <div class="action" data-profile="st7789-gpio21">
+        <p>Wybrano: <b>ST7789 / podświetlenie GPIO21</b></p>
+        <esp-web-install-button manifest="./manifests/st7789-gpio21.json">
+          <button slot="activate" type="button">Połącz i zainstaluj</button>
+          <span slot="unsupported" class="bad">Przeglądarka nie obsługuje Web Serial. Użyj Chrome lub Edge na komputerze.</span>
+          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
+        </esp-web-install-button>
+      </div>
+      <div class="action" data-profile="st7789-gpio27" hidden>
+        <p>Wybrano: <b>ST7789 / podświetlenie GPIO27</b></p>
+        <esp-web-install-button manifest="./manifests/st7789-gpio27.json">
+          <button slot="activate" type="button">Połącz i zainstaluj</button>
+          <span slot="unsupported" class="bad">Użyj Chrome lub Edge na komputerze.</span>
+          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
+        </esp-web-install-button>
+      </div>
+      <div class="action" data-profile="ili9341-gpio21" hidden>
+        <p>Wybrano: <b>ILI9341 / podświetlenie GPIO21</b></p>
+        <esp-web-install-button manifest="./manifests/ili9341-gpio21.json">
+          <button slot="activate" type="button">Połącz i zainstaluj</button>
+          <span slot="unsupported" class="bad">Użyj Chrome lub Edge na komputerze.</span>
+          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
+        </esp-web-install-button>
+      </div>
+    </div>
+    <div id="not-published" class="notice" hidden role="alert">
+      <strong>Instalator czeka na publikację firmware.</strong> W ustawieniach repozytorium GitHub przełącz <b>Settings → Pages → Build and deployment → Source</b> z „Deploy from a branch” na <b>GitHub Actions</b>. Następnie sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem.
+    </div>
+    <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
+  </section>
+
+  <section class="card">
+    <h2>3. Podłączenie wioślarza i zegarka</h2>
+    <p>Kontaktron: <code>GPIO22</code> + <code>GND</code> (nie GPIO2 — zajmuje go TFT). Sprawdź fizycznie pinout złącza P3 swojej rewizji płytki. Garmin: pozostaje dotychczasowa nazwa <code>WR S4BL3</code>, usługa FTMS i format danych BLE, kompatybilny z dotychczasowym polem Connect IQ.</p>
+    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Nowego firmware nie testowano jeszcze end-to-end na sprzęcie.</p>
+    <p><a href="https://github.com/mpuchara/ArduRower/tree/main/cyd_rower">Instrukcja i dokumentacja firmware</a> ·
+       <a href="https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor">Sterownik LCD z HA_UBOX_bridge</a> ·
+       <a href="https://github.com/mpuchara/ArduRower/actions">Status kompilacji</a></p>
+  </section>
+  <footer>ArduRower CYD · instalator korzysta z ESP Web Tools i portu szeregowego w Twojej przeglądarce. Dane BLE do zegarka nie są zmieniane. <span id="build-label"></span></footer>
+</main>
+<script>
+  const choices = document.querySelectorAll('input[name="profile"]');
+  const active = document.querySelectorAll('[data-profile]');
+  function showProfile() {
+    const selected = document.querySelector('input[name="profile"]:checked').value;
+    for (const panel of active) panel.hidden = panel.dataset.profile !== selected;
+  }
+  for (const radio of choices) radio.addEventListener('change', showProfile);
+  showProfile();
+
+  async function checkPublished() {
+    const status = document.getElementById('status');
+    const ready = document.getElementById('install-ready');
+    const missing = document.getElementById('not-published');
+    try {
+      const responses = await Promise.all([
+        fetch('./version.json', {cache:'no-store'}),
+        fetch('./manifests/st7789-gpio21.json', {cache:'no-store'})
+      ]);
+      if (!responses.every(r => r.ok)) throw new Error('brak manifestów');
+      const manifest = await responses[1].json();
+      if (!manifest.builds?.[0]?.parts?.[0]) throw new Error('niepoprawny manifest');
+      ready.hidden = false;
+      missing.hidden = true;
+      status.textContent = 'Obrazy firmware zostały opublikowane. Można rozpocząć instalację.';
+      status.classList.add('ok');
+      const version = await responses[0].json();
+      if (version.version) document.getElementById('build-label').textContent = 'Kompilacja: ' + version.version;
+    } catch (e) {
+      ready.hidden = true;
+      missing.hidden = false;
+      status.textContent = 'Pliki instalacyjne nie są jeszcze dostępne na tej stronie.';
+      status.classList.add('bad');
+    }
+  }
+  checkPublished();
+</script>
+</body>
+</html>
