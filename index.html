@@ -58,7 +58,7 @@
   <section class="card">
     <h2>Wyświetlacz potwierdzony: ST7789 / GPIO21</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
-    <p class="notice">Nowa wersja eliminuje miganie ekranu: nie czyści go cyklicznie. Statyczne obszary pozostają na miejscu, a zmienione liczby i wykresy są aktualizowane za pomocą niewielkiego bufora w RAM.</p>
+    <p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
   </section>
 
   <section class="card">
@@ -66,7 +66,7 @@
     <ol class="steps">
       <li>Podłącz <b>micro-USB</b> do komputera, na którym działa Chrome lub Edge. Wybierz działający port COM (np. COM4, ale numer może być inny).</li>
       <li>Kliknij <b>Połącz i zainstaluj</b>. Firmware jest przeznaczony wyłącznie dla ST7789/GPIO21.</li>
-      <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. Jeżeli pojawi się pytanie o kasowanie pamięci, pamiętaj, że usunie ono poprzednią konfigurację.</li>
+      <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. <b>Podczas aktualizacji nie wybieraj pełnego kasowania pamięci</b>, jeśli chcesz zachować rekordy wyścigów. Kasowanie flash usuwa także rekordy NVS.</li>
       <li>Po wgraniu płytka powinna uruchomić dashboard ArduRower. Następnie sprawdź odbiór przez dotychczasowe pole Connect IQ w Garminie.</li>
     </ol>
     <div id="install-ready">
@@ -88,7 +88,7 @@
   <section class="card">
     <h2>3. Podłączenie wioślarza i zegarka</h2>
     <p>Kontaktron: <code>GPIO22</code> + <code>GND</code> (nie GPIO2 — zajmuje go TFT). Sprawdź fizycznie pinout złącza P3 swojej rewizji płytki. Garmin: pozostaje dotychczasowa nazwa <code>WR S4BL3</code>, usługa FTMS i format danych BLE, kompatybilny z dotychczasowym polem Connect IQ.</p>
-    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Poprawkę odświeżania należy potwierdzić na fizycznej płytce.</p>
+    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Nowy tryb Ghost Race wymaga potwierdzenia działania na fizycznej płytce.</p>
     <p><a href="https://github.com/mpuchara/ArduRower/tree/main/cyd_rower">Instrukcja i dokumentacja firmware</a> ·
        <a href="https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor">Sterownik LCD z HA_UBOX_bridge</a> ·
        <a href="https://github.com/mpuchara/ArduRower/actions">Status kompilacji</a></p>
