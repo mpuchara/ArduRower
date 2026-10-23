@@ -99,3 +99,8 @@ Testy obejmują dystans, prędkość, czas, pauzę i wznowienie, przepełnienie 
 ## Pochodzenie
 
 Projekt bazuje na ArduRower autorstwa zpukr, wskazującym także WaterRino oraz WaterRower S4BL3. Dołączone źródła OLED pochodzą z biblioteki ThingPulse, a RunningAverage z projektu Roba Tillaarta. Zachowano informacje autorów i warunki licencyjne obecne w plikach źródłowych.
+
+
+## Ghost Race — ściganie ze sobą na CYD
+
+Firmware CYD ST7789/GPIO21 ma nowy tryb **Ghost Race**. Swipe w lewo/prawo przełącza dashboard i tryb wyścigu; menu pozwala wybrać 500/1000/2000 m, a zapisany rekord odtwarzany jest jako drugi wioślarz. Wyświetlane są przewaga w metrach i sekundach, czas, moc, prędkość i wykresy. Dane rekordu trafiają lokalnie do ESP32 NVS, ale nie ingerują w działające pole Garmin Connect IQ. [Instrukcja](cyd_rower/README.md) · [Instalator](https://mpuchara.github.io/ArduRower/).
