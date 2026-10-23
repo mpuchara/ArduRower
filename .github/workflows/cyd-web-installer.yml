@@ -36,6 +36,7 @@ jobs:
       - name: Keep previous Garmin Connect IQ BLE contract
         run: |
           python3 tests/cyd_ble_contract_test.py
+          python3 tests/cyd_display_refresh_test.py
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
