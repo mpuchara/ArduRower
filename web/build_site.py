@@ -16,7 +16,7 @@ SITE = ROOT / "site"
 ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
 }
-VERSION = "0.07-cyd-" + os.environ.get("GITHUB_SHA", "local")[:7]
+VERSION = "0.08-ghost-" + os.environ.get("GITHUB_SHA", "local")[:7]
 
 
 def require(path):
@@ -61,7 +61,7 @@ def main():
         manifest = {
             "name": "ArduRower CYD " + slug,
             "version": VERSION,
-            "new_install_prompt_erase": True,
+            "new_install_prompt_erase": False,  # preserve Ghost Race records in NVS during updates
             "new_install_improv_wait_time": 0,
             "builds": [{
                 "chipFamily": "ESP32",
