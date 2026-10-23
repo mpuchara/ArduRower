@@ -12,14 +12,14 @@ Bez działania workflow instalator celowo pokazuje informację o braku binariów
 
 ## Co zostanie wgrane
 
-web/build_site.py łączy dla **profilu ST7789/GPIO21** cztery obrazy:
+GitHub Pages publikuje **cztery niezależne pliki BIN** i manifest ESP Web Tools:
 
-- bootloader: **0x1000**
-- tabela partycji: **0x8000**
-- boot_app0: **0xe000**
-- firmware: **0x10000**
+- bootloader: `0x1000`
+- tablica partycji: `0x8000`
+- boot_app0: `0xE000`
+- aplikacja: `0x10000`
 
-Następnie tworzy site/firmware/*.bin (pełne obrazy flash, adres 0) oraz site/manifests/*.json dla ESP Web Tools. GitHub Actions sprawdza nagłówki obrazów oraz granicę 4 MB. **Nie można wgrać samego firmware.bin pod adresem 0**. Manifest wskazuje bezpośrednio na statyczne pliki z GitHub Pages.
+**Dlaczego nie jeden scalony obraz firmware?** Scalenie plików z wypełnieniem 0xFF i wgranie go pod offset 0 mogłoby nadpisać obszar NVS `0x9000–0xDFFF`, kasując rekordy Ghost Race. Rozdzielone pliki omijają NVS. Przy kolejnych instalacjach NIE wybieraj pełnego erase flash. Spójność zakresów i obrazów jest sprawdzana w GitHub Actions.
 
 **Jedyny profil:** ST7789 z podświetleniem GPIO21, potwierdzony na docelowej płytce.
 
