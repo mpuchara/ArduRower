@@ -995,7 +995,7 @@ void updateTouch(uint32_t now) {
                     rawEndX-rawStartX,rawEndY-rawStartY,
                     deltaX,deltaY,touchCalibrated?"yes":"no",
                     horizontalSwipe?"yes":"no");
-    if(held>1100 && max(dx,dy)<420 &&
+    if(held>1100 && max(dx,dy)<420 && !horizontalSwipe &&
        activeMode==Mode::Dashboard && !calibrationScreen) {
       int16_t px,py;
       if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
