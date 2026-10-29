@@ -3,19 +3,12 @@
 // Workout calculation is shared directly with original ArduRower v0.07.
 // BLE FTMS wire contract follows original ArduRower.ino and must stay unchanged.
 #include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLEAdvertising.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>
 #include <TFT_eSPI.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <Preferences.h>
-#include <BLEScan.h>
-#include <BLEClient.h>
-#include <BLERemoteDescriptor.h>
 #include "CydMotion.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
@@ -23,7 +16,7 @@
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.5";
+static constexpr const char *FIRMWARE_VERSION = "0.09.6";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -53,9 +46,14 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33, 36);
+XPT2046_Touchscreen touch(33); // Poll touch over SPI; IRQ GPIO36 may be unconnected
 bool touchReady = false;
 bool touchedLast = false;
+bool swipeTriggered=false;
+uint32_t touchEvents=0;
+uint32_t touchSwipeEvents=0;
+uint32_t touchLastLogMs=0;
+uint32_t touchLastPollMs=0;
 uint32_t touchPressedAt = 0;
 int16_t rawStartX = 0, rawStartY = 0, rawEndX = 0, rawEndY = 0;
 float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
@@ -136,381 +134,12 @@ void saveMotionCalibration() {
     p.end();
   }
 }
-// Optional reverse BLE link (Garmin/strap => CYD): leave FTMS peripheral
-// and its already-working Connect IQ notifications completely unchanged.
-// 2.0.x ESP32 BLEClient::connect() is a BLOCKING API. There is no supported
-// per-call timeout. Report stalled stages WITHOUT deleting the BLE task,
-// reinitializing BLE, or disconnecting the physical Garmin BLE link (which
-// could take down the FTMS subscription as well).
-// ESP32 Arduino Bluedroid calls the custom GATTC handler AFTER dispatching
-// the same event to its BLEClient/RemoteCharacteristic. Observe real status
-// codes instead of assuming registerForNotify() returning means CCCD succeeded.
-// This hook must never disconnect the GAP peer or alter the FTMS server.
-static volatile uint16_t hrNotifyHandle=0;
-static volatile uint16_t hrDescriptorHandle=0;
-static volatile uint8_t hrRegResult=0xff;
-static volatile uint8_t hrDescriptorResult=0xff;
-static volatile uint32_t hrGattNotifications=0;
-static void hrGattEvents(esp_gattc_cb_event_t event,esp_gatt_if_t,
-                         esp_ble_gattc_cb_param_t* p) {
-  if(!p)return;
-  if(event==ESP_GATTC_REG_FOR_NOTIFY_EVT &&
-     hrNotifyHandle && p->reg_for_notify.handle==hrNotifyHandle) {
-    hrRegResult=static_cast<uint8_t>(p->reg_for_notify.status);
-    Serial.printf("HR: GATT notify registration status=%d handle=%u\n",
-                  (int)p->reg_for_notify.status,(unsigned)hrNotifyHandle);
-  }
-  if(event==ESP_GATTC_WRITE_DESCR_EVT &&
-     hrDescriptorHandle && p->write.handle==hrDescriptorHandle) {
-    hrDescriptorResult=static_cast<uint8_t>(p->write.status);
-    Serial.printf("HR: CCCD WRITE result=%d descriptor=%u\n",
-                  (int)p->write.status,(unsigned)hrDescriptorHandle);
-  }
-  if(event==ESP_GATTC_NOTIFY_EVT &&
-     hrNotifyHandle && p->notify.handle==hrNotifyHandle) {
-    ++hrGattNotifications;
-    if(hrGattNotifications<=5)
-      Serial.printf("HR: raw GATT notification len=%u n=%lu first=%02X\n",
-                    (unsigned)p->notify.value_len,
-                    (unsigned long)hrGattNotifications,
-                    p->notify.value_len?p->notify.value[0]:0);
-  }
-}
-static BLEAdvertisedDevice *hrCandidate=nullptr;
-static int hrCandidateScore=-100000;
-static String hrPreferredAddress;
-static String hrAttemptAddress;
-static bool hrPreferredSaved=false;
-static constexpr uint32_t HR_STALLED_AFTER_MS=16000;
-static constexpr uint32_t HR_FIRST_NOTIFICATION_MS=15000;
-static constexpr uint8_t HR_MAX_FAILED_CONNECTS=12;
+#include "NimbleHr.h"
 
-void setHrState(HrState state,const char* description) {
-  hrState=state;
-  hrStageSinceMs=millis();
-  hrLastReportedStall=HrState::Starting;
-  Serial.printf("HR: [%lu] %s (heap %u)\n",
-                (unsigned long)hrStageSinceMs,description,
-                (unsigned)ESP.getFreeHeap());
-}
-
-bool isHrBlockingStage(HrState state) {
-  return state==HrState::Connecting || state==HrState::GattConnected ||
-         state==HrState::Service || state==HrState::Characteristic ||
-         state==HrState::Subscribing || state==HrState::Descriptor;
-}
-HrState displayedHrState(uint32_t nowMs) {
-  HrState state=hrState;
-  if(isHrBlockingStage(state) && hrStageSinceMs &&
-     (uint32_t)(nowMs-hrStageSinceMs)>HR_STALLED_AFTER_MS)
-    return HrState::Stalled;
-  return state;
-}
-// Called from the normal dashboard loop, even when hrWorker is stuck
-// inside Bluedroid. This is diagnostic only. Cancelling the connection
-// by MAC at GAP level can also sever the Garmin's working FTMS link.
-void checkHrStall(uint32_t nowMs) {
-  if(displayedHrState(nowMs)==HrState::Stalled &&
-     hrLastReportedStall!=hrState) {
-    hrLastReportedStall=hrState;
-    Serial.printf("HR: STALLED at %s for %lu ms; FTMS left running\n",
-                  hrStatus(hrState),(unsigned long)(nowMs-hrStageSinceMs));
-  }
-}
-class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
- public:
-  void onResult(BLEAdvertisedDevice device) override {
-    ++hrAdvertisers;
-    if(!device.haveServiceUUID() ||
-       !device.isAdvertisingService(BLEUUID((uint16_t)0x180D)))return;
-    ++hrMatches;
-    String addr(device.getAddress().toString().c_str());
-    const bool known=(hrPreferredAddress.length()>0 &&
-                      addr.equalsIgnoreCase(hrPreferredAddress));
-    const String name=device.haveName() ?
-                      String(device.getName().c_str()) : String("");
-    // Favor the last SOURCE OF VALID HEART-RATE NOTIFICATIONS, not the
-    // first advertiser. Fall back to strongest RSSI if its address rotates.
-    const int score=(known?1000:0)+device.getRSSI();
-    if(score>hrCandidateScore) {
-      delete hrCandidate;
-      hrCandidate=new BLEAdvertisedDevice(device);
-      hrCandidateScore=score;
-    }
-    Serial.printf("HR: candidate addr=%s type=%d name=%s RSSI=%d preferred=%s FTMS=%s\n",
-                  addr.c_str(),(int)device.getAddressType(),
-                  name.length()?name.c_str():"(no name)",device.getRSSI(),
-                  known?"yes":"no",deviceConnected?"connected":"not connected");
-  }
-};
-
-static void hrNotify(BLERemoteCharacteristic*,uint8_t* bytes,size_t size,bool) {
-  if(size<2)return;
-  const bool wide=(bytes[0]&0x01)!=0;
-  if(wide && size<3)return;
-  const uint16_t bpm=wide ?
-        (uint16_t)(bytes[1]|(uint16_t(bytes[2])<<8)) : bytes[1];
-  if(bpm>=35 && bpm<=240) {
-    receivedHr=bpm;
-    receivedHrAt=millis();
-    ++hrNotifyPackets;
-    hrState=HrState::Receiving;
-  }
-}
-class HrClientCallbacks : public BLEClientCallbacks {
- public:
-  void onConnect(BLEClient*) override {
-    setHrState(HrState::GattConnected,"GATT connected callback");
-  }
-  void onDisconnect(BLEClient*) override {
-    hrConnected=false;
-    setHrState(HrState::Disconnected,"GATT disconnected callback");
-  }
-};
-static HrClientCallbacks hrClientCallbacks;
-
-// All application-level HR discovery must yield to an active rowing workout.
-// The BLE controller handles microsecond connection-event radio scheduling;
-// we intentionally do NOT alternate FTMS and HR by disconnecting a peer.
-bool hrWorkAllowed() {
-  return bleDuty.canStart(millis());
-}
-void hrWorker(void*) {
-  // Install once, before GATT client connections. It only observes events.
-  BLEDevice::setCustomGattcHandler(hrGattEvents);
-  BLEScan* scanner=BLEDevice::getScan();
-  if(!scanner) {
-    setHrState(HrState::InitFailed,"scanner unavailable");
-    vTaskDelete(nullptr); return;
-  }
-  scanner->setAdvertisedDeviceCallbacks(new HrAdvertisements(),false);
-  scanner->setActiveScan(true);
-  scanner->setInterval(160);
-  scanner->setWindow(48);
-  // The Bluedroid client is kept alive for the task lifetime: the older
-  // Arduino-ESP32 BLEDevice has no deleteClient API, and forcibly killing
-  // this task while callbacks still reference it would be unsafe.
-  BLEClient* client=BLEDevice::createClient();
-  if(!client) {
-    setHrState(HrState::InitFailed,"client unavailable");
-    vTaskDelete(nullptr);return;
-  }
-  client->setClientCallbacks(&hrClientCallbacks);
-  uint8_t failedConnects=0;
-  while(true) {
-    // HR service discovery, GAP scan and CCCD writes can occupy Bluedroid
-    // for tens of seconds. Only begin during an idle maintenance window.
-    // A single HR setup attempt is permitted per continuous FTMS session.
-    if(!hrWorkAllowed()) {
-      if(hrState!=HrState::Paused && !hrConnected)
-        setHrState(HrState::Paused,
-                   "FTMS priority; HR discovery postponed until idle");
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      continue;
-    }
-    if(ESP.getFreeHeap()<50000) {
-      setHrState(HrState::LowMemory,"scan paused: heap below 50 KB");
-      vTaskDelay(pdMS_TO_TICKS(20000)); continue;
-    }
-    if(failedConnects>=HR_MAX_FAILED_CONNECTS) {
-      setHrState(HrState::InitFailed,
-                 "too many GATT failures; reboot to retry (FTMS unaffected)");
-      vTaskDelete(nullptr);return;
-    }
-    // All modifications to candidate are performed in BLE scan callbacks
-    // while start() is executing and consumed only after the scan finishes.
-    bleDuty.begin(millis());
-    Serial.printf("HR: scheduled maintenance window, FTMS=%s, attempts=%lu, drops=%lu\n",
-                  deviceConnected?"connected":"disconnected",
-                  (unsigned long)bleDuty.attempts,
-                  (unsigned long)bleDuty.ftmsDrops);
-    delete hrCandidate;hrCandidate=nullptr;
-    hrCandidateScore=-100000;
-    hrAdvertisers=hrMatches=0;
-    lastHrScanMs=millis();
-    setHrState(HrState::Scan,"active BLE scan begin (4s)");
-    scanner->start(4,false);
-    // Some stacks need a pause between an active scan and opening a GATT
-    // connection, even when the blocking scan call has already returned.
-    scanner->stop();
-    scanner->clearResults();
-    vTaskDelay(pdMS_TO_TICKS(180));
-    BLEAdvertisedDevice* peer=hrCandidate;
-    hrCandidate=nullptr;
-    Serial.printf("HR: scan found %u advertisers, %u HR matches, selected=%s\n",
-                  (unsigned)hrAdvertisers,(unsigned)hrMatches,
-                  peer?peer->getAddress().toString().c_str():"none");
-    if(!peer) {
-      bleDuty.end();
-      setHrState(HrState::NotFound,"no 0x180D source detected");
-      vTaskDelay(pdMS_TO_TICKS(14000));continue;
-    }
-    if(bleDuty.shouldYield(millis())) {
-      delete peer;
-      bleDuty.end();
-      setHrState(HrState::Paused,"movement or FTMS conflict during scan; postpone HR connect");
-      vTaskDelay(pdMS_TO_TICKS(2000));continue;
-    }
-    hrAttemptAddress=String(peer->getAddress().toString().c_str());
-    const uint32_t attempt=millis();
-    setHrState(HrState::Connecting,"connect() ENTER");
-    // In Arduino-ESP32 2.x, BLEClient::connect() may wait indefinitely for
-    // GATT completion. Stage timestamps remain visible to dashboard/USB.
-    const bool connected=client->connect(peer);
-    Serial.printf("HR: connect() RETURN result=%s elapsed=%lu ms\n",
-                  connected?"OK":"FAIL",(unsigned long)(millis()-attempt));
-    delete peer;
-    hrConnected=false;
-    if(!connected) {
-      bleDuty.end();
-      ++failedConnects;
-      setHrState(HrState::Disconnected,"connect failed, retry follows");
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    failedConnects=0;
-    if(bleDuty.shouldYield(millis())) {
-      Serial.println("HR: rower active after GATT link; skipping service discovery");
-      if(client->isConnected())client->disconnect();
-      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
-    }
-    setHrState(HrState::Service,"getService(0x180D) ENTER");
-    BLERemoteService* service=client->getService(BLEUUID((uint16_t)0x180D));
-    Serial.printf("HR: getService(0x180D) RETURN %s\n",
-                  service?"FOUND":"MISSING");
-    if(!service) {
-      bleDuty.end();
-      setHrState(HrState::InitFailed,"connected peer has no 0x180D");
-      if(client->isConnected())client->disconnect();
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    if(bleDuty.shouldYield(millis())) {
-      Serial.println("HR: FTMS priority after service discovery, abort HR setup");
-      if(client->isConnected())client->disconnect();
-      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
-    }
-    setHrState(HrState::Characteristic,"getCharacteristic(0x2A37) ENTER");
-    BLERemoteCharacteristic* characteristic=
-        service->getCharacteristic(BLEUUID((uint16_t)0x2A37));
-    Serial.printf("HR: getCharacteristic(0x2A37) RETURN %s, notify=%s\n",
-                  characteristic?"FOUND":"MISSING",
-                  characteristic&&characteristic->canNotify()?"yes":"no");
-    if(!characteristic || !characteristic->canNotify()) {
-      bleDuty.end();
-      setHrState(HrState::InitFailed,"missing HR notifications characteristic");
-      if(client->isConnected())client->disconnect();
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    // The older Arduino BLE wrapper enables CCCD *before* waiting for the
-    // GATT registration completion. This can stall, and status is void.
-    // Split the operations: first subscribe the local GATT notify callback,
-    // then explicitly enable the peer's CCCD and inspect GATT status.
-    BLERemoteDescriptor* cccd =
-        characteristic->getDescriptor(BLEUUID((uint16_t)0x2902));
-    if(!cccd) {
-      bleDuty.end();
-      Serial.println("HR: missing CCCD 0x2902; cannot enable remote HR updates");
-      setHrState(HrState::InitFailed,"HR CCCD missing; no notifications possible");
-      if(client->isConnected())client->disconnect();
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    if(bleDuty.shouldYield(millis())) {
-      Serial.println("HR: rowing or FTMS conflict; skipping CCCD subscription");
-      if(client->isConnected())client->disconnect();
-      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
-    }
-    hrNotifyHandle=characteristic->getHandle();
-    hrDescriptorHandle=cccd->getHandle();
-    hrRegResult=hrDescriptorResult=0xff;
-    const uint32_t countBefore=hrNotifyPackets;
-    setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER, no CCCD write");
-    characteristic->registerForNotify(hrNotify,true,false);
-    // Library gives its internal semaphore before the observer hook runs,
-    // so await the same GATTC callback's status briefly before evaluation.
-    for(int tries=0;tries<50 && hrRegResult==0xff;++tries)
-      vTaskDelay(pdMS_TO_TICKS(10));
-    Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\n",
-                  (unsigned)hrRegResult);
-    if(hrRegResult!=ESP_GATT_OK) {
-      bleDuty.end();
-      setHrState(HrState::InitFailed,"GATT notification registration failed");
-      if(client->isConnected())client->disconnect();
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    if(bleDuty.shouldYield(millis())) {
-      Serial.println("HR: FTMS priority after GATT registration; defer CCCD");
-      if(client->isConnected())client->disconnect();
-      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
-    }
-    uint8_t enableNotify[2]={0x01,0x00};
-    setHrState(HrState::Descriptor,"CCCD 0x2902 enable notifications ENTER");
-    cccd->writeValue(enableNotify,2,true);
-    for(int tries=0;tries<50 && hrDescriptorResult==0xff;++tries)
-      vTaskDelay(pdMS_TO_TICKS(10));
-    Serial.printf("HR: CCCD write RETURN result=%u\n",
-                  (unsigned)hrDescriptorResult);
-    if(hrDescriptorResult!=ESP_GATT_OK) {
-      bleDuty.end();
-      setHrState(HrState::InitFailed,"CCCD enable failed; cannot receive BPM");
-      if(client->isConnected())client->disconnect();
-      vTaskDelay(pdMS_TO_TICKS(7000));continue;
-    }
-    hrConnected=true;
-    bleDuty.end(); // subscription is now passive and may coexist with FTMS
-    setHrState(HrState::NoData,"CCCD enabled; passive HR notifications only");
-    const uint32_t subscribedAt=millis();
-    bool gotData=(hrNotifyPackets!=countBefore);
-    uint32_t lastReport=0;
-    while(client->isConnected()) {
-      const uint32_t now=millis();
-      if(hrNotifyPackets!=countBefore) {
-        gotData=true;
-        if(liveHr(now))hrState=HrState::Receiving;
-        else hrState=HrState::NoData;
-        if(!hrPreferredSaved && hrAttemptAddress.length()) {
-          Preferences pref;
-          if(pref.begin("rower-hr",false)) {
-            hrPreferredSaved=pref.putString("addr",hrAttemptAddress)>0;
-            pref.end();
-            if(hrPreferredSaved) {
-              hrPreferredAddress=hrAttemptAddress;
-              Serial.printf("HR: saved verified sensor address %s\n",
-                            hrPreferredAddress.c_str());
-            }
-          }
-        }
-      }
-      if(!gotData && (uint32_t)(now-subscribedAt)>HR_FIRST_NOTIFICATION_MS) {
-        Serial.println("HR: no BPM for 15s; disconnecting HR client for retry");
-        break;
-      }
-      if(gotData && receivedHrAt &&
-         (uint32_t)(now-receivedHrAt)>20000) {
-        Serial.println("HR: no fresh BPM for 20s; reconnect HR GATT client");
-        break;
-      }
-      if((uint32_t)(now-lastReport)>=8000) {
-        lastReport=now;
-        Serial.printf("HR: linked=%s packets=%lu bpm=%u age=%lu ms\n",
-                      client->isConnected()?"yes":"no",
-                      (unsigned long)hrNotifyPackets,
-                      (unsigned)liveHr(now),
-                      receivedHrAt?(unsigned long)(now-receivedHrAt):0UL);
-      }
-      vTaskDelay(pdMS_TO_TICKS(1500));
-    }
-    hrConnected=false;
-    hrNotifyHandle=hrDescriptorHandle=0;
-    if(client->isConnected())client->disconnect(); // only HR GATT client
-    setHrState(HrState::Disconnected,"HR client closed; backoff before scan");
-    // DutySchedule enforces >=90 seconds before next GATT setup and at
-    // most one setup during a continuous Garmin FTMS connection.
-    vTaskDelay(pdMS_TO_TICKS(7000));
-  }
-}
-BLEServer *pServer = nullptr;
-BLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
-BLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
-BLECharacteristic *pBatCharacteristic = nullptr;
+NimBLEServer *pServer = nullptr;
+NimBLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
+NimBLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
+NimBLECharacteristic *pBatCharacteristic = nullptr;
 bool oldDeviceConnected = false;
 
 portMUX_TYPE pulseMux = portMUX_INITIALIZER_UNLOCKED;
@@ -538,8 +167,8 @@ bool pageRendered = false, displayedDetails = false;
 // Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
 // 12-element String array was indexed at 12..20 in race mode, overwriting
 // adjacent global memory and causing spontaneous ESP32 resets.
-static constexpr uint8_t kTextSlotCount = 24;
-static constexpr uint8_t kMaxAssignedTextSlot = 20;
+static constexpr uint8_t kTextSlotCount = 26;
+static constexpr uint8_t kMaxAssignedTextSlot = 25;
 static_assert(kTextSlotCount > kMaxAssignedTextSlot, "Ghost Race fields exceed text cache");
 String previousField[kTextSlotCount];
 bool previousValid[kTextSlotCount] = {};
@@ -559,16 +188,16 @@ uint32_t lastRacePaintMs=0;
 bool recordSaveFailed=false;
 uint8_t lastRaceSelection=255;
 
-class MyServerCallbacks : public BLEServerCallbacks {
+class MyServerCallbacks : public NimBLEServerCallbacks {
  public:
-  void onConnect(BLEServer *) override {
+  void onConnect(NimBLEServer *) override {
     deviceConnected=true;
     ftmsConnectedAtMs=millis();
     Serial.printf("FTMS: CONNECTED at %lu, HR=%s, packets=%lu\n",
                   (unsigned long)ftmsConnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
   }
-  void onDisconnect(BLEServer *) override {
+  void onDisconnect(NimBLEServer *) override {
     deviceConnected=false;
     ftmsDisconnectedAtMs=millis();
     Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
@@ -578,56 +207,52 @@ class MyServerCallbacks : public BLEServerCallbacks {
 };
 // Intentionally no-op: as in the existing firmware, FTMS Control Point procedures
 // are NOT implemented. Preserving the existing Connect IQ integration is paramount.
-class MyCallbacks : public BLECharacteristicCallbacks {
+class MyCallbacks : public NimBLECharacteristicCallbacks {
  public:
-  void onWrite(BLECharacteristic *) override {}
+  void onWrite(NimBLECharacteristic *) override {}
 };
 
 void initBLE() {
   Serial.print(F("Init BLE:"));
-  BLEDevice::init(BLE_SERVICE_NAME);
-  pServer = BLEDevice::createServer();
+  NimBLEDevice::init(BLE_SERVICE_NAME);
+  pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-  BLEService *pService =
-      pServer->createService(BLEUUID((uint16_t)FitnessMachineService));
+  NimBLEService *pService =
+      pServer->createService(NimBLEUUID((uint16_t)FitnessMachineService));
   pDtCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineRowerData),
-      BLECharacteristic::PROPERTY_NOTIFY);
-  pDtCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineRowerData),
+      NIMBLE_PROPERTY::NOTIFY);
+  // NimBLE creates CCCD for notify characteristics automatically.
   pDtCharacteristic->setCallbacks(new MyCallbacks());
   pFmfCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineFeature),
-      BLECharacteristic::PROPERTY_READ);
-  pFmfCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineFeature),
+      NIMBLE_PROPERTY::READ);
   pCtrCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineControlPoint),
-      BLECharacteristic::PROPERTY_WRITE);
-  pCtrCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineControlPoint),
+      NIMBLE_PROPERTY::WRITE);
   pCtrCharacteristic->setCallbacks(new MyCallbacks());
-  BLEService *pBatteryService = pServer->createService(BLEUUID((uint16_t)0x180F));
+  NimBLEService *pBatteryService = pServer->createService(NimBLEUUID((uint16_t)0x180F));
   pBatCharacteristic = pBatteryService->createCharacteristic(
-      BLEUUID((uint16_t)batteryLevel),
-      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
-  pBatCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)batteryLevel),
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   pStCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineStatus),
-      BLECharacteristic::PROPERTY_NOTIFY);
-  pStCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineStatus),
+      NIMBLE_PROPERTY::NOTIFY);
   pService->start();
   pBatteryService->start();
-  BLEService *pService2 = pServer->createService(BLEUUID((uint16_t)DEVICE_INFORMATION));
-  BLECharacteristic *pCharacteristic24 = pService2->createCharacteristic(
-      (uint16_t)0x2A24, BLECharacteristic::PROPERTY_READ);
-  BLECharacteristic *pCharacteristic25 = pService2->createCharacteristic(
-      (uint16_t)0x2A25, BLECharacteristic::PROPERTY_READ);
-  BLECharacteristic *pCharacteristic26 = pService2->createCharacteristic(
-      (uint16_t)0x2A26, BLECharacteristic::PROPERTY_READ);
-  BLECharacteristic *pCharacteristic27 = pService2->createCharacteristic(
-      (uint16_t)0x2A27, BLECharacteristic::PROPERTY_READ);
-  BLECharacteristic *pCharacteristic28 = pService2->createCharacteristic(
-      (uint16_t)0x2A28, BLECharacteristic::PROPERTY_READ);
-  BLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
-      (uint16_t)0x2A29, BLECharacteristic::PROPERTY_READ);
+  NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
+  NimBLECharacteristic *pCharacteristic24 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A24), NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *pCharacteristic25 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A25), NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *pCharacteristic26 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A26), NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *pCharacteristic27 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A27), NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *pCharacteristic28 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A28), NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
+      NimBLEUUID((uint16_t)0x2A29), NIMBLE_PROPERTY::READ);
   pService2->start();
   // Preserve original device-information characteristic strings, not new IDs.
   pCharacteristic24->setValue("4");
@@ -642,17 +267,20 @@ void initBLE() {
   cRower[2] = cRower[3] = cRower[4] = 0;
   cRower[5] = cRower[6] = cRower[7] = 0;
   pFmfCharacteristic->setValue((uint8_t *)cRower, 8);
-  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
   uint8_t advData[] = {0x02, 0x01, 0x06, 0x05, 0x02, 0x26, 0x18, 0x0a, 0x18};
   String advDataStr;
   for (unsigned int i = 0; i < sizeof(advData); i++)
     advDataStr += (char)advData[i];
-  BLEAdvertisementData oAdvertisementData;
-  oAdvertisementData.addData(advDataStr);
+  NimBLEAdvertisementData oAdvertisementData;
+  oAdvertisementData.addData(std::string(advDataStr.c_str(),advDataStr.length()));
   pAdvertising->setScanResponse(true);
   pAdvertising->setAdvertisementData(oAdvertisementData);
-  pAdvertising->addServiceUUID(BLEUUID((uint16_t)FitnessMachineService));
-  BLEDevice::startAdvertising();
+  pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)FitnessMachineService));
+  NimBLEAdvertisementData scanResponse;
+  scanResponse.setName(BLE_SERVICE_NAME);
+  pAdvertising->setScanResponseData(scanResponse);
+  NimBLEDevice::startAdvertising();
   Serial.println();
 }
 
@@ -963,19 +591,40 @@ void touchTap(int16_t rx,int16_t ry) {
 }
 void updateTouch(uint32_t now) {
   if(!touchReady)return;
+  if(now-touchLastPollMs<12)return;
+  touchLastPollMs=now;
   const bool down=touch.touched();
   if(down) {
     const TS_Point pt=touch.getPoint();
     if(!touchedLast){
-      touchedLast=true;touchPressedAt=now;
+      touchedLast=true;touchPressedAt=now;swipeTriggered=false;
+      ++touchEvents;
+      Serial.printf("TOUCH: DOWN #%lu raw=%d,%d irq=%d\n",
+                    (unsigned long)touchEvents,pt.x,pt.y,digitalRead(36));
       rawStartX=rawEndX=pt.x;
       rawStartY=rawEndY=pt.y;
     } else {
       rawEndX=pt.x;rawEndY=pt.y;
+      const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+      const float dY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+      if(!swipeTriggered && !calibrationScreen && now-touchPressedAt>=55 &&
+         cydtouch::pageSwipe(rawEndX-rawStartX,rawEndY-rawStartY,
+                             touchCalibrated,dX,dY)) {
+        swipeTriggered=true;
+        ++touchSwipeEvents;
+        Serial.printf("GHOST: LIVE SWIPE #%lu raw=(%d,%d), mode=%d\n",
+                      (unsigned long)touchSwipeEvents,
+                      rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
+        toggleMode();
+      }
     }
   } else if(touchedLast) {
     touchedLast=false;
     const uint32_t held=now-touchPressedAt;
+    if(swipeTriggered) {
+      Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
+      return;
+    }
     const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
     // Use calibrated screen coordinates so ONLY horizontal swipes navigate.
     // Before first calibration, accept a dominant long raw-axis swipe to
@@ -1520,7 +1169,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.5 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.6 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1530,7 +1179,8 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
+  Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
+                touchReady ? "OK" : "unavailable");
   initBLE();
   loadMotionCalibration();
   {
@@ -1557,11 +1207,11 @@ void setup() {
   // Optional second BLE role. If the full BLE stack used most heap,
   // preserve the working FTMS stream instead of risking a crash.
   const uint32_t beforeHr=ESP.getFreeHeap();
-  if(beforeHr>85000)
-    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",8192,
+  if(beforeHr>50000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",6144,
                                          nullptr,1,nullptr,0)==pdPASS;
   if(!hrTaskCreated)
-    hrState=(beforeHr<=85000)?HrState::LowMemory:HrState::InitFailed;
+    hrState=(beforeHr<=50000)?HrState::LowMemory:HrState::InitFailed;
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));

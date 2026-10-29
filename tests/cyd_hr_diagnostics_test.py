@@ -1,57 +1,27 @@
 #!/usr/bin/env python3
-"""Keep dual-role FTMS intact and expose why HR is unavailable on CYD."""
+"""Assert one NimBLE host for FTMS and Garmin HR, no deadlock-induced HR PAUZ."""
 from pathlib import Path
-import re
-
 root=Path(__file__).resolve().parents[1]
-src=(root/"cyd_rower/src/main.cpp").read_text(encoding="utf-8")
-page=(root/"index.html").read_text(encoding="utf-8")
-for marker in (
-    "scanner->setActiveScan(true)",
-    "scanner->start(4,false)",
-    "BLEDevice::createServer()",
-    "BLEDevice::createClient()",
-    "BLEUUID((uint16_t)0x180D)",
-    "BLEUUID((uint16_t)0x2A37)",
-    "hrAdvertisers",
-    "hrMatches",
-    "HR RAM",
-    "HR BRAK",
-    "HR SKAN",
-    "HR POL",
-    "HR DANE",
-    "HR OK",
-    "HR BLAD",
-    "HR ZAW",
-    "getService(0x180D) ENTER",
-    "getCharacteristic(0x2A37) ENTER",
-    "registerForNotify(0x2A37) ENTER",
-    "connect() ENTER",
-    "connect() RETURN",
-    "HR_FIRST_NOTIFICATION_MS=15000",
-    "HR_MAX_FAILED_CONNECTS=12",
-    "hrPreferredAddress",
-    "hrNotifyPackets",
-    "checkHrStall(now)",
-    "scanner->stop()",
-    "client->setClientCallbacks(&hrClientCallbacks)",
-    "setHrState(HrState::LowMemory",
-    "setHrState(HrState::NotFound",
-    "hrState=HrState::Receiving",
-    "String(hrStatus(displayedHrState(millis())))",
-    "ArduRower CYD v0.09.5",
-    'FIRMWARE_VERSION = "0.09.5"',
-):
-    assert marker in src, marker
-
-assert src.count("BLEDevice::init(")==1, "Never reinitialize Bluetooth when starting HR receiver"
-assert 'BLE_SERVICE_NAME "WR S4BL3"' in src, "Garmin must still see same FTMS peripheral"
-assert 'pDtCharacteristic->notify()' in src
-assert 'SEND_EQUIVALENT_POWER = false' in src
-assert 'const EXPECTED_PREFIX = ' in page
-assert 'const EXPECTED_PREFIX = \'0.09.5-ftms-priority-swipe-\'' in page
-assert 'HR RAM' in page and 'HR BRAK' in page and 'HR OK' in page
-assert "BLEDevice::deinit(" not in src, "Never reset existing FTMS host for HR"
-assert "esp_ble_gap_disconnect(" not in src, "Never disconnect Garmin physical FTMS link for HR retry"
-assert "vTaskDelete(client" not in src, "Never kill a BLE task still referenced by callbacks"
-print("PASS: FTMS retained; HR connect/GATT stage tracing, 16s stalled state, safe HR-only retry")
+src=(root/"cyd_rower/src/main.cpp").read_text()
+hr=(root/"cyd_rower/src/NimbleHr.h").read_text()
+ini=(root/"cyd_rower/platformio.ini").read_text()
+page=(root/"index.html").read_text()
+for v in ('NimBLEDevice::createServer()', 'NimBLEDevice::init(BLE_SERVICE_NAME)',
+          'NIMBLE_PROPERTY::NOTIFY', 'pDtCharacteristic->notify()',
+          '#include "NimbleHr.h"', 'FIRMWARE_VERSION = "0.09.6"',
+          'ArduRower CYD v0.09.6', 'BLE_SERVICE_NAME "WR S4BL3"',
+          'String(hrStatus(displayedHrState(millis())))'):
+    assert v in src,v
+for v in ('NimBLEDevice::getScan()', 'NimBLEDevice::createClient()',
+          'scan->setActiveScan(true)', 'scan->start(2,false)',
+          'NimBLEUUID((uint16_t)0x180D)', 'NimBLEUUID((uint16_t)0x2A37)',
+          'chr->subscribe(true,hrNotify,true)', 'hrNotifyPackets',
+'NimBLE connect ENTER', 'HR: packet #',
+          'client->setConnectTimeout(6)', 'HR_STALLED_AFTER_MS'):
+    assert v in hr,v
+assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
+assert 'const EXPECTED_PREFIX = \'0.09.6-nimble-ghost-\'' in page
+assert 'HR PAUZ' not in hr, "Never block HR because Garmin is receiving FTMS"
+assert 'BLEDevice::deinit(' not in src and 'esp_ble_gap_disconnect(' not in src
+assert src.count('NimBLEDevice::init(')==1
+print("PASS: one NimBLE BLE host, simultaneous FTMS/peripheral + Garmin HR/client")
