@@ -20,6 +20,7 @@
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
+static constexpr const char *FIRMWARE_VERSION = "0.09.1";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -832,6 +833,7 @@ void pageLayout() {
   tft.fillRect(0,0,320,24,panelColor);
   tft.setTextColor(whiteColor,panelColor);
   tft.drawString("ARDUROWER",7,3,2);
+  tft.drawString(FIRMWARE_VERSION,108,8,1);
   if(!detailPage){
     tft.setTextColor(heartColor,backgroundColor);
     tft.drawString("PULS",8,27,2);
@@ -927,6 +929,7 @@ void paintRaceLayout(uint8_t screen) {
   tft.fillRect(0,0,320,25,panelColor);
   tft.setTextColor(whiteColor,panelColor);
   tft.drawString("GHOST RACE",9,4,2);
+  tft.drawString(FIRMWARE_VERSION,109,8,1);
   tft.setTextColor(labelColor,panelColor);
   tft.drawRightString("SWIPE: DASHBOARD",313,6,1);
   if(screen==0) {
@@ -1104,13 +1107,14 @@ void initDisplay() {
 #else
   tft.drawString("LCD: ILI9341", 16, 116, 2);
 #endif
+  tft.drawString(String("FW ") + FIRMWARE_VERSION, 16, 146, 4);
   Serial.printf("CYD LCD: %ux%u, backlight GPIO%d\n",
                 (unsigned)tft.width(), (unsigned)tft.height(), BACKLIGHT_PIN);
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD Ghost Race v0.08.1 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.1 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
