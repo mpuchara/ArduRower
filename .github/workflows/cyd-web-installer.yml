@@ -40,6 +40,8 @@ jobs:
           python3 tests/cyd_text_cache_test.py
           g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
           /tmp/ghost_race_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
+          /tmp/cyd_motion_test
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
