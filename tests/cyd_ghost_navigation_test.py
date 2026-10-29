@@ -60,4 +60,6 @@ assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-
 assert 'FTMS: advertising recovery' in loop
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
 assert 'FIRMWARE_VERSION = "0.09.12"' in src
+assert 'ghostWorkout!=displayedGhostWorkout' in src
+assert 'ghost.meterLead(millis())' in src
 print("PASS: Ghost Race touch row selection, pressure-polled release/recovery, two-way swipe, no blocking wizard")
