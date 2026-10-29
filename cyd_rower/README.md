@@ -99,3 +99,12 @@ Nowy wirtualny model prędkości **nie zwiększa prędkości na impulsach fazy p
 ## 0.09.1: jak sprawdzić, czy nowe firmware naprawdę się wgrało
 
 W poprzednim instalatorze wersja plików nie była weryfikowana przed włączeniem przycisku, więc możliwe było wgranie starszych obrazów z cache GitHub Pages. Od v0.09.1 urządzenie wyświetla numer firmware przy uruchamianiu i w nagłówku dashboardu/wyścigu. Otwórz stronę instalatora z parametrem `?v=0.09.1`, sprawdź `Kompilacja: 0.09.1-installer-...` i wgraj tylko zatwierdzoną przez stronę wersję. Proces zachowuje pamięć NVS z rekordami. Kod nie zmienia identyfikatorów ani formatu BLE FTMS.
+
+
+## 0.09.2: dlaczego HR pokazuje -- BPM mimo BLE OK?
+
+Znacznik **BLE OK** dotyczy wyłącznie połączenia `WR S4BL3` → pole Connect IQ w Garminie. Odbiornik tętna na ESP32 działa jako **osobny klient BLE** i oczekuje, że zegarek/czujnik nadaje usługę Heart Rate `0x180D` oraz charakterystykę `0x2A37`.
+
+W wersji 0.09.2 skanowanie HR jest **aktywne**, by odbierać również odpowiedź skanowania, i udostępnia stany w prawym górnym rogu: `HR INIT`, `HR SKAN` (szukanie), `HR BRAK` (brak reklamy usługi 180D), `HR POL` (próba połączenia), `HR DANE` (połączenie, ale brak aktualnych pakietów BPM), `HR OK` (puls dostępny), `HR ROZ` (rozłączono), `HR RAM` (brakuje pamięci na drugą rolę BLE), `HR BLAD` (nie uruchomiono skanera/klienta). Log przez port USB / 115200 pokazuje liczbę reklam BLE i trafień 180D po każdym 4-sekundowym skanie. Próbę powtarza automatycznie co około 22 sekundy, o ile pozwala pamięć. Obowiązujący kontrakt FTMS i format danych do Connect IQ nie zostały zmienione.
+
+**Test zgodności zegarka:** włącz na Garminie udostępnianie tętna podczas aktywności, uruchom trening i sprawdź aplikacją **nRF Connect** na telefonie, czy zegarek reklamuje BLE usługę `180D`. Uwaga: instrukcja fēnix 6 Pro opisuje także wysyłanie tętna przez ANT+, a niektóre materiały Garmina wymieniają serię fēnix 6 wśród urządzeń z nadawaniem BLE. Dlatego brak 180D w eterze wymaga ustalenia faktycznego zachowania Twojego egzemplarza. Klasyczny ESP32 CYD nie ma stosu radiowego ANT+ i nie potrafi odebrać ANT+ samym oprogramowaniem BLE. Alternatywami są nadajnik/pasek HR z BLE albo zewnętrzny mostek ANT+ → BLE; Garmin może w dalszym ciągu odbierać FTMS niezależnie.
