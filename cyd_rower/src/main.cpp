@@ -46,13 +46,14 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33, 36);
+XPT2046_Touchscreen touch(33); // Poll touch over SPI; IRQ GPIO36 may be unconnected
 bool touchReady = false;
 bool touchedLast = false;
 bool swipeTriggered=false;
 uint32_t touchEvents=0;
 uint32_t touchSwipeEvents=0;
 uint32_t touchLastLogMs=0;
+uint32_t touchLastPollMs=0;
 uint32_t touchPressedAt = 0;
 int16_t rawStartX = 0, rawStartY = 0, rawEndX = 0, rawEndY = 0;
 float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
@@ -590,6 +591,8 @@ void touchTap(int16_t rx,int16_t ry) {
 }
 void updateTouch(uint32_t now) {
   if(!touchReady)return;
+  if(now-touchLastPollMs<12)return;
+  touchLastPollMs=now;
   const bool down=touch.touched();
   if(down) {
     const TS_Point pt=touch.getPoint();
@@ -1176,8 +1179,8 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s, IRQ GPIO36=%d, SPI=25/39/32/33\n",
-                touchReady ? "OK" : "unavailable",digitalRead(36));
+  Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
+                touchReady ? "OK" : "unavailable");
   initBLE();
   loadMotionCalibration();
   {
