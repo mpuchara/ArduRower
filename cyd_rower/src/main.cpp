@@ -20,7 +20,7 @@
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.1";
+static constexpr const char *FIRMWARE_VERSION = "0.09.2";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -65,6 +65,31 @@ volatile uint16_t receivedHr=0;
 volatile uint32_t receivedHrAt=0;
 volatile bool hrConnected=false;
 bool hrTaskCreated=false;
+// Independent HR link status. "BLE OK" refers ONLY to Garmin's working
+// FTMS connection, not to the reverse HR connection.
+enum class HrState : uint8_t {
+  Starting, Scan, NotFound, Connecting, Receiving, NoData,
+  Disconnected, LowMemory, InitFailed
+};
+volatile HrState hrState=HrState::Starting;
+volatile uint16_t hrAdvertisers=0;
+volatile uint16_t hrMatches=0;
+volatile uint32_t lastHrScanMs=0;
+const char *hrStatus(HrState s) {
+  switch (s) {
+    case HrState::Starting: return "HR INIT";
+    case HrState::Scan: return "HR SKAN";
+    case HrState::NotFound: return "HR BRAK";
+    case HrState::Connecting: return "HR POL";
+    case HrState::Receiving: return "HR OK";
+    case HrState::NoData: return "HR DANE";
+    case HrState::Disconnected: return "HR ROZ";
+    case HrState::LowMemory: return "HR RAM";
+    case HrState::InitFailed: return "HR BLAD";
+  }
+  return "HR --";
+}
+
 struct TrendPoint { uint16_t tenthKmh; uint8_t heartBpm; uint8_t reserved; };
 TrendPoint trends[TREND_SAMPLES] = {};
 uint16_t trendHead=0,trendCount=0;
@@ -99,9 +124,14 @@ static BLEAdvertisedDevice *hrCandidate=nullptr;
 class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
  public:
   void onResult(BLEAdvertisedDevice device) override {
+    ++hrAdvertisers;
     if(!hrCandidate && device.haveServiceUUID() &&
        device.isAdvertisingService(BLEUUID((uint16_t)0x180D))) {
+      ++hrMatches;
       hrCandidate=new BLEAdvertisedDevice(device);
+      Serial.printf("HR: BLE peripheral with 0x180D: %s, RSSI %d\n",
+                    device.haveName()?device.getName().c_str():"(no name)",
+                    (int)device.getRSSI());
     }
   }
 };
@@ -113,31 +143,57 @@ static void hrNotify(BLERemoteCharacteristic*,uint8_t *buf,size_t size,bool) {
   if(hr>=35 && hr<=240) {
     receivedHr=hr;
     receivedHrAt=millis();
+    hrState=HrState::Receiving;
   }
 }
 void hrWorker(void *) {
   BLEScan *scanner=BLEDevice::getScan();
-  if(!scanner){vTaskDelete(nullptr);return;}
+  if(!scanner) {
+    hrState=HrState::InitFailed;
+    Serial.println("HR: BLE scanner unavailable");
+    vTaskDelete(nullptr);
+    return;
+  }
   scanner->setAdvertisedDeviceCallbacks(new HrAdvertisements(),false);
-  scanner->setActiveScan(false);
+  // Active scan also receives the scan response; passive scan can miss HR
+  // service UUIDs that are not in the first advertising PDU.
+  scanner->setActiveScan(true);
   scanner->setInterval(160);
   scanner->setWindow(48); // low radio duty-cycle; protect Garmin FTMS stream
   // Reuse the same client across scans; BLEDevice keeps its own reference.
   BLEClient *client=BLEDevice::createClient();
-  if(!client) {vTaskDelete(nullptr);return;}
+  if(!client) {
+    hrState=HrState::InitFailed;
+    Serial.println("HR: BLE client unavailable");
+    vTaskDelete(nullptr);
+    return;
+  }
   while(true) {
-    if(ESP.getFreeHeap()<50000) {
+    const uint32_t heap=ESP.getFreeHeap();
+    if(heap<50000) {
+      hrState=HrState::LowMemory;
+      Serial.printf("HR: scan skipped (heap %lu < 50000)\n",
+                    (unsigned long)heap);
       vTaskDelay(pdMS_TO_TICKS(20000));
       continue;
     }
     hrCandidate=nullptr;
+    hrAdvertisers=hrMatches=0;
+    hrState=HrState::Scan;
+    lastHrScanMs=millis();
     scanner->start(4,false);
+    // Keep the independently allocated candidate; remove scan results.
     scanner->clearResults();
     BLEAdvertisedDevice *peer=hrCandidate;
     hrCandidate=nullptr;
+    Serial.printf("HR: scan found %u BLE advertisers, %u HR-service matches; heap %lu\n",
+                  (unsigned)hrAdvertisers,(unsigned)hrMatches,
+                  (unsigned long)ESP.getFreeHeap());
     if(peer) {
+      hrState=HrState::Connecting;
       bool subscribed=false;
-      if(client && client->connect(peer)) {
+      const bool connected=client->connect(peer);
+      if(connected) {
         BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
         BLERemoteCharacteristic *characteristic=service ?
           service->getCharacteristic(BLEUUID((uint16_t)0x2A37)) : nullptr;
@@ -146,12 +202,25 @@ void hrWorker(void *) {
           subscribed=true;
         }
         hrConnected=subscribed;
-        if(subscribed)
-          while(client->isConnected())vTaskDelay(pdMS_TO_TICKS(1500));
+        Serial.printf("HR: connected; 180D=%s, 2A37 notify=%s\n",
+                      service?"yes":"no",subscribed?"yes":"no");
+        if(subscribed) {
+          hrState=HrState::NoData;
+          while(client->isConnected()) {
+            if(liveHr(millis()))hrState=HrState::Receiving;
+            else hrState=HrState::NoData;
+            vTaskDelay(pdMS_TO_TICKS(1500));
+          }
+        }
         client->disconnect();
+      } else {
+        Serial.println("HR: BLE connect failed");
       }
       hrConnected=false;
+      if(hrState!=HrState::LowMemory)hrState=HrState::Disconnected;
       delete peer;
+    } else {
+      hrState=HrState::NotFound;
     }
     vTaskDelay(pdMS_TO_TICKS(18000));
   }
@@ -867,7 +936,7 @@ void updateUI() {
   if(!pageRendered || detailPage!=displayedDetails)pageLayout();
   textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
-  textPatch(1,250,2,70,19,liveHr(millis())?"HR OK":"HR --",
+  textPatch(1,250,2,70,19,String(hrStatus(hrState)),
             liveHr(millis())?heartColor:labelColor,panelColor,2,true);
   if(!detailPage){
     const uint16_t bpm=liveHr(millis());
@@ -1114,7 +1183,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.1 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.2 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1139,13 +1208,17 @@ void setup() {
   resetWorkout();
   loadBestTimes();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
-  // Optional second BLE role; do not start it under memory pressure.
-  if(ESP.getFreeHeap()>85000)
+  // Optional second BLE role. If the full BLE stack used most heap,
+  // preserve the working FTMS stream instead of risking a crash.
+  const uint32_t beforeHr=ESP.getFreeHeap();
+  if(beforeHr>85000)
     hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",8192,
                                          nullptr,1,nullptr,0)==pdPASS;
-  Serial.printf("HR client %s; heap %u\n",
+  if(!hrTaskCreated)
+    hrState=(beforeHr<=85000)?HrState::LowMemory:HrState::InitFailed;
+  Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
-                (unsigned)ESP.getFreeHeap());
+                (unsigned)beforeHr,hrStatus(hrState));
   updateUI();
 }
 void loop() {
