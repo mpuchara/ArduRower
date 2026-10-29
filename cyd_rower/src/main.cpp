@@ -108,7 +108,7 @@ const char *hrStatus(HrState s) {
     case HrState::Subscribing: return "HR SUB";
     case HrState::Descriptor: return "HR CCCD";
     case HrState::Stalled: return "HR ZAW";
-    case HrState::Paused: return "HR PAUZ";
+    case HrState::Paused: return "HR FTMS";
     case HrState::Receiving: return "HR OK";
     case HrState::NoData: return "HR DANE";
     case HrState::Disconnected: return "HR ROZ";
@@ -613,9 +613,9 @@ void touchTap(int16_t rx,int16_t ry) {
   }
   if(ghost.phase==ghostrace::Phase::Finished ||
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
-  if(ghost.phase!=ghostrace::Phase::Idle)return;
   int16_t x,y;
-  if(!mappedTouch(rx,ry,x,y)) {
+  const bool calibrated=mappedTouch(rx,ry,x,y);
+  if(!calibrated) {
     // CYD horizontal view: with XPT2046 rotation=0, physical screen Y is
     // the reversed raw X axis. Unlike v0.09.8, tapping a row must choose
     // THAT row, not cycle all distances. Do not start a calibration wizard.
@@ -624,6 +624,15 @@ void touchTap(int16_t rx,int16_t ry) {
     Serial.printf("GHOST: uncalibrated tap raw=%d,%d screenY~%d\n",
                   (int)rx,(int)ry,(int)y);
   }
+  if(ghost.phase==ghostrace::Phase::Running ||
+     ghost.phase==ghostrace::Phase::Armed) {
+    if(y>=216) {
+      Serial.println("GHOST: touch MENU cancels active race");
+      openRaceMenu();
+    }
+    return;
+  }
+  if(ghost.phase!=ghostrace::Phase::Idle)return;
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
                 (int)x,(int)y,(unsigned)selectedDistance);
   // Three entire rows are large touch targets with no small hitbox.
@@ -1055,7 +1064,7 @@ void paintRaceLayout(uint8_t screen) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("PULS",15,174,1);
     tft.drawString("km/h",174,174,1);
-    tft.drawString("BOOT 1.5s: anuluj",9,228,1);
+    tft.drawString("DOTKNIJ: MENU / SWIPE: WROC",9,228,1);
     tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
   } else {
     tft.setTextColor(ghost.personalBest && !recordSaveFailed ?
