@@ -46,6 +46,8 @@ jobs:
           /tmp/cyd_motion_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
           /tmp/cyd_ble_duty_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
+          /tmp/cyd_touch_swipe_test
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
