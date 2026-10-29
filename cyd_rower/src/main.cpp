@@ -49,6 +49,10 @@ SPIClass touchSPI(HSPI);
 XPT2046_Touchscreen touch(33, 36);
 bool touchReady = false;
 bool touchedLast = false;
+bool swipeTriggered=false;
+uint32_t touchEvents=0;
+uint32_t touchSwipeEvents=0;
+uint32_t touchLastLogMs=0;
 uint32_t touchPressedAt = 0;
 int16_t rawStartX = 0, rawStartY = 0, rawEndX = 0, rawEndY = 0;
 float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
@@ -162,8 +166,8 @@ bool pageRendered = false, displayedDetails = false;
 // Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
 // 12-element String array was indexed at 12..20 in race mode, overwriting
 // adjacent global memory and causing spontaneous ESP32 resets.
-static constexpr uint8_t kTextSlotCount = 24;
-static constexpr uint8_t kMaxAssignedTextSlot = 20;
+static constexpr uint8_t kTextSlotCount = 26;
+static constexpr uint8_t kMaxAssignedTextSlot = 25;
 static_assert(kTextSlotCount > kMaxAssignedTextSlot, "Ghost Race fields exceed text cache");
 String previousField[kTextSlotCount];
 bool previousValid[kTextSlotCount] = {};
@@ -590,15 +594,34 @@ void updateTouch(uint32_t now) {
   if(down) {
     const TS_Point pt=touch.getPoint();
     if(!touchedLast){
-      touchedLast=true;touchPressedAt=now;
+      touchedLast=true;touchPressedAt=now;swipeTriggered=false;
+      ++touchEvents;
+      Serial.printf("TOUCH: DOWN #%lu raw=%d,%d irq=%d\n",
+                    (unsigned long)touchEvents,pt.x,pt.y,digitalRead(36));
       rawStartX=rawEndX=pt.x;
       rawStartY=rawEndY=pt.y;
     } else {
       rawEndX=pt.x;rawEndY=pt.y;
+      const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+      const float dY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+      if(!swipeTriggered && !calibrationScreen && now-touchPressedAt>=55 &&
+         cydtouch::pageSwipe(rawEndX-rawStartX,rawEndY-rawStartY,
+                             touchCalibrated,dX,dY)) {
+        swipeTriggered=true;
+        ++touchSwipeEvents;
+        Serial.printf("GHOST: LIVE SWIPE #%lu raw=(%d,%d), mode=%d\n",
+                      (unsigned long)touchSwipeEvents,
+                      rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
+        toggleMode();
+      }
     }
   } else if(touchedLast) {
     touchedLast=false;
     const uint32_t held=now-touchPressedAt;
+    if(swipeTriggered) {
+      Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
+      return;
+    }
     const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
     // Use calibrated screen coordinates so ONLY horizontal swipes navigate.
     // Before first calibration, accept a dominant long raw-axis swipe to
@@ -1153,7 +1176,8 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
+  Serial.printf("Touch: %s, IRQ GPIO36=%d, SPI=25/39/32/33\n",
+                touchReady ? "OK" : "unavailable",digitalRead(36));
   initBLE();
   loadMotionCalibration();
   {
