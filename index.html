@@ -56,7 +56,7 @@
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09.2 — diagnostyka odbioru pulsu</h2>
+    <h2>ArduRower 0.09.3 — diagnoza połączenia i odbiór pulsu</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice"><b>Nowość:</b> wspólny wykres tętna i prędkości z ostatnich 10 minut, duże wartości oraz szacowana moc w dolnym rzędzie. Tętno odbieramy przez BLE tylko gdy Garmin nadaje je w standardowej usłudze HR (0x180D). Brak transmisji nie blokuje FTMS. Dłuższe dotknięcie nagłówka w dashboardzie otwiera regulację skali wirtualnego dystansu; nowy model wykrywa dwie fazy ruchu koła. To model eksperymentalny, nie pomiar oryginalnego S4.</p><p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
   </section>
@@ -64,7 +64,7 @@
   <section class="card">
     <h2>Diagnostyka pulsu z Garmina</h2>
     <p>Jeśli ArduRower pokazuje <b>BLE OK</b>, oznacza to jedynie połączenie FTMS <b>z zegarka do komputerka</b>, a nie tętno w przeciwnym kierunku. W górnym pasku odczytaj status odbiornika: <code>HR RAM</code> — za mało pamięci, <code>HR SKAN</code> — szukanie, <code>HR BRAK</code> — nie znaleziono reklamowanej usługi BLE Heart Rate <code>0x180D</code>, <code>HR POL</code> — łączenie, <code>HR DANE</code> — połączenie bez pomiarów, <code>HR OK</code> — puls otrzymywany. Dla szczegółów monitor USB 115200.</p>
-    <p class="notice">Ustawienie zegarka „Transmituj podczas aktywności” nie potwierdza samo w sobie emisji usługi <code>0x180D</code> przez Bluetooth: część wersji korzysta z ANT+. Możesz sprawdzić emisję BLE aplikacją nRF Connect na telefonie. Nie zmieniaj działającego połączenia FTMS.</p>
+    <p class="notice"><b>0.09.3:</b> po znalezieniu nadajnika pokazujemy osobne fazy <code>HR POL</code> (łączenie), <code>HR GATT</code> (callback połączenia), <code>HR USL</code> (usługa 180D), <code>HR CHAR</code> (charakterystyka 2A37), <code>HR SUB</code> (subskrypcja). <code>HR ZAW</code> oznacza, że któryś etap trwa ponad 16 sekund. Zegarek jest zapamiętywany dopiero po otrzymaniu poprawnego BPM. Brak pierwszego BPM przez 15 s powoduje bezpieczne rozłączenie wyłącznie klienta HR i ponowienie skanowania. Jeśli starsza biblioteka BLE utknie na wywołaniu connect(), nie restartujemy całego urządzenia, aby zachować działające FTMS.</p><p class="notice">Ustawienie zegarka „Transmituj podczas aktywności” nie potwierdza samo w sobie emisji usługi <code>0x180D</code> przez Bluetooth: część wersji korzysta z ANT+. Możesz sprawdzić emisję BLE aplikacją nRF Connect na telefonie. Nie zmieniaj działającego połączenia FTMS.</p>
   </section>
   <section class="card">
     <h2>2. Podłącz płytkę i zainstaluj</h2>
@@ -88,7 +88,7 @@
       </esp-web-install-button>
     </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.2.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.2</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.3.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.3</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -107,7 +107,7 @@
   // Fail closed: an old manifest or cached BIN must NEVER be accepted as
   // the requested update. In particular GitHub Pages can briefly serve files
   // from different deployments while its CDN caches are being refreshed.
-  const EXPECTED_PREFIX = '0.09.2-hr-scan-';
+  const EXPECTED_PREFIX = '0.09.3-hr-link-';
   const MANIFEST_PATH = './manifests/st7789-gpio21.json';
   async function checkedJSON(url) {
     const response = await fetch(url, {cache: 'no-store'});
