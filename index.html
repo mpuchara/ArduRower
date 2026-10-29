@@ -56,20 +56,22 @@
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09.8 — Równoczesne FTMS i HR przez NimBLE; Ghost Race swipe</h2>
+    <h2>ArduRower 0.09.9 — Równoczesne FTMS i HR przez NimBLE; Ghost Race swipe</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice"><b>Nowość:</b> wspólny wykres tętna i prędkości z ostatnich 10 minut, duże wartości oraz szacowana moc w dolnym rzędzie. Tętno odbieramy przez BLE tylko gdy Garmin nadaje je w standardowej usłudze HR (0x180D). Brak transmisji nie blokuje FTMS. Dłuższe dotknięcie nagłówka w dashboardzie otwiera regulację skali wirtualnego dystansu; nowy model wykrywa dwie fazy ruchu koła. To model eksperymentalny, nie pomiar oryginalnego S4.</p><p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
   </section>
 
   <section class="card">
-    <h2>Odbiór pulsu i Ghost Race (0.09.8)</h2>
-    <p><b>0.09.8 — naprawa bootloopa:</b> poprawiono inicjalizację sterownika Bluetooth w Arduino-ESP32 2.x. Poprzedni firmware 0.09.6 zatrzymywał się na <code>esp_bt_controller_init()</code> z kodem 0x103. Ta wersja wymusza zachowanie pamięci BLE jeszcze podczas startu Arduino, zanim kod uruchomi NimBLE. Nie jest to reset ani kasowanie pamięci NVS. Test z fizycznym Garminem wciąż potrzebny.</p>
-    <p><b>Jednoczesne FTMS + HR:</b> wersja 0.09.8 przechodzi na jeden stos NimBLE-Arduino (zamiast Bluedroid). Nadajnik treningowy FTMS nadal pracuje co 1 sekundę, a klient HR może skanować i łączyć się z Garminem nawet przy aktywnym FTMS. Nie stosujemy blokady HR PAUZ, Wi-Fi, MQTT ani Home Assistant. Sterownik BLE sam harmonogramuje transmisję radiową, dlatego jest to rozwiązanie eksperymentalne wymagające próby z zegarkiem.</p>
+    <h2>Garmin: wspólny link FTMS/HR i dotykowy Ghost Race (0.09.9)</h2>
+    <p><b>Fundamentalna zmiana BLE:</b> standard Bluetooth dopuszcza tylko jedno połączenie radiowe (ACL) między tą samą parą adresów urządzeń LE. Garmin odbierający FTMS i jednocześnie udostępniający HR telefonowi QZ działa, bo telefon jest trzecim urządzeniem. Próby osobnego klienta HR na CYD dawały `connect RETURN FAIL after 1 ms` po nawiązaniu FTMS. W 0.09.9 ESP32 nie próbuje drugiego połączenia: wykorzystuje istniejący link, na którym Garmin jest centralą, a CYD serwerem FTMS. CYD próbuje odczytać na tym **samym linku** usługę GATT HR 0x180D oraz pomiary 0x2A37 z zegarka. Działa to tylko wtedy, gdy Garmin udostępnia usługę HR również przez już istniejące połączenie FTMS. Jeśli nie udostępnia, dane treningowe FTMS pozostają priorytetem, ale puls nie będzie dostępny bez innego rozwiązania sprzętowego.</p>
+    <p><b>Ghost Race — wyłącznie dotyk:</b> przywrócono obsługę przerwania XPT2046 na GPIO36, która działała w starszym oprogramowaniu i pozwala rozpoznać podniesienie palca. Swipe w lewo/prawo przełącza ekran główny i Ghost Race w obie strony. Dotknięcie wiersza 500, 1000 lub 2000 m uruchamia dokładnie ten wyścig; po wybraniu można swipem wrócić. Nie trzeba przycisku BOOT ani blokującej kalibracji.</p>
+    <p><b>0.09.9 — naprawa bootloopa:</b> poprawiono inicjalizację sterownika Bluetooth w Arduino-ESP32 2.x. Poprzedni firmware 0.09.6 zatrzymywał się na <code>esp_bt_controller_init()</code> z kodem 0x103. Ta wersja wymusza zachowanie pamięci BLE jeszcze podczas startu Arduino, zanim kod uruchomi NimBLE. Nie jest to reset ani kasowanie pamięci NVS. Test z fizycznym Garminem wciąż potrzebny.</p>
+    <p><b>Jednoczesne FTMS + HR:</b> wersja 0.09.9 przechodzi na jeden stos NimBLE-Arduino (zamiast Bluedroid). Nadajnik treningowy FTMS nadal pracuje co 1 sekundę, a klient HR może skanować i łączyć się z Garminem nawet przy aktywnym FTMS. Nie stosujemy blokady HR PAUZ, Wi-Fi, MQTT ani Home Assistant. Sterownik BLE sam harmonogramuje transmisję radiową, dlatego jest to rozwiązanie eksperymentalne wymagające próby z zegarkiem.</p>
     <p><b>Gest Ghost Race:</b> przesuń palec poziomo w lewo lub w prawo po ekranie. Gdy kalibracja dotyku przejęta z innego softu ma inną orientację, obsługujemy również dominujący ruch po surowej osi X/Y. W górnej części dashboardu pojawiła się wskazówka <code>&lt; GHOST &gt;</code>; dwukrotny BOOT jest tylko opcją zapasową.</p>
     <p><b>Nowy odbiornik:</b> NimBLE szuka usługi 0x180D, łączy się z nadajnikiem i subskrybuje pomiary 0x2A37. Wyświetla rzeczywiste BPM dopiero po odebraniu poprawnego pakietu. Logi pokazują skanowanie, łączenie, subskrypcję oraz liczbę pakietów przy aktywnym FTMS. Nie zmieniamy formatu wysyłanych danych Garmin Connect IQ.</p>
     <p><b>Ghost Race:</b> dotknij napisu ARDUROWER w lewym górnym rogu dashboardu albo naciśnij przycisk BOOT <b>dwa razy</b>. Działa to również bez kalibracji dotyku. W menu krótkie naciśnięcie BOOT wybiera dystans, przytrzymanie 1,5 s rozpoczyna przygotowanie wyścigu. Pierwszy pełny wyścig w nowym modelu tworzy rekord do ścigania; rekordy ze starszej skali dystansu nie są porównywalne.</p>
     <p>Jeśli ArduRower pokazuje <b>BLE OK</b>, oznacza to jedynie połączenie FTMS <b>z zegarka do komputerka</b>, a nie tętno w przeciwnym kierunku. W górnym pasku odczytaj status odbiornika: <code>HR RAM</code> — za mało pamięci, <code>HR SKAN</code> — szukanie, <code>HR BRAK</code> — nie znaleziono reklamowanej usługi BLE Heart Rate <code>0x180D</code>, <code>HR POL</code> — łączenie, <code>HR DANE</code> — połączenie bez pomiarów, <code>HR OK</code> — puls otrzymywany. Dla szczegółów monitor USB 115200.</p>
-    <p class="notice"><b>0.09.8:</b> odbiór HR i FTMS pozostają aktywne równolegle przez NimBLE. Ghost Race przełącza się podczas przesuwania palcem, bez oczekiwania na jego oderwanie. Monitor USB 115200 pokazuje <code>TOUCH: DOWN</code> i <code>GHOST: LIVE SWIPE</code> albo ich brak — to rozróżnia problem dotyku od problemu interfejsu.</p><p class="notice">Ustawienie zegarka „Transmituj podczas aktywności” nie potwierdza samo w sobie emisji usługi <code>0x180D</code> przez Bluetooth: część wersji korzysta z ANT+. Możesz sprawdzić emisję BLE aplikacją nRF Connect na telefonie. Nie zmieniaj działającego połączenia FTMS.</p>
+    <p class="notice"><b>0.09.9:</b> odbiór HR i FTMS pozostają aktywne równolegle przez NimBLE. Ghost Race przełącza się podczas przesuwania palcem, bez oczekiwania na jego oderwanie. Monitor USB 115200 pokazuje <code>TOUCH: DOWN</code> i <code>GHOST: LIVE SWIPE</code> albo ich brak — to rozróżnia problem dotyku od problemu interfejsu.</p><p class="notice">Ustawienie zegarka „Transmituj podczas aktywności” nie potwierdza samo w sobie emisji usługi <code>0x180D</code> przez Bluetooth: część wersji korzysta z ANT+. Możesz sprawdzić emisję BLE aplikacją nRF Connect na telefonie. Nie zmieniaj działającego połączenia FTMS.</p>
   </section>
   <section class="card">
     <h2>2. Podłącz płytkę i zainstaluj</h2>
@@ -93,7 +95,7 @@
       </esp-web-install-button>
     </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.8.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.8</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.9.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.9</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -112,7 +114,7 @@
   // Fail closed: an old manifest or cached BIN must NEVER be accepted as
   // the requested update. In particular GitHub Pages can briefly serve files
   // from different deployments while its CDN caches are being refreshed.
-  const EXPECTED_PREFIX = '0.09.8-ftms-ghost-';
+  const EXPECTED_PREFIX = '0.09.9-shared-gatt-touch-';
   const MANIFEST_PATH = './manifests/st7789-gpio21.json';
   async function checkedJSON(url) {
     const response = await fetch(url, {cache: 'no-store'});

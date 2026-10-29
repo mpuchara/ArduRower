@@ -27,7 +27,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.8";
+static constexpr const char *FIRMWARE_VERSION = "0.09.9";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -57,7 +57,7 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33); // Poll touch over SPI; IRQ GPIO36 may be unconnected
+XPT2046_Touchscreen touch(33,36); // working v0.08 IRQ-based touch release
 bool touchReady = false;
 bool touchedLast = false;
 bool swipeTriggered=false;
@@ -108,7 +108,7 @@ const char *hrStatus(HrState s) {
     case HrState::Subscribing: return "HR SUB";
     case HrState::Descriptor: return "HR CCCD";
     case HrState::Stalled: return "HR ZAW";
-    case HrState::Paused: return "HR PAUZ";
+    case HrState::Paused: return "HR FTMS";
     case HrState::Receiving: return "HR OK";
     case HrState::NoData: return "HR DANE";
     case HrState::Disconnected: return "HR ROZ";
@@ -145,7 +145,7 @@ void saveMotionCalibration() {
     p.end();
   }
 }
-#include "NimbleHr.h"
+#include "SharedLinkHr.h"
 
 NimBLEServer *pServer = nullptr;
 NimBLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
@@ -210,12 +210,18 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
                   (unsigned long)ftmsConnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
   }
+  void onConnect(NimBLEServer *,ble_gap_conn_desc *desc) override {
+    if(desc)onFtmsHandleReady(desc->conn_handle);
+  }
   void onDisconnect(NimBLEServer *) override {
     deviceConnected=false;
     ftmsDisconnectedAtMs=millis();
     Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
                   (unsigned long)ftmsDisconnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
+  }
+  void onDisconnect(NimBLEServer *,ble_gap_conn_desc *) override {
+    onFtmsHandleClosed();
   }
 };
 // Intentionally no-op: as in the existing firmware, FTMS Control Point procedures
@@ -228,6 +234,7 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
 void initBLE() {
   Serial.print(F("Init BLE:"));
   NimBLEDevice::init(BLE_SERVICE_NAME);
+  NimBLEDevice::setCustomGapHandler(onHrGapEvent);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   NimBLEService *pService =
@@ -606,18 +613,26 @@ void touchTap(int16_t rx,int16_t ry) {
   }
   if(ghost.phase==ghostrace::Phase::Finished ||
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
-  if(ghost.phase!=ghostrace::Phase::Idle)return;
   int16_t x,y;
-  if(!mappedTouch(rx,ry,x,y)) {
-    // Earlier versions launched a blocking three-point calibration wizard
-    // (up to 45 seconds) when any menu option was tapped without a stored
-    // mapping. That made Ghost Race look completely frozen and prevented
-    // swipe-back. Never auto-calibrate during a workout/menu.
-    selectedDistance=(selectedDistance+1)%3;
-    Serial.printf("GHOST: uncalibrated tap -> selected %u m; long BOOT starts\n",
-                  (unsigned)raceDistances[selectedDistance]);
+  const bool calibrated=mappedTouch(rx,ry,x,y);
+  if(!calibrated) {
+    // CYD horizontal view: with XPT2046 rotation=0, physical screen Y is
+    // the reversed raw X axis. Unlike v0.09.8, tapping a row must choose
+    // THAT row, not cycle all distances. Do not start a calibration wizard.
+    x=160;
+    y=constrain((int)((4095L-(long)rx)*240L/4095L),0,239);
+    Serial.printf("GHOST: uncalibrated tap raw=%d,%d screenY~%d\n",
+                  (int)rx,(int)ry,(int)y);
+  }
+  if(ghost.phase==ghostrace::Phase::Running ||
+     ghost.phase==ghostrace::Phase::Armed) {
+    if(y>=216) {
+      Serial.println("GHOST: touch MENU cancels active race");
+      openRaceMenu();
+    }
     return;
   }
+  if(ghost.phase!=ghostrace::Phase::Idle)return;
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
                 (int)x,(int)y,(unsigned)selectedDistance);
   // Three entire rows are large touch targets with no small hitbox.
@@ -656,6 +671,9 @@ void updateTouch(uint32_t now) {
     }
   } else if(touchedLast) {
     touchedLast=false;
+    Serial.printf("TOUCH: UP raw=%d,%d duration=%lu mode=%d\n",
+                  (int)rawEndX,(int)rawEndY,
+                  (unsigned long)(now-touchPressedAt),(int)activeMode);
     const uint32_t held=now-touchPressedAt;
     if(swipeTriggered) {
       Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
@@ -1021,7 +1039,7 @@ void paintRaceLayout(uint8_t screen) {
   tft.drawString("GHOST RACE",9,4,2);
   tft.drawString(FIRMWARE_VERSION,109,8,1);
   tft.setTextColor(labelColor,panelColor);
-  tft.drawRightString("SWIPE: DASHBOARD",313,6,1);
+  tft.drawRightString("SWIPE: WROC",313,6,1);
   if(screen==0) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("WYBIERZ DYSTANS",11,31,2);
@@ -1037,8 +1055,7 @@ void paintRaceLayout(uint8_t screen) {
       tft.drawRightString(pb,297,yy+17,2);
     }
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString(touchCalibrated?"DOTKNIJ DYSTANS / SWIPE: WROC":
-                   "TAP/BOOT: WYBOR, BOOT 1.5s START",10,230,1);
+    tft.drawString("DOTKNIJ 500/1000/2000, SWIPE: WROC",10,230,1);
   } else if(screen==1) {
     tft.setTextColor(whiteColor,backgroundColor);
     tft.drawString("TY",12,33,2);
@@ -1047,7 +1064,7 @@ void paintRaceLayout(uint8_t screen) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("PULS",15,174,1);
     tft.drawString("km/h",174,174,1);
-    tft.drawString("BOOT 1.5s: anuluj",9,228,1);
+    tft.drawString("DOTKNIJ: MENU / SWIPE: WROC",9,228,1);
     tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
   } else {
     tft.setTextColor(ghost.personalBest && !recordSaveFailed ?
@@ -1205,7 +1222,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.8 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.9 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1215,7 +1232,7 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
+  Serial.printf("Touch: %s, IRQ GPIO36 restored, CS33 SPI=25/39/32/33\n",
                 touchReady ? "OK" : "unavailable");
   // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
   // retain BLE memory. Both hooks are strong overrides defined above.
@@ -1226,15 +1243,8 @@ void setup() {
                 controllerAlreadyStarted?1:0,controllerStatus);
   initBLE();
   loadMotionCalibration();
-  {
-    Preferences pref;
-    if(pref.begin("rower-hr",true)) {
-      hrPreferredAddress=pref.getString("addr","");
-      pref.end();
-    }
-    Serial.printf("HR: preferred verified source: %s\n",
-                  hrPreferredAddress.length()?hrPreferredAddress.c_str():"(none)");
-  }
+  // No BLE central pairing/discovery in this firmware: Garmin joins FTMS,
+  // and we use exactly the same ACL for remote HR GATT discovery.
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
@@ -1250,11 +1260,11 @@ void setup() {
   // Optional second BLE role. If the full BLE stack used most heap,
   // preserve the working FTMS stream instead of risking a crash.
   const uint32_t beforeHr=ESP.getFreeHeap();
-  if(beforeHr>50000)
-    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",6144,
+  if(beforeHr>40000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",4096,
                                          nullptr,1,nullptr,0)==pdPASS;
   if(!hrTaskCreated)
-    hrState=(beforeHr<=50000)?HrState::LowMemory:HrState::InitFailed;
+    hrState=(beforeHr<=40000)?HrState::LowMemory:HrState::InitFailed;
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));
