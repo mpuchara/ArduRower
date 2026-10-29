@@ -896,6 +896,9 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
   const int hrMin=60,hrMax=190; // 60..190 BPM left scale
   const uint16_t speedInk=ghostTraining?(speedColor>>1)&0x7BEF:speedColor;
   const uint16_t hrInk=ghostTraining?(heartColor>>1)&0x7BEF:heartColor;
+  const uint16_t ghostInk=(powerColor>>1)&0x7BEF;
+  const bool ghostCurve=ghostTraining && ghost.hasBest && ghost.phase==ghostrace::Phase::Running;
+  const uint32_t ghostElapsed=ghostCurve?ghost.elapsed(millis()):0;
   for(int left=0;left<width;left+=BUFFER_W) {
     const int part=min((int)BUFFER_W,width-left);
     if(scratchReady) {
@@ -908,7 +911,8 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
         tft.drawFastHLine(x+left,y+i*(height-1)/2,part,gridColor);
     }
     int previousX=0,previousHrY=0,previousSpeedY=0;
-    bool prevHrValid=false,prevSpeedValid=false;
+    bool prevHrValid=false,prevSpeedValid=false,prevGhostValid=false;
+    int previousGhostY=0;
     for(uint16_t i=0;i<trendCount;++i) {
       const TrendPoint &sample=trendAt(i);
       const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
