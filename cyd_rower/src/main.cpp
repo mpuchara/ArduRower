@@ -64,6 +64,7 @@ cydmotion::Engine motion;
 volatile uint16_t receivedHr=0;
 volatile uint32_t receivedHrAt=0;
 volatile bool hrConnected=false;
+volatile bool deviceConnected=false;
 bool hrTaskCreated=false;
 // Independent HR link status. "BLE OK" refers ONLY to Garmin's working
 // FTMS connection, not to the reverse HR connection.
@@ -368,7 +369,6 @@ BLEServer *pServer = nullptr;
 BLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
 BLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
 BLECharacteristic *pBatCharacteristic = nullptr;
-volatile bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 portMUX_TYPE pulseMux = portMUX_INITIALIZER_UNLOCKED;
