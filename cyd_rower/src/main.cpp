@@ -942,8 +942,13 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
           else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,heartColor);
         }
       }
-      previousX=xx;previousHrY=hrY;previousSpeedY=spY;
-      prevHrValid=hrValid;prevSpeedValid=true;
+      if(i>0 && ghostValid && prevGhostValid && (i%2)==0 &&
+         xx>=left-2 && previousX<left+part) {
+        if(scratchReady)scratch.drawLine(previousX-left,previousGhostY,xx-left,ghostY,ghostInk);
+        else tft.drawLine(x+previousX,y+previousGhostY,x+xx,y+ghostY,ghostInk);
+      }
+      previousX=xx;previousHrY=hrY;previousSpeedY=spY;previousGhostY=ghostY;
+      prevHrValid=hrValid;prevSpeedValid=true;prevGhostValid=ghostValid;
     }
     if(scratchReady) scratch.pushSprite(x+left,y,0,0,part,height);
   }
