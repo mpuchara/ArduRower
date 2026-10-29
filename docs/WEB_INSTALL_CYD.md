@@ -52,3 +52,12 @@ Poprawiony firmware nie czyści całego ekranu co pół sekundy. Zachowuje nieru
 Nowy tryb zawiera wybór wyścigu 500, 1000 lub 2000 metrów i zapis najlepszego przejazdu. Przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów; ponowny swipe wraca do dotychczasowego dashboardu. Jeżeli ekran poprosi o kalibrację, dotknij po kolei trzech żółtych znaków +. Dotyk wybiera dystans; BOOT krótko wybiera kolejną pozycję, przytrzymanie >1,5 s uruchamia wyścig. Start czasu następuje na pierwszym impulsie kontaktronu. Zegar wyścigu nie zatrzymuje się przy odpoczynku. Wartości są estymowane jak dotychczas.
 
 Na ekranie wyścigu dwie belki pokazują dystans aktualny i zapisany, przewagę w metrach i sekundach oraz moc/prędkość z miniwykresami. Rekord zapisuje się tylko po ukończeniu dystansu szybciej od poprzedniego wyniku. Podczas aktualizacji **nie zaznaczaj pełnego erase flash**, aby zachować rekordy Ghost Race w NVS. Interfejs BLE FTMS nie jest modyfikowany.
+
+
+## Instalacja v0.09-motion-hr
+
+Na stronie instalatora sprawdź oznaczenie `0.09-motion-hr` przed aktualizacją. Repozytorium publikuje cztery obrazy na oddzielnych offsetach (brak nadpisywania NVS pomiędzy `0x9000` a `0xDFFF`). Przy aktualizacji nie zaznaczaj erase flash.
+
+Wersja 0.09 dodaje eksperymentalną detekcję faz pociągnięcie/powrót z jednego kontaktronu, model prędkości z wygaszaniem, niezależną skalę zapisaną w NVS, większe pola i wspólny 10-minutowy wykres pulsu/prędkości oraz opcjonalny odbiornik tętna BLE (`0x180D`). Jeżeli Garmin nie wysyła HR lub moduł nie zdoła połączyć się jako klient BLE, prędkość, licznik i FTMS nadal pracują, a puls ma wartość `--`. Jednoczesne połączenia z zegarkiem trzeba zweryfikować doświadczalnie.
+
+Przed pełnym treningiem wykonaj 30 spokojnych pociągnięć i sprawdź liczbę ruchów w trybie diagnostycznym: zmiana fazy na podstawie zwolnień NIE jest bezpośrednim pomiarem kierunku. Nie traktuj nowego dystansu jako skalibrowanego względem WaterRower S4.
