@@ -32,6 +32,8 @@ jobs:
         run: python3 tests/cyd_installer_integrity_test.py
       - name: Assert HR receiver scanning and diagnostics
         run: python3 tests/cyd_hr_diagnostics_test.py
+      - name: Assert Ghost Race navigation and HR CCCD status flow
+        run: python3 tests/cyd_ghost_navigation_test.py
       - name: Test ghost racing, record integrity and timing
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
