@@ -174,7 +174,7 @@ HistorySample history[HISTORY_LENGTH] = {};
 uint8_t historyHead = 0;
 uint8_t historyCount = 0;
 uint16_t backgroundColor, panelColor, faintColor, gridColor;
-uint16_t powerColor, speedColor, labelColor, whiteColor;
+uint16_t powerColor, speedColor, labelColor, whiteColor, heartColor;
 uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
 bool pageRendered = false, displayedDetails = false;
 // Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
@@ -535,7 +535,7 @@ void touchTap(int16_t rx,int16_t ry) {
   if(calibrationScreen) {
     int16_t x,y;
     if(!mappedTouch(rx,ry,x,y)) return;
-    if(y>67 && y<157) {
+    if(y>105 && y<160) {
       if(x<158) speedCalibration=fmaxf(0.3f,speedCalibration-0.05f);
       else speedCalibration=fminf(1.5f,speedCalibration+0.05f);
       motion.setCalibration(speedCalibration);
@@ -638,7 +638,7 @@ const TrendPoint &trendAt(uint16_t i) {
   return trends[(trendHead+TREND_SAMPLES-trendCount+i)%TREND_SAMPLES];
 }
 void recordHistory() {
-  history[historyHead] = {metrics.equivalentPower(), metrics.speed * 3.6f};
+  history[historyHead] = {(float)liveHr(millis()), metrics.speed * 3.6f};
   historyHead = (historyHead + 1) % HISTORY_LENGTH;
   if (historyCount < HISTORY_LENGTH) ++historyCount;
   ++historyRevision;
@@ -652,7 +652,7 @@ float sampleValue(uint8_t index, bool power) {
   return power ? s.power : s.speedKmh;
 }
 float historyMax(bool power) {
-  float result = power ? 10.0f : 2.0f;
+  float result = power ? 150.0f : 2.0f;
   for (uint8_t i = 0; i < historyCount; ++i)
     result = max(result, sampleValue(i, power));
   return result * 1.12f;
@@ -754,80 +754,147 @@ void plot(int x, int y, int w, int h, bool power) {
     if (scratchReady) scratch.pushSprite(x+left,y,0,0,part,h);
   }
 }
-void pageLayout() {
-  tft.fillScreen(backgroundColor);  // only at startup or on explicit view change
-  tft.fillRect(0,0,320,25,panelColor);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(whiteColor,panelColor);
-  tft.drawString("ARDUROWER",8,4,2);
-  if (!detailPage) {
-    for (int i=0;i<2;i++) {
-      const int x=i?163:8, y=32, w=149, h=123;
-      tft.fillRoundRect(x,y,w,h,6,panelColor);
-      tft.drawRoundRect(x,y,w,h,6,gridColor);
-      tft.setTextColor(labelColor,panelColor);
-      tft.drawString(i?"PREDKOSC":"MOC SZACOWANA",x+9,y+6,2);
-      tft.drawString(i?"km/h / 120 s":"W / 120 s",x+9,y+62,2);
+// Two independent units on one long graph, with a fixed mapping to avoid
+// rescaling mid-session. Heartbeat samples that are stale/absent break the HR
+// line; they must never be drawn as zero or mistaken for a real measurement.
+void renderSharedTrend(int x,int y,int width,int height) {
+  const int16_t speedMaxTenth=220; // 22.0 km/h right scale
+  const int hrMin=60,hrMax=190; // 60..190 BPM left scale
+  for(int left=0;left<width;left+=BUFFER_W) {
+    const int part=min((int)BUFFER_W,width-left);
+    if(scratchReady) {
+      scratch.fillSprite(panelColor);
+      for(int i=0;i<3;i++)
+        scratch.drawFastHLine(0,i*(height-1)/2,part,gridColor);
+    }else{
+      tft.fillRect(x+left,y,part,height,panelColor);
+      for(int i=0;i<3;i++)
+        tft.drawFastHLine(x+left,y+i*(height-1)/2,part,gridColor);
     }
-    const int pos[3]={8,115,225};
-    const char* names[6]={"CZAS","DYSTANS","SPM~","TEMPO / 500m","SR. ~W","RUCHY~"};
-    tft.setTextColor(labelColor,backgroundColor);
-    for (int i=0;i<6;i++) tft.drawString(names[i],pos[i%3],i<3?156:198,2);
-  } else {
-    tft.setTextColor(powerColor,backgroundColor);
-    tft.drawString("MOC ~W",8,29,2);
-    tft.setTextColor(speedColor,backgroundColor);
-    tft.drawString("PREDKOSC km/h",8,119,2);
-    tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("OSTATNIE 120 s",8,207,2);
-    tft.drawRightString("Dotknij, by wrocic",311,207,2);
-    tft.drawString("BOOT: krotko = widok; >1.5 s = reset",8,225,1);
+    int previousX=0,previousHrY=0,previousSpeedY=0;
+    bool prevHrValid=false,prevSpeedValid=false;
+    for(uint16_t i=0;i<trendCount;++i) {
+      const TrendPoint &sample=trendAt(i);
+      const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
+      const int hrY=height-1-(int)((constrain((int)sample.heartBpm,hrMin,hrMax)-hrMin)*
+                                  (height-1)/(hrMax-hrMin));
+      const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
+                                (int)speedMaxTenth))*(height-1)/speedMaxTenth);
+      bool hrValid=sample.heartBpm>=hrMin;
+      if(i>0 && xx>=left-2 && previousX<left+part) {
+        if(prevSpeedValid) {
+          if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedColor);
+          else tft.drawLine(x+previousX,y+previousSpeedY,x+xx,y+spY,speedColor);
+        }
+        if(hrValid && prevHrValid) {
+          if(scratchReady)scratch.drawLine(previousX-left,previousHrY,xx-left,hrY,heartColor);
+          else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,heartColor);
+        }
+      }
+      previousX=xx;previousHrY=hrY;previousSpeedY=spY;
+      prevHrValid=hrValid;prevSpeedValid=true;
+    }
+    if(scratchReady) scratch.pushSprite(x+left,y,0,0,part,height);
   }
-  pageRendered=true; displayedDetails=detailPage;
+}
+void calibrationPage() {
+  if(lastCalibrationPaint!=255)return;
+  tft.fillScreen(backgroundColor);
+  tft.setTextColor(whiteColor,backgroundColor);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("KALIBRACJA DYSTANSU",9,6,2);
+  tft.setTextColor(labelColor,backgroundColor);
+  tft.drawString("Skala wirtualna (nie S4)",9,36,2);
+  tft.setTextColor(whiteColor,backgroundColor);
+  tft.drawCentreString(String(speedCalibration,2)+" x",160,61,4);
+  tft.fillRoundRect(10,105,144,52,7,panelColor);
+  tft.fillRoundRect(166,105,144,52,7,panelColor);
+  tft.setTextColor(heartColor,panelColor);
+  tft.drawCentreString("-0.05",82,118,4);
+  tft.setTextColor(speedColor,panelColor);
+  tft.drawCentreString("+0.05",238,118,4);
+  tft.fillRoundRect(10,180,300,51,7,panelColor);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawCentreString("ZAPISZ I WROC",160,192,2);
+  lastCalibrationPaint=0;
+}
+void pageLayout() {
+  tft.fillScreen(backgroundColor); // only on view change
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(0,0,320,24,panelColor);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawString("ARDUROWER",7,3,2);
+  if(!detailPage){
+    tft.setTextColor(heartColor,backgroundColor);
+    tft.drawString("PULS",8,27,2);
+    tft.setTextColor(speedColor,backgroundColor);
+    tft.drawString("PREDKOSC",165,27,2);
+    tft.fillRoundRect(7,87,306,62,4,panelColor);
+    tft.setTextColor(labelColor,backgroundColor);
+    const int xx[3]={8,115,224};
+    const char *names[6]={"CZAS","DYSTANS","SPM","TEMPO /500m","MOC ~W","RUCHY"};
+    for(int i=0;i<6;++i)
+      tft.drawString(names[i],xx[i%3],i<3?156:199,1);
+  }else{
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString("ANALIZA CYKLU",9,28,2);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("FAZA",9,60,2);
+    tft.drawString("IMPULSY",178,60,2);
+    tft.drawString("RUCHY",9,114,2);
+    tft.drawString("ZMIANY KIERUNKU ~",178,114,2);
+    tft.fillRoundRect(8,176,304,43,4,panelColor);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("DOTKNIJ, ABY WROCIC",12,224,1);
+  }
+  pageRendered=true;displayedDetails=detailPage;
   resetRenderCache();
+  trendDrawn=UINT32_MAX;
 }
 void updateUI() {
-  if (activeMode == Mode::Race) { renderRaceUI(); return; }
-  if (!pageRendered || detailPage != displayedDetails) pageLayout();
-  textPatch(0,155,3,85,20,deviceConnected?"BLE OK":"BLE ...",
+  if(activeMode==Mode::Race) {renderRaceUI();return;}
+  if(calibrationScreen) {calibrationPage();return;}
+  if(!pageRendered || detailPage!=displayedDetails)pageLayout();
+  textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
-  textPatch(1,244,3,76,20,metrics.paused?"PAUZA":formatTime((uint32_t)metrics.seconds()),
-            metrics.paused?powerColor:labelColor,panelColor,2,true);
-  if (!detailPage) {
-    cardValue(2,8,true);
-    cardValue(3,163,false);
-    textPatch(4,8,172,99,26,formatTime((uint32_t)metrics.seconds()),
+  textPatch(1,250,2,70,19,liveHr(millis())?"HR OK":"HR --",
+            liveHr(millis())?heartColor:labelColor,panelColor,2,true);
+  if(!detailPage){
+    const uint16_t bpm=liveHr(millis());
+    textPatch(2,8,49,145,34,bpm?String(bpm)+" BPM":"-- BPM",
+              heartColor,backgroundColor,4);
+    textPatch(3,164,49,149,34,String(metrics.speed*3.6f,1)+" km/h",
+              speedColor,backgroundColor,4);
+    textPatch(4,8,166,102,26,formatTime((uint32_t)metrics.seconds()),
               whiteColor,backgroundColor,4);
-    textPatch(5,115,172,105,26,String((uint32_t)metrics.distance())+" m",
+    textPatch(5,115,166,104,26,String((uint32_t)roundf(metrics.distance()))+" m",
               whiteColor,backgroundColor,4);
-    textPatch(6,225,172,92,26,String((uint32_t)roundf(metrics.strokeRate)),
+    textPatch(6,224,166,95,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
-    textPatch(7,8,214,99,26,formatPace(metrics.pace()),
+    textPatch(7,8,207,102,26,formatPace(metrics.pace()),
               whiteColor,backgroundColor,4);
-    textPatch(8,115,214,105,26,String((uint32_t)roundf(metrics.averageEquivalentPower())),
+    textPatch(8,115,207,104,26,
+              "~"+String((int)roundf(metrics.equivalentPower())),
               whiteColor,backgroundColor,4);
-    textPatch(9,225,214,92,26,String(metrics.strokes),
+    textPatch(9,224,207,95,26,String(metrics.strokes),
               whiteColor,backgroundColor,4);
-  } else {
-    textPatch(10,176,29,143,18,"MAX "+String((int)roundf(historyMax(true)))+" W",
-              labelColor,backgroundColor,2,true);
-    textPatch(11,165,119,154,18,"MAX "+String(historyMax(false),1)+" km/h",
-              labelColor,backgroundColor,2,true);
-  }
-  if (plottedRevision != historyRevision) {
-    if (detailPage) {
-      plot(9,53,302,54,true);
-      plot(9,143,302,54,false);
-    } else {
-      plot(18,113,129,32,true);
-      plot(173,113,129,32,false);
+    if(trendDrawn!=trendRevision) {
+      renderSharedTrend(9,91,302,54);
+      trendDrawn=trendRevision;
     }
-    plottedRevision=historyRevision;
-  }
-  if (!detailPage && droppedPulses) {
-    tft.fillRect(290,225,23,14,TFT_RED);
-    tft.setTextColor(TFT_WHITE,TFT_RED);
-    tft.drawString("!",298,224,2);
+  }else{
+    String phaseName=motion.phase==cydmotion::Phase::Drive?"NAPED" :
+      motion.phase==cydmotion::Phase::Return?"POWROT":"OCZEKIWANIE";
+    textPatch(10,9,82,159,26,phaseName,heartColor,backgroundColor,4);
+    textPatch(11,178,82,138,26,String(motion.pulses),
+              whiteColor,backgroundColor,4);
+    textPatch(21,9,138,155,26,String(motion.strokes),
+              whiteColor,backgroundColor,4);
+    textPatch(22,178,138,138,26,String(motion.transitions),
+              whiteColor,backgroundColor,4);
+    textPatch(23,13,183,288,30,
+              "Skala "+String(speedCalibration,2)+"   Faza z impulsow",
+              labelColor,panelColor,2);
   }
 }
 // Ghost UI: page changes perform one clear; every live field is replaced by
@@ -876,7 +943,7 @@ void paintRaceLayout(uint8_t screen) {
     tft.setTextColor(speedColor,backgroundColor);
     tft.drawString("DUCH",12,84,2);
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("MOC ~W",15,174,1);
+    tft.drawString("PULS",15,174,1);
     tft.drawString("km/h",174,174,1);
     tft.drawString("BOOT 1.5s: anuluj",9,228,1);
     tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
@@ -982,8 +1049,8 @@ void renderRaceUI() {
               leadSeconds>=0?speedColor:powerColor,backgroundColor,1,true);
   }
   textPatch(16,12,149,145,25,
-            "~"+String((int)roundf(metrics.equivalentPower()))+" W",
-            powerColor,backgroundColor,4);
+            liveHr(millis())?String(liveHr(millis()))+" BPM":"-- BPM",
+            heartColor,backgroundColor,4);
   textPatch(17,165,149,148,25,
             String(metrics.speed*3.6f,1)+" km/h",
             speedColor,backgroundColor,4);
@@ -993,9 +1060,8 @@ void renderRaceUI() {
             labelColor,panelColor,2,true);
   paintProgress(56,ghost.meters,powerColor);
   paintProgress(106,ghost.ghostMeters(now),speedColor);
-  if(plottedRevision!=historyRevision) {
-    plot(15,189,132,28,true);
-    plot(173,189,132,28,false);
+  if(trendDrawn!=trendRevision) {
+    renderSharedTrend(15,189,290,28);
     plottedRevision=historyRevision;
   }
 }
@@ -1017,6 +1083,7 @@ void initDisplay() {
   gridColor = tft.color565(34, 48, 62);
   powerColor = tft.color565(255, 184, 64);
   speedColor = tft.color565(64, 215, 196);
+  heartColor = tft.color565(250, 91, 108);
   labelColor = tft.color565(145, 160, 175);
   whiteColor = TFT_WHITE;
   tft.fillScreen(backgroundColor);
