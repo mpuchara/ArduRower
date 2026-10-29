@@ -23,6 +23,8 @@ assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
 assert '#include "esp32-hal-bt.h"' in src
 assert 'const bool controllerAlreadyStarted=btStarted();' in src, "Force link Arduino BT retention hook"
 assert 'esp_bt_controller_get_status()' in src, "Must expose BT controller state diagnostic"
+assert 'extern "C" bool btInUse(void) { return true; }' in src
+assert 'extern "C" bool bleInUse(void) { return true; }' in src
 
 assert 'const EXPECTED_PREFIX = \'0.09.7-nimble-boot-\'' in page
 assert 'HR PAUZ' not in hr, "Never block HR because Garmin is receiving FTMS"
