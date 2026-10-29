@@ -193,9 +193,10 @@ class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
       hrCandidate=new BLEAdvertisedDevice(device);
       hrCandidateScore=score;
     }
-    Serial.printf("HR: candidate addr=%s name=%s RSSI=%d preferred=%s\n",
-                  addr.c_str(),name.length()?name.c_str():"(no name)",
-                  device.getRSSI(),known?"yes":"no");
+    Serial.printf("HR: candidate addr=%s type=%d name=%s RSSI=%d preferred=%s FTMS=%s\n",
+                  addr.c_str(),(int)device.getAddressType(),
+                  name.length()?name.c_str():"(no name)",device.getRSSI(),
+                  known?"yes":"no",deviceConnected?"connected":"not connected");
   }
 };
 
