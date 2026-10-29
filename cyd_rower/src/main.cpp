@@ -921,6 +921,17 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
       const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
                                 (int)speedMaxTenth))*(height-1)/speedMaxTenth);
       bool hrValid=sample.heartBpm>=hrMin;
+      const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
+      const bool ghostValid=ghostCurve && ghostElapsed>=age;
+      int ghostY=height-1;
+      if(ghostValid) {
+        const uint32_t t=ghostElapsed-age,start=t>2000?t-2000:0;
+        const float dt=(t-start)*0.001f;
+        const float meters=ghostrace::interpolate(ghost.best,t)-
+                           ghostrace::interpolate(ghost.best,start);
+        const float kmh=dt>0?constrain(meters*3.6f/dt,0.0f,22.0f):0;
+        ghostY=height-1-(int)(kmh*10.0f*(height-1)/speedMaxTenth);
+      }
       if(i>0 && xx>=left-2 && previousX<left+part) {
         if(prevSpeedValid) {
           if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedInk);
