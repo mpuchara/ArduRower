@@ -138,8 +138,10 @@ void hrWorker(void *) {
         BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
         BLERemoteCharacteristic *characteristic=service ?
           service->getCharacteristic(BLEUUID((uint16_t)0x2A37)) : nullptr;
-        if(characteristic && characteristic->canNotify())
-          subscribed=characteristic->registerForNotify(hrNotify);
+        if(characteristic && characteristic->canNotify()) {
+          characteristic->registerForNotify(hrNotify);
+          subscribed=true;
+        }
         hrConnected=subscribed;
         if(subscribed)
           while(client->isConnected())vTaskDelay(pdMS_TO_TICKS(1500));
