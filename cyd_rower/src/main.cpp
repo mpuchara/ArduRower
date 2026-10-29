@@ -892,7 +892,7 @@ void updateUI() {
               whiteColor,backgroundColor,4);
     textPatch(22,178,138,138,26,String(motion.transitions),
               whiteColor,backgroundColor,4);
-    textPatch(23,13,183,288,30,
+    textPatch(23,13,183,150,30,
               "Skala "+String(speedCalibration,2)+"   Faza z impulsow",
               labelColor,panelColor,2);
   }
