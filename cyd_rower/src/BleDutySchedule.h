@@ -37,6 +37,10 @@ struct DutySchedule {
     if(attempts && (uint32_t)(now-lastAttemptMs)<kRetryMs)return false;
     if(collisionGuard &&
        (uint32_t)(now-lastDropMs)<kGuardAfterDropMs)return false;
+    // Once rowing has begun, never initiate another GATT discovery against
+    // an already-connected Garmin. This protects FTMS even after a pause.
+    // A previously established HR link can still receive notifications.
+    if(ftmsUp && sawMotion)return false;
     if(ftmsUp && ((uint32_t)(now-ftmsSinceMs)<kStableFtmsMs ||
                   oneAttemptWithFtms))return false;
     return true;
