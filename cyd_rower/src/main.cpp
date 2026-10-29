@@ -20,7 +20,7 @@
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.2";
+static constexpr const char *FIRMWARE_VERSION = "0.09.3";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -68,19 +68,28 @@ bool hrTaskCreated=false;
 // Independent HR link status. "BLE OK" refers ONLY to Garmin's working
 // FTMS connection, not to the reverse HR connection.
 enum class HrState : uint8_t {
-  Starting, Scan, NotFound, Connecting, Receiving, NoData,
-  Disconnected, LowMemory, InitFailed
+  Starting, Scan, NotFound, Connecting, GattConnected,
+  Service, Characteristic, Subscribing, Receiving, NoData,
+  Disconnected, LowMemory, InitFailed, Stalled
 };
 volatile HrState hrState=HrState::Starting;
 volatile uint16_t hrAdvertisers=0;
 volatile uint16_t hrMatches=0;
 volatile uint32_t lastHrScanMs=0;
+volatile uint32_t hrStageSinceMs=0;
+volatile uint32_t hrNotifyPackets=0;
+volatile HrState hrLastReportedStall=HrState::Starting;
 const char *hrStatus(HrState s) {
   switch (s) {
     case HrState::Starting: return "HR INIT";
     case HrState::Scan: return "HR SKAN";
     case HrState::NotFound: return "HR BRAK";
     case HrState::Connecting: return "HR POL";
+    case HrState::GattConnected: return "HR GATT";
+    case HrState::Service: return "HR USL";
+    case HrState::Characteristic: return "HR CHAR";
+    case HrState::Subscribing: return "HR SUB";
+    case HrState::Stalled: return "HR ZAW";
     case HrState::Receiving: return "HR OK";
     case HrState::NoData: return "HR DANE";
     case HrState::Disconnected: return "HR ROZ";
@@ -117,112 +126,241 @@ void saveMotionCalibration() {
     p.end();
   }
 }
-// Heart rate is optional. An independent BLE client attempts to subscribe to
-// a broadcasting Garmin's standard Heart Rate Measurement (0x180D/0x2A37).
-// Any failure leaves the FTMS peripheral untouched and renders "-- BPM".
+// Optional reverse BLE link (Garmin/strap => CYD): leave FTMS peripheral
+// and its already-working Connect IQ notifications completely unchanged.
+// 2.0.x ESP32 BLEClient::connect() is a BLOCKING API. There is no supported
+// per-call timeout. Report stalled stages WITHOUT deleting the BLE task,
+// reinitializing BLE, or disconnecting the physical Garmin BLE link (which
+// could take down the FTMS subscription as well).
 static BLEAdvertisedDevice *hrCandidate=nullptr;
+static int hrCandidateScore=-100000;
+static String hrPreferredAddress;
+static String hrAttemptAddress;
+static bool hrPreferredSaved=false;
+static constexpr uint32_t HR_STALLED_AFTER_MS=16000;
+static constexpr uint32_t HR_FIRST_NOTIFICATION_MS=15000;
+static constexpr uint8_t HR_MAX_FAILED_CONNECTS=12;
+
+void setHrState(HrState state,const char* description) {
+  hrState=state;
+  hrStageSinceMs=millis();
+  hrLastReportedStall=HrState::Starting;
+  Serial.printf("HR: [%lu] %s (heap %u)\n",
+                (unsigned long)hrStageSinceMs,description,
+                (unsigned)ESP.getFreeHeap());
+}
+
+bool isHrBlockingStage(HrState state) {
+  return state==HrState::Connecting || state==HrState::GattConnected ||
+         state==HrState::Service || state==HrState::Characteristic ||
+         state==HrState::Subscribing;
+}
+HrState displayedHrState(uint32_t nowMs) {
+  HrState state=hrState;
+  if(isHrBlockingStage(state) && hrStageSinceMs &&
+     (uint32_t)(nowMs-hrStageSinceMs)>HR_STALLED_AFTER_MS)
+    return HrState::Stalled;
+  return state;
+}
+// Called from the normal dashboard loop, even when hrWorker is stuck
+// inside Bluedroid. This is diagnostic only. Cancelling the connection
+// by MAC at GAP level can also sever the Garmin's working FTMS link.
+void checkHrStall(uint32_t nowMs) {
+  if(displayedHrState(nowMs)==HrState::Stalled &&
+     hrLastReportedStall!=hrState) {
+    hrLastReportedStall=hrState;
+    Serial.printf("HR: STALLED at %s for %lu ms; FTMS left running\n",
+                  hrStatus(hrState),(unsigned long)(nowMs-hrStageSinceMs));
+  }
+}
 class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
  public:
   void onResult(BLEAdvertisedDevice device) override {
     ++hrAdvertisers;
-    if(!hrCandidate && device.haveServiceUUID() &&
-       device.isAdvertisingService(BLEUUID((uint16_t)0x180D))) {
-      ++hrMatches;
+    if(!device.haveServiceUUID() ||
+       !device.isAdvertisingService(BLEUUID((uint16_t)0x180D)))return;
+    ++hrMatches;
+    String addr(device.getAddress().toString().c_str());
+    const bool known=(hrPreferredAddress.length()>0 &&
+                      addr.equalsIgnoreCase(hrPreferredAddress));
+    const String name=device.haveName() ?
+                      String(device.getName().c_str()) : String("");
+    // Favor the last SOURCE OF VALID HEART-RATE NOTIFICATIONS, not the
+    // first advertiser. Fall back to strongest RSSI if its address rotates.
+    const int score=(known?1000:0)+device.getRSSI();
+    if(score>hrCandidateScore) {
+      delete hrCandidate;
       hrCandidate=new BLEAdvertisedDevice(device);
-      Serial.printf("HR: BLE peripheral with 0x180D: %s, RSSI %d\n",
-                    device.haveName()?device.getName().c_str():"(no name)",
-                    (int)device.getRSSI());
+      hrCandidateScore=score;
     }
+    Serial.printf("HR: candidate addr=%s name=%s RSSI=%d preferred=%s\n",
+                  addr.c_str(),name.length()?name.c_str():"(no name)",
+                  device.getRSSI(),known?"yes":"no");
   }
 };
-static void hrNotify(BLERemoteCharacteristic*,uint8_t *buf,size_t size,bool) {
+
+static void hrNotify(BLERemoteCharacteristic*,uint8_t* bytes,size_t size,bool) {
   if(size<2)return;
-  const bool sixteen=buf[0]&1;
-  if(sixteen && size<3)return;
-  const uint16_t hr=sixteen ? (uint16_t)(buf[1]|(buf[2]<<8)) : buf[1];
-  if(hr>=35 && hr<=240) {
-    receivedHr=hr;
+  const bool wide=(bytes[0]&0x01)!=0;
+  if(wide && size<3)return;
+  const uint16_t bpm=wide ?
+        (uint16_t)(bytes[1]|(uint16_t(bytes[2])<<8)) : bytes[1];
+  if(bpm>=35 && bpm<=240) {
+    receivedHr=bpm;
     receivedHrAt=millis();
+    ++hrNotifyPackets;
     hrState=HrState::Receiving;
   }
 }
-void hrWorker(void *) {
-  BLEScan *scanner=BLEDevice::getScan();
+class HrClientCallbacks : public BLEClientCallbacks {
+ public:
+  void onConnect(BLEClient*) override {
+    setHrState(HrState::GattConnected,"GATT connected callback");
+  }
+  void onDisconnect(BLEClient*) override {
+    hrConnected=false;
+    setHrState(HrState::Disconnected,"GATT disconnected callback");
+  }
+};
+static HrClientCallbacks hrClientCallbacks;
+
+void hrWorker(void*) {
+  BLEScan* scanner=BLEDevice::getScan();
   if(!scanner) {
-    hrState=HrState::InitFailed;
-    Serial.println("HR: BLE scanner unavailable");
-    vTaskDelete(nullptr);
-    return;
+    setHrState(HrState::InitFailed,"scanner unavailable");
+    vTaskDelete(nullptr); return;
   }
   scanner->setAdvertisedDeviceCallbacks(new HrAdvertisements(),false);
-  // Active scan also receives the scan response; passive scan can miss HR
-  // service UUIDs that are not in the first advertising PDU.
   scanner->setActiveScan(true);
   scanner->setInterval(160);
-  scanner->setWindow(48); // low radio duty-cycle; protect Garmin FTMS stream
-  // Reuse the same client across scans; BLEDevice keeps its own reference.
-  BLEClient *client=BLEDevice::createClient();
+  scanner->setWindow(48);
+  // The Bluedroid client is kept alive for the task lifetime: the older
+  // Arduino-ESP32 BLEDevice has no deleteClient API, and forcibly killing
+  // this task while callbacks still reference it would be unsafe.
+  BLEClient* client=BLEDevice::createClient();
   if(!client) {
-    hrState=HrState::InitFailed;
-    Serial.println("HR: BLE client unavailable");
-    vTaskDelete(nullptr);
-    return;
+    setHrState(HrState::InitFailed,"client unavailable");
+    vTaskDelete(nullptr);return;
   }
+  client->setClientCallbacks(&hrClientCallbacks);
+  uint8_t failedConnects=0;
   while(true) {
-    const uint32_t heap=ESP.getFreeHeap();
-    if(heap<50000) {
-      hrState=HrState::LowMemory;
-      Serial.printf("HR: scan skipped (heap %lu < 50000)\n",
-                    (unsigned long)heap);
-      vTaskDelay(pdMS_TO_TICKS(20000));
-      continue;
+    if(ESP.getFreeHeap()<50000) {
+      setHrState(HrState::LowMemory,"scan paused: heap below 50 KB");
+      vTaskDelay(pdMS_TO_TICKS(20000)); continue;
     }
-    hrCandidate=nullptr;
+    if(failedConnects>=HR_MAX_FAILED_CONNECTS) {
+      setHrState(HrState::InitFailed,
+                 "too many GATT failures; reboot to retry (FTMS unaffected)");
+      vTaskDelete(nullptr);return;
+    }
+    // All modifications to candidate are performed in BLE scan callbacks
+    // while start() is executing and consumed only after the scan finishes.
+    delete hrCandidate;hrCandidate=nullptr;
+    hrCandidateScore=-100000;
     hrAdvertisers=hrMatches=0;
-    hrState=HrState::Scan;
     lastHrScanMs=millis();
+    setHrState(HrState::Scan,"active BLE scan begin (4s)");
     scanner->start(4,false);
-    // Keep the independently allocated candidate; remove scan results.
+    // Some stacks need a pause between an active scan and opening a GATT
+    // connection, even when the blocking scan call has already returned.
+    scanner->stop();
     scanner->clearResults();
-    BLEAdvertisedDevice *peer=hrCandidate;
+    vTaskDelay(pdMS_TO_TICKS(180));
+    BLEAdvertisedDevice* peer=hrCandidate;
     hrCandidate=nullptr;
-    Serial.printf("HR: scan found %u BLE advertisers, %u HR-service matches; heap %lu\n",
+    Serial.printf("HR: scan found %u advertisers, %u HR matches, selected=%s\n",
                   (unsigned)hrAdvertisers,(unsigned)hrMatches,
-                  (unsigned long)ESP.getFreeHeap());
-    if(peer) {
-      hrState=HrState::Connecting;
-      bool subscribed=false;
-      const bool connected=client->connect(peer);
-      if(connected) {
-        BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
-        BLERemoteCharacteristic *characteristic=service ?
-          service->getCharacteristic(BLEUUID((uint16_t)0x2A37)) : nullptr;
-        if(characteristic && characteristic->canNotify()) {
-          characteristic->registerForNotify(hrNotify);
-          subscribed=true;
-        }
-        hrConnected=subscribed;
-        Serial.printf("HR: connected; 180D=%s, 2A37 notify=%s\n",
-                      service?"yes":"no",subscribed?"yes":"no");
-        if(subscribed) {
-          hrState=HrState::NoData;
-          while(client->isConnected()) {
-            if(liveHr(millis()))hrState=HrState::Receiving;
-            else hrState=HrState::NoData;
-            vTaskDelay(pdMS_TO_TICKS(1500));
+                  peer?peer->getAddress().toString().c_str():"none");
+    if(!peer) {
+      setHrState(HrState::NotFound,"no 0x180D source detected");
+      vTaskDelay(pdMS_TO_TICKS(14000));continue;
+    }
+    hrAttemptAddress=String(peer->getAddress().toString().c_str());
+    const uint32_t attempt=millis();
+    setHrState(HrState::Connecting,"connect() ENTER");
+    // In Arduino-ESP32 2.x, BLEClient::connect() may wait indefinitely for
+    // GATT completion. Stage timestamps remain visible to dashboard/USB.
+    const bool connected=client->connect(peer);
+    Serial.printf("HR: connect() RETURN result=%s elapsed=%lu ms\n",
+                  connected?"OK":"FAIL",(unsigned long)(millis()-attempt));
+    delete peer;
+    hrConnected=false;
+    if(!connected) {
+      ++failedConnects;
+      setHrState(HrState::Disconnected,"connect failed, retry follows");
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    failedConnects=0;
+    setHrState(HrState::Service,"getService(0x180D) ENTER");
+    BLERemoteService* service=client->getService(BLEUUID((uint16_t)0x180D));
+    Serial.printf("HR: getService(0x180D) RETURN %s\n",
+                  service?"FOUND":"MISSING");
+    if(!service) {
+      setHrState(HrState::InitFailed,"connected peer has no 0x180D");
+      if(client->isConnected())client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    setHrState(HrState::Characteristic,"getCharacteristic(0x2A37) ENTER");
+    BLERemoteCharacteristic* characteristic=
+        service->getCharacteristic(BLEUUID((uint16_t)0x2A37));
+    Serial.printf("HR: getCharacteristic(0x2A37) RETURN %s, notify=%s\n",
+                  characteristic?"FOUND":"MISSING",
+                  characteristic&&characteristic->canNotify()?"yes":"no");
+    if(!characteristic || !characteristic->canNotify()) {
+      setHrState(HrState::InitFailed,"missing HR notifications characteristic");
+      if(client->isConnected())client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    // registerForNotify() enables the 0x2902 CCCD when present. Old
+    // Bluedroid API returns void, so distinguish local registration from
+    // first ACTUAL notification; never mark this as HR OK prematurely.
+    const uint32_t countBefore=hrNotifyPackets;
+    setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER");
+    characteristic->registerForNotify(hrNotify);
+    Serial.println("HR: registerForNotify(0x2A37) RETURN");
+    hrConnected=true;
+    setHrState(HrState::NoData,"registered; waiting for first BPM");
+    const uint32_t subscribedAt=millis();
+    bool gotData=(hrNotifyPackets!=countBefore);
+    uint32_t lastReport=0;
+    while(client->isConnected()) {
+      const uint32_t now=millis();
+      if(hrNotifyPackets!=countBefore) {
+        gotData=true;
+        if(liveHr(now))hrState=HrState::Receiving;
+        else hrState=HrState::NoData;
+        if(!hrPreferredSaved && hrAttemptAddress.length()) {
+          Preferences pref;
+          if(pref.begin("rower-hr",false)) {
+            hrPreferredSaved=pref.putString("addr",hrAttemptAddress)>0;
+            pref.end();
+            if(hrPreferredSaved) {
+              hrPreferredAddress=hrAttemptAddress;
+              Serial.printf("HR: saved verified sensor address %s\n",
+                            hrPreferredAddress.c_str());
+            }
           }
         }
-        client->disconnect();
-      } else {
-        Serial.println("HR: BLE connect failed");
       }
-      hrConnected=false;
-      if(hrState!=HrState::LowMemory)hrState=HrState::Disconnected;
-      delete peer;
-    } else {
-      hrState=HrState::NotFound;
+      if(!gotData && (uint32_t)(now-subscribedAt)>HR_FIRST_NOTIFICATION_MS) {
+        Serial.println("HR: no BPM for 15s; disconnecting HR client for retry");
+        break;
+      }
+      if((uint32_t)(now-lastReport)>=8000) {
+        lastReport=now;
+        Serial.printf("HR: linked=%s packets=%lu bpm=%u age=%lu ms\n",
+                      client->isConnected()?"yes":"no",
+                      (unsigned long)hrNotifyPackets,
+                      (unsigned)liveHr(now),
+                      receivedHrAt?(unsigned long)(now-receivedHrAt):0UL);
+      }
+      vTaskDelay(pdMS_TO_TICKS(1500));
     }
-    vTaskDelay(pdMS_TO_TICKS(18000));
+    hrConnected=false;
+    if(client->isConnected())client->disconnect(); // only HR GATT client
+    setHrState(HrState::Disconnected,"HR link closed; rescan");
+    vTaskDelay(pdMS_TO_TICKS(7000));
   }
 }
 BLEServer *pServer = nullptr;
@@ -936,7 +1074,7 @@ void updateUI() {
   if(!pageRendered || detailPage!=displayedDetails)pageLayout();
   textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
-  textPatch(1,250,2,70,19,String(hrStatus(hrState)),
+  textPatch(1,250,2,70,19,String(hrStatus(displayedHrState(millis()))),
             liveHr(millis())?heartColor:labelColor,panelColor,2,true);
   if(!detailPage){
     const uint16_t bpm=liveHr(millis());
@@ -1183,7 +1321,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.2 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.3 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1196,6 +1334,15 @@ void setup() {
   Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
   initBLE();
   loadMotionCalibration();
+  {
+    Preferences pref;
+    if(pref.begin("rower-hr",true)) {
+      hrPreferredAddress=pref.getString("addr","");
+      pref.end();
+    }
+    Serial.printf("HR: preferred verified source: %s\n",
+                  hrPreferredAddress.length()?hrPreferredAddress.c_str():"(none)");
+  }
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
@@ -1242,6 +1389,7 @@ void loop() {
     }
   }
   const uint32_t now=millis();
+  checkHrStall(now);
   motion.tick(micros());
   metrics.setExternalTelemetry(motion.meters,motion.speed,
                                motion.strokes,motion.spm);
