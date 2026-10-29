@@ -13,7 +13,9 @@ checks = (
     'GHOST: armed target=',
     'GHOST: started',
     'GHOST: finished',
-    'TAP/BOOT: WYBOR, BOOT 1.5s START',
+    'DOTKNIJ 500/1000/2000, SWIPE: WROC',
+    '4095L-(long)rx',
+    'TOUCH: UP raw=',
     'trendDrawn=trendRevision;',
     'if (ghost.phase==ghostrace::Phase::Armed && metrics.started)',
     'ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,',
@@ -28,10 +30,10 @@ checks = (
     'touchSwipeEvents',
     'TOUCH: DOWN #',
     'GHOST: alive phase=',
-    'GHOST: uncalibrated tap -> selected',
+    'GHOST: uncalibrated tap raw=',
     'GHOST: automatic calibration suppressed',
     'TAP/BOOT: WYBOR, BOOT 1.5s START',
-    'XPT2046_Touchscreen touch(33);',
+    'XPT2046_Touchscreen touch(33,36);',
     'if(now-touchLastPollMs<12)return;',
     'NimBLEDevice::createServer()',
 
@@ -46,9 +48,11 @@ end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
 tap=src[src.index("void touchTap("):src.index("void updateTouch(")]
 assert "pendingCalibration=true" not in tap, "Ghost menu taps must never schedule blocking calibration"
+assert 'startRace(0);' in tap and 'startRace(1);' in tap and 'startRace(2);' in tap
+assert 'selectedDistance=(selectedDistance+1)%3;' not in tap, "Touch must select row, never cycle"
 loop=src[src.index("void loop()"):]
 assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-second touch wizard in the main loop"
 assert 'FTMS: advertising recovery' in loop
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.8"' in src
+assert 'FIRMWARE_VERSION = "0.09.9"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
