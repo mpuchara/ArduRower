@@ -22,8 +22,21 @@ for marker in (
     "HR DANE",
     "HR OK",
     "HR BLAD",
-    "hrState=HrState::LowMemory",
-    "hrState=HrState::NotFound",
+    "HR ZAW",
+    "getService(0x180D) ENTER",
+    "getCharacteristic(0x2A37) ENTER",
+    "registerForNotify(0x2A37) ENTER",
+    "connect() ENTER",
+    "connect() RETURN",
+    "HR_FIRST_NOTIFICATION_MS=15000",
+    "HR_MAX_FAILED_CONNECTS=12",
+    "hrPreferredAddress",
+    "hrNotifyPackets",
+    "checkHrStall(now)",
+    "scanner->stop()",
+    "client->setClientCallbacks(&hrClientCallbacks)",
+    "setHrState(HrState::LowMemory",
+    "setHrState(HrState::NotFound",
     "hrState=HrState::Receiving",
     "String(hrStatus(hrState))",
     "ArduRower CYD v0.09.3",
@@ -38,4 +51,7 @@ assert 'SEND_EQUIVALENT_POWER = false' in src
 assert 'const EXPECTED_PREFIX = ' in page
 assert 'const EXPECTED_PREFIX = \'0.09.3-hr-link-\'' in page
 assert 'HR RAM' in page and 'HR BRAK' in page and 'HR OK' in page
-print("PASS: BT FTMS retained, active HR scan and distinguishable error states")
+assert "BLEDevice::deinit(" not in src, "Never reset existing FTMS host for HR"
+assert "esp_ble_gap_disconnect(" not in src, "Never disconnect Garmin physical FTMS link for HR retry"
+assert "vTaskDelete(client" not in src, "Never kill a BLE task still referenced by callbacks"
+print("PASS: FTMS retained; HR connect/GATT stage tracing, 16s stalled state, safe HR-only retry")
