@@ -23,13 +23,12 @@ checks = (
     'horizontalSwipe=cydtouch::pageSwipe(',
     '#include "TouchGestures.h"',
     'tft.drawString("<  GHOST  >"',
-    'registerForNotify(hrNotify,true,false)',
-    'cccd->writeValue(enableNotify,2,true)',
-    'HR: CCCD WRITE result=',
-    'HR: GATT notify registration status=',
-    'HR: raw GATT notification',
-    'ESP_GATTC_WRITE_DESCR_EVT',
-    'ESP_GATTC_REG_FOR_NOTIFY_EVT',
+    'GHOST: LIVE SWIPE #',
+    'swipeTriggered=true;',
+    'touchSwipeEvents',
+    'TOUCH: DOWN #',
+    'NimBLEDevice::createServer()',
+
 )
 for marker in checks:
     assert marker in src, marker
@@ -40,5 +39,5 @@ begin=src.index("void toggleMode() {")
 end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.5"' in src
+assert 'FIRMWARE_VERSION = "0.09.6"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
