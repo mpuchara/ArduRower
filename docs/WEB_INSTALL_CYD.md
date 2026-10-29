@@ -131,3 +131,7 @@ Przyszły test fizyczny: FTMS połączone i wzrost `tx`, `HR: discover Garmin HR
 ## 0.09.11 — menu Ghost Race przy stałym Z
 
 Porównanie z wersją 0.08: wcześniejszy wybór dystansu następował po `touch.touched()==false`. W logach 0.09.10 po zwolnieniu panelu Z nadal jest około 3600 przy IRQ=0, więc zdarzenie UP nie występuje. Naprawa pozwala zatwierdzić stabilny dotyk po 160 ms bez czekania na UP i automatycznie uzbroić wykrywanie następnego gestu po zmianie miejsca dotknięcia. Jeden swipe nie przełączy strony dwa razy. FTMS pozostaje niezmieniony, a brak HR to brak powiadomień na istniejącym linku mimo subskrypcji CCCD=01 00. Nie interpretuj tego jako błędu parsowania BPM.
+
+
+## Plan dla 0.09.12
+Pulpit ducha, przygaszone wykresy i różnica dystansu, bez zmiany FTMS.
