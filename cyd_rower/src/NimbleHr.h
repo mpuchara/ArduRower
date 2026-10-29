@@ -75,3 +75,37 @@ class HrClientCallbacks : public NimBLEClientCallbacks {
   }
 };
 static HrClientCallbacks hrClientCallbacks;
+void hrWorker(void*) {
+  NimBLEScan *scan=NimBLEDevice::getScan();
+  NimBLEClient *client=NimBLEDevice::createClient();
+  if(!scan || !client) {
+    setHrState(HrState::InitFailed,"NimBLE scan/client unavailable");
+    vTaskDelete(nullptr);return;
+  }
+  scan->setAdvertisedDeviceCallbacks(&hrAdvertisementCallbacks,false);
+  scan->setActiveScan(true);
+  scan->setInterval(180);
+  scan->setWindow(30); // 17% radio scan duty
+  client->setClientCallbacks(&hrClientCallbacks,false);
+  client->setConnectTimeout(6);
+  client->setConnectionParams(24,48,0,120);
+  Serial.println("HR: NimBLE dual-role started; FTMS never paused");
+  while(true) {
+    if(ESP.getFreeHeap()<30000) {
+      setHrState(HrState::LowMemory,"HR heap low");
+      vTaskDelay(pdMS_TO_TICKS(10000));continue;
+    }
+    hrCandidateAddress="";hrCandidateScore=-200;
+    hrAdvertisers=hrMatches=0; ++hrScanRounds;
+    setHrState(HrState::Scan,"NimBLE scan 2 seconds");
+    scan->start(2,false);
+    scan->stop();
+    Serial.printf("HR: scan #%lu devices=%u matches=%u FTMS=%d tx=%lu\n",
+                  (unsigned long)hrScanRounds,(unsigned)hrAdvertisers,
+                  (unsigned)hrMatches,deviceConnected?1:0,
+                  (unsigned long)ftmsNotifications);
+    if(!hrCandidateAddress.length()) {
+      scan->clearResults();
+      setHrState(HrState::NotFound,"NimBLE 180D not found");
+      vTaskDelay(pdMS_TO_TICKS(10000));continue;
+    }
