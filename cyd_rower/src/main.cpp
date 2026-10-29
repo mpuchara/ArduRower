@@ -987,7 +987,7 @@ void pageLayout() {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("<  GHOST  >",77,29,1);
   }
-  if(ghostWorkout){tft.setTextColor(labelColor,backgroundColor);tft.drawString(ghost.hasBest?"DUCH: REKORD":"NOWY DUCH - BRAK REKORDU",115,29,1);}
+  if(ghostWorkout){tft.setTextColor(labelColor,backgroundColor);tft.drawString(ghost.hasBest?"PB OK":"BRAK PB",85,29,1);}
   tft.drawString(FIRMWARE_VERSION,108,8,1);
   if(!detailPage || ghostWorkout){
     tft.setTextColor(heartColor,backgroundColor);
