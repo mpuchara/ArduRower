@@ -27,7 +27,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.8";
+static constexpr const char *FIRMWARE_VERSION = "0.09.9";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -57,7 +57,7 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33); // Poll touch over SPI; IRQ GPIO36 may be unconnected
+XPT2046_Touchscreen touch(33,36); // working v0.08 IRQ-based touch release
 bool touchReady = false;
 bool touchedLast = false;
 bool swipeTriggered=false;
@@ -145,7 +145,7 @@ void saveMotionCalibration() {
     p.end();
   }
 }
-#include "NimbleHr.h"
+#include "SharedLinkHr.h"
 
 NimBLEServer *pServer = nullptr;
 NimBLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
@@ -210,12 +210,18 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
                   (unsigned long)ftmsConnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
   }
+  void onConnect(NimBLEServer *,ble_gap_conn_desc *desc) override {
+    if(desc)onFtmsHandleReady(desc->conn_handle);
+  }
   void onDisconnect(NimBLEServer *) override {
     deviceConnected=false;
     ftmsDisconnectedAtMs=millis();
     Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
                   (unsigned long)ftmsDisconnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
+  }
+  void onDisconnect(NimBLEServer *,ble_gap_conn_desc *) override {
+    onFtmsHandleClosed();
   }
 };
 // Intentionally no-op: as in the existing firmware, FTMS Control Point procedures
@@ -228,6 +234,7 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
 void initBLE() {
   Serial.print(F("Init BLE:"));
   NimBLEDevice::init(BLE_SERVICE_NAME);
+  NimBLEDevice::setCustomGapHandler(onHrGapEvent);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   NimBLEService *pService =
@@ -1205,7 +1212,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.8 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.9 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1215,7 +1222,7 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
+  Serial.printf("Touch: %s, IRQ GPIO36 restored, CS33 SPI=25/39/32/33\n",
                 touchReady ? "OK" : "unavailable");
   // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
   // retain BLE memory. Both hooks are strong overrides defined above.
@@ -1250,11 +1257,11 @@ void setup() {
   // Optional second BLE role. If the full BLE stack used most heap,
   // preserve the working FTMS stream instead of risking a crash.
   const uint32_t beforeHr=ESP.getFreeHeap();
-  if(beforeHr>50000)
-    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",6144,
+  if(beforeHr>40000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",4096,
                                          nullptr,1,nullptr,0)==pdPASS;
   if(!hrTaskCreated)
-    hrState=(beforeHr<=50000)?HrState::LowMemory:HrState::InitFailed;
+    hrState=(beforeHr<=40000)?HrState::LowMemory:HrState::InitFailed;
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));
