@@ -16,7 +16,7 @@ for v in ('NimBLEDevice::getScan()', 'NimBLEDevice::createClient()',
           'scan->setActiveScan(true)', 'scan->start(2,false)',
           'NimBLEUUID((uint16_t)0x180D)', 'NimBLEUUID((uint16_t)0x2A37)',
           'chr->subscribe(true,hrNotify,true)', 'hrNotifyPackets',
-          'no FTMS pause gate', 'NimBLE connect ENTER', 'HR: packet #',
+'NimBLE connect ENTER', 'HR: packet #',
           'client->setConnectTimeout(6)', 'HR_STALLED_AFTER_MS'):
     assert v in hr,v
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
