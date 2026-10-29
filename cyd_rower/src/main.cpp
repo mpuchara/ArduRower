@@ -1039,7 +1039,7 @@ void updateUI() {
     textPatch(6,224,166,95,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
     const String paceOrDelta=ghostWorkout ? (ghost.hasBest ?
-      String(ghost.meterLead(millis())>=0?"+":"")+String(ghost.meterLead(millis()),1)+" m" : "-- m") :
+      String(ghost.meterLead(millis())>=0?"+":"")+String((int)lroundf(ghost.meterLead(millis())))+"m" : "-- m") :
       formatPace(metrics.pace());
     textPatch(7,8,207,102,26,paceOrDelta,
               whiteColor,backgroundColor,4);
