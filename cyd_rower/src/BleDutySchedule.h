@@ -11,10 +11,10 @@ struct DutySchedule {
   static constexpr uint32_t kStableFtmsMs=8000;
   static constexpr uint32_t kRetryMs=90000;
   static constexpr uint32_t kGuardAfterDropMs=180000;
-  uint32_t lastMotionMs=0, ftmsSinceMs=0, lastAttemptMs=0, lastDropMs=0;
-  uint32_t attempts=0, ftmsDrops=0;
-  bool sawMotion=false, ftmsUp=false, oneAttemptWithFtms=false;
-  bool hrSetupRunning=false, collisionGuard=false;
+  volatile uint32_t lastMotionMs=0, ftmsSinceMs=0, lastAttemptMs=0, lastDropMs=0;
+  volatile uint32_t attempts=0, ftmsDrops=0;
+  volatile bool sawMotion=false, ftmsUp=false, oneAttemptWithFtms=false;
+  volatile bool hrSetupRunning=false, collisionGuard=false;
 
   void onMotion(uint32_t ms) { lastMotionMs=ms; sawMotion=true; }
   void onFtms(bool connected,uint32_t now) {
@@ -48,7 +48,8 @@ struct DutySchedule {
   }
   void end() {hrSetupRunning=false;}
   bool shouldYield(uint32_t now) const {
-    return !motionQuiet(now) || collisionGuard;
+    return !motionQuiet(now) ||
+           (collisionGuard && (uint32_t)(now-lastDropMs)<kGuardAfterDropMs);
   }
 };
 } // namespace cydble
