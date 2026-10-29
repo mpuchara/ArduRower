@@ -42,6 +42,12 @@ jobs:
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
           /tmp/cyd_motion_test
+      - name: Test FTMS-first HR maintenance scheduling
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
+          /tmp/cyd_ble_duty_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
+          /tmp/cyd_touch_swipe_test
       - name: Test unchanged rowing calculations
         run: |
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test

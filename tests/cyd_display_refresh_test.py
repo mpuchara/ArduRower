@@ -36,7 +36,8 @@ for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "pa
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
 assert "trendDrawn!=trendRevision" in source
-assert "max(dx,dy)>700" in source
+assert "horizontalSwipe=cydtouch::pageSwipe(" in source
+assert "TouchGestures.h" in source
 assert "ghost.start(now)" in source
 assert "saveBest(selectedDistance,ghost.attempt)" in source
 assert "previousValid[slot] && previousField[slot] == text" in source

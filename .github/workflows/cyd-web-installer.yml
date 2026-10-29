@@ -44,6 +44,10 @@ jobs:
           /tmp/ghost_race_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
           /tmp/cyd_motion_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
+          /tmp/cyd_ble_duty_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
+          /tmp/cyd_touch_swipe_test
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
           /tmp/metrics_test
 
@@ -70,7 +74,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.4-hr-cccd-ghost-")
+          assert version["version"].startswith("0.09.5-ftms-priority-swipe-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]
