@@ -8,8 +8,8 @@ ini=(root/"cyd_rower/platformio.ini").read_text()
 page=(root/"index.html").read_text()
 for v in ('NimBLEDevice::createServer()', 'NimBLEDevice::init(BLE_SERVICE_NAME)',
           'NIMBLE_PROPERTY::NOTIFY', 'pDtCharacteristic->notify()',
-          '#include "NimbleHr.h"', 'FIRMWARE_VERSION = "0.09.7"',
-          'ArduRower CYD v0.09.7', 'BLE_SERVICE_NAME "WR S4BL3"',
+          '#include "NimbleHr.h"', 'FIRMWARE_VERSION = "0.09.8"',
+          'ArduRower CYD v0.09.8', 'BLE_SERVICE_NAME "WR S4BL3"',
           'String(hrStatus(displayedHrState(millis())))'):
     assert v in src,v
 for v in ('NimBLEDevice::getScan()', 'NimBLEDevice::createClient()',
@@ -26,7 +26,7 @@ assert 'esp_bt_controller_get_status()' in src, "Must expose BT controller state
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
 
-assert 'const EXPECTED_PREFIX = \'0.09.7-nimble-boot-\'' in page
+assert 'const EXPECTED_PREFIX = \'0.09.8-nimble-boot-\'' in page
 assert 'HR PAUZ' not in hr, "Never block HR because Garmin is receiving FTMS"
 assert 'BLEDevice::deinit(' not in src and 'esp_ble_gap_disconnect(' not in src
 assert src.count('NimBLEDevice::init(')==1
