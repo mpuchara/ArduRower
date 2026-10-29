@@ -184,3 +184,8 @@ Przyszły test fizyczny: FTMS połączone i wzrost `tx`, `HR: discover Garmin HR
 - The existing 0x1826 FTMS/Connect IQ payload and one-ACL link architecture are preserved.
 - HR 0x2902 descriptor must belong to value handle 0x2A37. The client logs 180D/2A37 handles, CCCD readback and incoming GAP notifications to distinguish peripheral silence from a local callback filter issue.
 - Passing CI does not establish that the Garmin sends heart rate on the FTMS link. Test on physical hardware and examine `HR: raw NOTIFY`, `HR: CCCD readback` and `HR: single-ACL`.
+
+
+## 0.09.11 — Ghost Race after v0.08 comparison
+
+The stable v0.08 menu selected rows using calibrated coordinates only on touchscreen UP. Physical 0.09.10 logs prove IRQ always zero and raw Z ~3600 even after a real finger release, so release-driven tap selection can never fire. A stable 160 ms tap is now committed in Ghost menu without waiting for UP. Completed gestures enter a cooldown/rearm state requiring a spatially distinct new contact; the same swipe cannot immediately switch back. Host tests replay the stuck-pressure scenario. The Garmin HR CCCD is correctly enabled (01 00) but reports zero incoming notifications, thus this change preserves FTMS unchanged rather than adding a failing second connection. Physical validation remains necessary.

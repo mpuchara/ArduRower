@@ -35,6 +35,8 @@ checks = (
     'XPT2046_Touchscreen touch(33);',
     '#include "TouchPress.h"',
     'TOUCH: RECOVERY',
+    'TOUCH: TAP without UP',
+    'touchTracker.consume(now,pt.x,pt.y)',
     'GHOST: SELECT 500',
     'GHOST: EXIT',
     'now-touchLastPollMs<12',
@@ -57,5 +59,5 @@ loop=src[src.index("void loop()"):]
 assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-second touch wizard in the main loop"
 assert 'FTMS: advertising recovery' in loop
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.10"' in src
+assert 'FIRMWARE_VERSION = "0.09.11"' in src
 print("PASS: Ghost Race touch row selection, pressure-polled release/recovery, two-way swipe, no blocking wizard")

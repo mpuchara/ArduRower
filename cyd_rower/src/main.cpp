@@ -28,7 +28,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.10";
+static constexpr const char *FIRMWARE_VERSION = "0.09.11";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -531,8 +531,12 @@ void readTouchCalibration() {
         (fabsf(touchD)+fabsf(touchE)>.01f);
     }
     p.end();
-    if (touchCalibrated) break;
+    if (touchCalibrated) {
+      Serial.printf("TOUCH: calibrated from %s rotation=%u\n",area,(unsigned)touchRotation);
+      break;
+    }
   }
+  if(!touchCalibrated)Serial.println("TOUCH: no saved calibration; using raw axis fallback for Ghost menu");
 }
 bool readCalPoint(int x,int y,int &rx,int &ry,int index) {
   tft.fillScreen(backgroundColor);
@@ -638,8 +642,8 @@ void touchTap(int16_t rx,int16_t ry) {
     return;
   }
   if(ghost.phase!=ghostrace::Phase::Idle)return;
-  Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
-                (int)x,(int)y,(unsigned)selectedDistance);
+  Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u calibrated=%d raw=%d,%d\n",
+                (int)x,(int)y,(unsigned)selectedDistance,calibrated?1:0,(int)rx,(int)ry);
   // Three entire rows are large touch targets with no small hitbox.
   if(y>=53 && y<105) {Serial.println("GHOST: SELECT 500");startRace(0);}
   else if(y>=112 && y<164) {Serial.println("GHOST: SELECT 1000");startRace(1);}
@@ -667,6 +671,19 @@ void updateTouch(uint32_t now) {
                   (unsigned long)touchEvents,pt.x,pt.y,pt.z,digitalRead(36));
     return;
   }
+  if(ev==cydtouch::Event::Tap) {
+    rawEndX=pt.x;rawEndY=pt.y;
+    Serial.printf("TOUCH: TAP without UP raw=%d,%d mode=%d z=%d\n",
+                  pt.x,pt.y,(int)activeMode,pt.z);
+    // Ghost menu and active-race MENU are deliberately operable without
+    // XPT2046 UP, which is absent in the physical v0.09.10 logs.
+    if(activeMode==Mode::Race && !calibrationScreen) {
+      touchTap(pt.x,pt.y);
+      swipeTriggered=true; // a committed tap must not toggle the page
+      touchTracker.consume(now,pt.x,pt.y);
+    }
+    return;
+  }
   if(ev==cydtouch::Event::Move) {
     rawEndX=pt.x;rawEndY=pt.y;
     const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
@@ -679,6 +696,7 @@ void updateTouch(uint32_t now) {
                     (unsigned long)touchSwipeEvents,
                     rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
       toggleMode(); // one navigation per physical gesture
+      touchTracker.consume(now,pt.x,pt.y); // immediately re-arm after a NEW contact
     }
     return;
   }
@@ -1223,7 +1241,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.10 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.11 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);

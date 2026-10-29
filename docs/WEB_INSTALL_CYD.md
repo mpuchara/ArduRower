@@ -126,3 +126,8 @@ Przyszły test fizyczny: FTMS połączone i wzrost `tx`, `HR: discover Garmin HR
 - The existing 0x1826 FTMS/Connect IQ payload and one-ACL link architecture are preserved.
 - HR 0x2902 descriptor must belong to value handle 0x2A37. The client logs 180D/2A37 handles, CCCD readback and incoming GAP notifications to distinguish peripheral silence from a local callback filter issue.
 - Passing CI does not establish that the Garmin sends heart rate on the FTMS link. Test on physical hardware and examine `HR: raw NOTIFY`, `HR: CCCD readback` and `HR: single-ACL`.
+
+
+## 0.09.11 — menu Ghost Race przy stałym Z
+
+Porównanie z wersją 0.08: wcześniejszy wybór dystansu następował po `touch.touched()==false`. W logach 0.09.10 po zwolnieniu panelu Z nadal jest około 3600 przy IRQ=0, więc zdarzenie UP nie występuje. Naprawa pozwala zatwierdzić stabilny dotyk po 160 ms bez czekania na UP i automatycznie uzbroić wykrywanie następnego gestu po zmianie miejsca dotknięcia. Jeden swipe nie przełączy strony dwa razy. FTMS pozostaje niezmieniony, a brak HR to brak powiadomień na istniejącym linku mimo subskrypcji CCCD=01 00. Nie interpretuj tego jako błędu parsowania BPM.
