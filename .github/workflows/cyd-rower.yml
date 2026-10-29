@@ -73,11 +73,13 @@ jobs:
         run: |
           set -euo pipefail
           ELF=cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.elf
-          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-nm"
+          NM="$(find "$HOME/.platformio/packages" -type f -name 'xtensa*-nm' -print -quit)"
           test -f "$ELF"
+          test -n "$NM"
           test -x "$NM"
-          "$NM" "$ELF" | grep -E ' [T] btInUse'
-          "$NM" "$ELF" | grep -E ' [T] btStarted'
+          "$NM" "$ELF" | grep -E ' T btInUse'
+          "$NM" "$ELF" | grep -E ' T bleInUse'
+          echo "PASS: BT memory retention hooks override Arduino defaults"
           echo "PASS: strong Arduino BT memory retention hook linked"
 
       - name: Publish compiled firmware BIN
