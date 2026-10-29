@@ -38,6 +38,7 @@ jobs:
           python3 tests/cyd_display_refresh_test.py
           python3 tests/cyd_text_cache_test.py
           python3 tests/cyd_installer_integrity_test.py
+          python3 tests/cyd_hr_diagnostics_test.py
           g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
           /tmp/ghost_race_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
