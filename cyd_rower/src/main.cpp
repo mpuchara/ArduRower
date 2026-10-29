@@ -1243,15 +1243,8 @@ void setup() {
                 controllerAlreadyStarted?1:0,controllerStatus);
   initBLE();
   loadMotionCalibration();
-  {
-    Preferences pref;
-    if(pref.begin("rower-hr",true)) {
-      hrPreferredAddress=pref.getString("addr","");
-      pref.end();
-    }
-    Serial.printf("HR: preferred verified source: %s\n",
-                  hrPreferredAddress.length()?hrPreferredAddress.c_str():"(none)");
-  }
+  // No BLE central pairing/discovery in this firmware: Garmin joins FTMS,
+  // and we use exactly the same ACL for remote HR GATT discovery.
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
