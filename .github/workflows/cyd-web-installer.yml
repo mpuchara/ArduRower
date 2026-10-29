@@ -59,6 +59,141 @@ jobs:
           set -euo pipefail
           pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21
 
+      - name: Verify strong Arduino Bluetooth retention hook is linked (bootloop guard)
+        run: |
+          set -euo pipefail
+          ELF=cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.elf
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-nm"
+          test -f "$ELF"
+          test -x "$NM"
+          "$NM" "$ELF" | grep -E ' [T] btInUse
+        run: python web/build_site.py
+
+      - name: Check manifest ranges never overwrite NVS
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = Path("site")
+          assert (base / "index.html").is_file()
+          manifest = json.loads((base / "manifests/st7789-gpio21.json").read_text())
+          build = manifest["builds"][0]
+          assert build["chipFamily"] == "ESP32"
+          assert manifest["new_install_prompt_erase"] is False
+          version = json.loads((base / "version.json").read_text())
+          assert version["version"].startswith("0.09.7-nimble-boot-")
+          assert len(version["revision"]) == 12
+          assert manifest["version"] == version["version"]
+          parts = build["parts"]
+          assert all(p["path"].endswith("-" + version["revision"] + ".bin") for p in parts)
+          assert [p["offset"] for p in parts] == [0x1000, 0x8000, 0xE000, 0x10000]
+          for part in parts:
+              bin_file = (base / "manifests" / part["path"]).resolve()
+              assert bin_file.is_file()
+              length = bin_file.stat().st_size
+              assert length > 0
+              begin, end = part["offset"], part["offset"] + length
+              assert end <= 0x400000
+              assert not (begin < 0xE000 and end > 0x9000), "NVS would be overwritten"
+              if begin in (0x1000, 0x10000):
+                  with bin_file.open("rb") as f:
+                      assert f.read(1) == b'\xe9', "Invalid ESP32 image magic"
+          print("PASS: ESP Web Tools segments preserve NVS/ghost best records")
+          PY
+
+      - name: Save a backup copy of the flashable site
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardurower-cyd-web-installer
+          path: site/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload installer site to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build-site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy from tested build artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+          "$NM" "$ELF" | grep -E ' [T] btStarted
+        run: python web/build_site.py
+
+      - name: Check manifest ranges never overwrite NVS
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = Path("site")
+          assert (base / "index.html").is_file()
+          manifest = json.loads((base / "manifests/st7789-gpio21.json").read_text())
+          build = manifest["builds"][0]
+          assert build["chipFamily"] == "ESP32"
+          assert manifest["new_install_prompt_erase"] is False
+          version = json.loads((base / "version.json").read_text())
+          assert version["version"].startswith("0.09.7-nimble-boot-")
+          assert len(version["revision"]) == 12
+          assert manifest["version"] == version["version"]
+          parts = build["parts"]
+          assert all(p["path"].endswith("-" + version["revision"] + ".bin") for p in parts)
+          assert [p["offset"] for p in parts] == [0x1000, 0x8000, 0xE000, 0x10000]
+          for part in parts:
+              bin_file = (base / "manifests" / part["path"]).resolve()
+              assert bin_file.is_file()
+              length = bin_file.stat().st_size
+              assert length > 0
+              begin, end = part["offset"], part["offset"] + length
+              assert end <= 0x400000
+              assert not (begin < 0xE000 and end > 0x9000), "NVS would be overwritten"
+              if begin in (0x1000, 0x10000):
+                  with bin_file.open("rb") as f:
+                      assert f.read(1) == b'\xe9', "Invalid ESP32 image magic"
+          print("PASS: ESP Web Tools segments preserve NVS/ghost best records")
+          PY
+
+      - name: Save a backup copy of the flashable site
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardurower-cyd-web-installer
+          path: site/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload installer site to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build-site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy from tested build artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+          echo "PASS: Arduino weak btInUse(false) overridden by BT strong implementation"
+
       - name: Publish separate flash images while preserving NVS records
         run: python web/build_site.py
 
