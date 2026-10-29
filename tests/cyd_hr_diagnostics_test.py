@@ -26,7 +26,7 @@ assert 'esp_bt_controller_get_status()' in src, "Must expose BT controller state
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
 
-assert 'const EXPECTED_PREFIX = \'0.09.8-nimble-boot-\'' in page
+assert 'const EXPECTED_PREFIX = \'0.09.8-ftms-ghost-\'' in page
 assert 'HR PAUZ' not in hr, "Never block HR because Garmin is receiving FTMS"
 assert 'BLEDevice::deinit(' not in src and 'esp_ble_gap_disconnect(' not in src
 assert src.count('NimBLEDevice::init(')==1
