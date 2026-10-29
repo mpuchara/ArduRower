@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/cyd-ghost-race-20261023
+      - feature/cyd-motion-heart-dashboard-20261029
     paths:
       - "cyd_rower/**"
       - "ArduRower/RowerMetrics.h"
