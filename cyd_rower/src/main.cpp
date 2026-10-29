@@ -121,6 +121,9 @@ void hrWorker(void *) {
   scanner->setActiveScan(false);
   scanner->setInterval(160);
   scanner->setWindow(48); // low radio duty-cycle; protect Garmin FTMS stream
+  // Reuse the same client across scans; BLEDevice keeps its own reference.
+  BLEClient *client=BLEDevice::createClient();
+  if(!client) {vTaskDelete(nullptr);return;}
   while(true) {
     if(ESP.getFreeHeap()<50000) {
       vTaskDelay(pdMS_TO_TICKS(20000));
@@ -132,7 +135,6 @@ void hrWorker(void *) {
     BLEAdvertisedDevice *peer=hrCandidate;
     hrCandidate=nullptr;
     if(peer) {
-      BLEClient *client=BLEDevice::createClient();
       bool subscribed=false;
       if(client && client->connect(peer)) {
         BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
@@ -148,7 +150,6 @@ void hrWorker(void *) {
         client->disconnect();
       }
       hrConnected=false;
-      if(client)BLEDevice::deleteClient(client);
       delete peer;
     }
     vTaskDelay(pdMS_TO_TICKS(18000));
