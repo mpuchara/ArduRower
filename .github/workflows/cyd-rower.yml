@@ -69,28 +69,16 @@ jobs:
         run: pip install platformio
       - name: Compile CYD (${{ matrix.lcd }})
         run: pio run -d cyd_rower -e ${{ matrix.lcd }}
-      - name: Verify strong Arduino Bluetooth retention hook is linked (bootloop guard)
+      - name: Verify Arduino BT retention linked (prevent 0x103 bootloop)
         run: |
           set -euo pipefail
           ELF=cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.elf
           NM="$HOME/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-nm"
           test -f "$ELF"
           test -x "$NM"
-          "$NM" "$ELF" | grep -E ' [T] btInUse
-        uses: actions/upload-artifact@v4
-        with:
-          name: ardurower-cyd-${{ matrix.lcd }}
-          path: cyd_rower/.pio/build/${{ matrix.lcd }}/firmware.bin
-          if-no-files-found: error
-
-          "$NM" "$ELF" | grep -E ' [T] btStarted
-        uses: actions/upload-artifact@v4
-        with:
-          name: ardurower-cyd-${{ matrix.lcd }}
-          path: cyd_rower/.pio/build/${{ matrix.lcd }}/firmware.bin
-          if-no-files-found: error
-
-          echo "PASS: Arduino weak btInUse(false) overridden by BT strong implementation"
+          "$NM" "$ELF" | grep -E ' [T] btInUse'
+          "$NM" "$ELF" | grep -E ' [T] btStarted'
+          echo "PASS: strong Arduino BT memory retention hook linked"
 
       - name: Publish compiled firmware BIN
         uses: actions/upload-artifact@v4
