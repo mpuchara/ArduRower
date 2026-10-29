@@ -2,10 +2,10 @@
 // HR over the EXISTING FTMS Bluetooth LE ACL link.
 // Bluetooth Core 6.2 permits only one ACL connection per pair of LE addresses.
 // The local GAP Peripheral may also be a GATT Client on that single link.
-#include "host/ble_gatt.h"
-#include "host/ble_gap.h"
-#include "host/ble_uuid.h"
-#include "os/os_mbuf.h"
+#include "nimble/nimble/host/include/host/ble_gatt.h"
+#include "nimble/nimble/host/include/host/ble_gap.h"
+#include "nimble/nimble/host/include/host/ble_uuid.h"
+#include "nimble/porting/nimble/include/os/os_mbuf.h"
 #include <stdint.h>
 
 static constexpr uint16_t HR_INVALID_HANDLE=0xffff;
