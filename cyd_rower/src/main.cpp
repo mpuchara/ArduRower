@@ -891,7 +891,7 @@ void plot(int x, int y, int w, int h, bool power) {
 // Two independent units on one long graph, with a fixed mapping to avoid
 // rescaling mid-session. Heartbeat samples that are stale/absent break the HR
 // line; they must never be drawn as zero or mistaken for a real measurement.
-void renderSharedTrend(int x,int y,int width,int height) {
+void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false) {
   const int16_t speedMaxTenth=220; // 22.0 km/h right scale
   const int hrMin=60,hrMax=190; // 60..190 BPM left scale
   for(int left=0;left<width;left+=BUFFER_W) {
