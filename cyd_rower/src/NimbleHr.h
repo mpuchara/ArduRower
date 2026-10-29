@@ -27,3 +27,27 @@ static void checkHrStall(uint32_t now) {
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
   }
 }
+static String hrAttemptAddress;
+static uint8_t hrCandidateType=BLE_ADDR_PUBLIC;
+static int hrCandidateScore=-200;
+static bool hrPreferredSaved=false;
+class HrAdvertisements : public NimBLEAdvertisedDeviceCallbacks {
+  void onResult(NimBLEAdvertisedDevice *d) override {
+    ++hrAdvertisers;
+    if(!d || !d->haveServiceUUID() ||
+       !d->isAdvertisingService(NimBLEUUID((uint16_t)0x180D)))return;
+    ++hrMatches;
+    String addr(d->getAddress().toString().c_str());
+    const bool preferred=hrPreferredAddress.length() &&
+                          addr.equalsIgnoreCase(hrPreferredAddress);
+    const int score=(preferred?1000:0)+d->getRSSI();
+    if(score>hrCandidateScore) {
+      hrCandidateScore=score;
+      hrCandidateAddress=addr;
+      hrCandidateType=d->getAddressType();
+      Serial.printf("HR: 180D addr=%s type=%u RSSI=%d\n",
+        addr.c_str(),(unsigned)hrCandidateType,d->getRSSI());
+    }
+  }
+};
+static HrAdvertisements hrAdvertisementCallbacks;
