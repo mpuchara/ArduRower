@@ -37,7 +37,7 @@ checks = (
     'TOUCH: RECOVERY',
     'GHOST: SELECT 500',
     'GHOST: EXIT',
-    'if(now-touchLastPollMs<12)return;',
+    'now-touchLastPollMs<12',
     'NimBLEDevice::createServer()',
 
 )
