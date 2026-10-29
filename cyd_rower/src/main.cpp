@@ -919,11 +919,11 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
       bool hrValid=sample.heartBpm>=hrMin;
       if(i>0 && xx>=left-2 && previousX<left+part) {
         if(prevSpeedValid) {
-          if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedColor);
+          if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedInk);
           else tft.drawLine(x+previousX,y+previousSpeedY,x+xx,y+spY,speedColor);
         }
         if(hrValid && prevHrValid) {
-          if(scratchReady)scratch.drawLine(previousX-left,previousHrY,xx-left,hrY,heartColor);
+          if(scratchReady)scratch.drawLine(previousX-left,previousHrY,xx-left,hrY,hrInk);
           else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,heartColor);
         }
       }
