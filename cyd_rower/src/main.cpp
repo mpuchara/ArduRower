@@ -965,8 +965,9 @@ void pageLayout() {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("<  GHOST  >",77,29,1);
   }
+  if(ghostWorkout){tft.setTextColor(labelColor,backgroundColor);tft.drawString(ghost.hasBest?"DUCH: REKORD":"NOWY DUCH - BRAK REKORDU",115,29,1);}
   tft.drawString(FIRMWARE_VERSION,108,8,1);
-  if(!detailPage){
+  if(!detailPage || ghostWorkout){
     tft.setTextColor(heartColor,backgroundColor);
     tft.drawString("PULS",8,27,2);
     tft.setTextColor(speedColor,backgroundColor);
@@ -974,7 +975,7 @@ void pageLayout() {
     tft.fillRoundRect(7,87,306,62,4,panelColor);
     tft.setTextColor(labelColor,backgroundColor);
     const int xx[3]={8,115,224};
-    const char *names[6]={"CZAS","DYSTANS","SPM","TEMPO /500m","MOC ~W","RUCHY"};
+    const char *names[6]={"CZAS","DYSTANS","SPM",ghostWorkout?"ROZNICA / DUCH":"TEMPO /500m","MOC ~W","RUCHY"};
     for(int i=0;i<6;++i)
       tft.drawString(names[i],xx[i%3],i<3?156:199,1);
   }else{
@@ -989,7 +990,7 @@ void pageLayout() {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("DOTKNIJ, ABY WROCIC",12,224,1);
   }
-  pageRendered=true;displayedDetails=detailPage;
+  pageRendered=true;displayedDetails=detailPage;displayedGhostWorkout=ghostWorkout;
   resetRenderCache();
   trendDrawn=UINT32_MAX;
 }
