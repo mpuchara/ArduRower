@@ -109,3 +109,43 @@ void hrWorker(void*) {
       setHrState(HrState::NotFound,"NimBLE 180D not found");
       vTaskDelay(pdMS_TO_TICKS(10000));continue;
     }
+    hrAttemptAddress=hrCandidateAddress;
+    NimBLEAddress peer(std::string(hrAttemptAddress.c_str()),hrCandidateType);
+    scan->clearResults();
+    const uint32_t began=millis();
+    setHrState(HrState::Connecting,"NimBLE connect ENTER");
+    const bool connected=client->connect(peer,true);
+    Serial.printf("HR: connect RETURN %s after %lu ms\n",
+                  connected?"OK":"FAIL",(unsigned long)(millis()-began));
+    if(!connected) {
+      setHrState(HrState::Disconnected,"NimBLE connect failed");
+      vTaskDelay(pdMS_TO_TICKS(HR_BACKOFF_MS));continue;
+    }
+    setHrState(HrState::Service,"NimBLE service discovery ENTER");
+    NimBLERemoteService *srv=client->getService(NimBLEUUID((uint16_t)0x180D));
+    NimBLERemoteCharacteristic *chr=srv?
+      srv->getCharacteristic(NimBLEUUID((uint16_t)0x2A37)):nullptr;
+    Serial.printf("HR: 180D=%s 2A37=%s notify=%s\n",
+                  srv?"yes":"no",chr?"yes":"no",
+                  chr&&chr->canNotify()?"yes":"no");
+    if(!chr || !chr->canNotify()) {
+      setHrState(HrState::InitFailed,"NimBLE 2A37 missing");
+      client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(HR_BACKOFF_MS));continue;
+    }
+    setHrState(HrState::Subscribing,"NimBLE subscribe ENTER");
+    const uint32_t beforeCount=hrNotifyPackets;
+    const bool subscribed=chr->subscribe(true,hrNotify,true);
+    Serial.printf("HR: subscribe RETURN %s after %lu ms, FTMS=%d\n",
+                  subscribed?"OK":"FAIL",(unsigned long)(millis()-began),
+                  deviceConnected?1:0);
+    if(!subscribed) {
+      setHrState(HrState::InitFailed,"NimBLE HR subscribe failed");
+      client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(HR_BACKOFF_MS));continue;
+    }
+    hrConnected=true;
+    setHrState(HrState::NoData,"NimBLE waiting for BPM");
+    const uint32_t subscribedAt=millis();
+    bool hasData=false;
+    uint32_t lastReport=millis();
