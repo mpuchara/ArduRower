@@ -51,3 +51,27 @@ class HrAdvertisements : public NimBLEAdvertisedDeviceCallbacks {
   }
 };
 static HrAdvertisements hrAdvertisementCallbacks;
+static void hrNotify(NimBLERemoteCharacteristic*,uint8_t *p,size_t size,bool) {
+  if(size<2)return;
+  const bool wide=(p[0]&1)!=0;
+  if(wide && size<3)return;
+  const uint16_t bpm=wide?(uint16_t)(p[1]|(uint16_t(p[2])<<8)):p[1];
+  if(bpm>=35 && bpm<=240) {
+    receivedHr=bpm;
+    receivedHrAt=millis();
+    ++hrNotifyPackets;
+    hrState=HrState::Receiving;
+    if(hrNotifyPackets<=8)Serial.printf("HR: packet #%lu bpm=%u FTMS=%d\n",
+       (unsigned long)hrNotifyPackets,(unsigned)bpm,deviceConnected?1:0);
+  }
+}
+class HrClientCallbacks : public NimBLEClientCallbacks {
+  void onConnect(NimBLEClient*) override {
+    setHrState(HrState::GattConnected,"NimBLE connected");
+  }
+  void onDisconnect(NimBLEClient*) override {
+    hrConnected=false;
+    setHrState(HrState::Disconnected,"NimBLE HR disconnected");
+  }
+};
+static HrClientCallbacks hrClientCallbacks;
