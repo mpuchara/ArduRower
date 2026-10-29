@@ -209,49 +209,45 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
 
 void initBLE() {
   Serial.print(F("Init BLE:"));
-  BLEDevice::init(BLE_SERVICE_NAME);
-  pServer = BLEDevice::createServer();
+  NimBLEDevice::init(BLE_SERVICE_NAME);
+  pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   NimBLEService *pService =
-      pServer->createService(BLEUUID((uint16_t)FitnessMachineService));
+      pServer->createService(NimBLEUUID((uint16_t)FitnessMachineService));
   pDtCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineRowerData),
-      BLECharacteristic::PROPERTY_NOTIFY);
-  pDtCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineRowerData),
+      NIMBLE_PROPERTY::NOTIFY);
+  // NimBLE creates CCCD for notify characteristics automatically.
   pDtCharacteristic->setCallbacks(new MyCallbacks());
   pFmfCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineFeature),
-      BLECharacteristic::PROPERTY_READ);
-  pFmfCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineFeature),
+      NIMBLE_PROPERTY::READ);
   pCtrCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineControlPoint),
-      BLECharacteristic::PROPERTY_WRITE);
-  pCtrCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineControlPoint),
+      NIMBLE_PROPERTY::WRITE);
   pCtrCharacteristic->setCallbacks(new MyCallbacks());
-  NimBLEService *pBatteryService = pServer->createService(BLEUUID((uint16_t)0x180F));
+  NimBLEService *pBatteryService = pServer->createService(NimBLEUUID((uint16_t)0x180F));
   pBatCharacteristic = pBatteryService->createCharacteristic(
-      BLEUUID((uint16_t)batteryLevel),
-      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
-  pBatCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)batteryLevel),
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   pStCharacteristic = pService->createCharacteristic(
-      BLEUUID((uint16_t)FitnessMachineStatus),
-      BLECharacteristic::PROPERTY_NOTIFY);
-  pStCharacteristic->addDescriptor(new BLE2902());
+      NimBLEUUID((uint16_t)FitnessMachineStatus),
+      NIMBLE_PROPERTY::NOTIFY);
   pService->start();
   pBatteryService->start();
-  NimBLEService *pService2 = pServer->createService(BLEUUID((uint16_t)DEVICE_INFORMATION));
+  NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
   NimBLECharacteristic *pCharacteristic24 = pService2->createCharacteristic(
-      (uint16_t)0x2A24, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A24, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic25 = pService2->createCharacteristic(
-      (uint16_t)0x2A25, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A25, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic26 = pService2->createCharacteristic(
-      (uint16_t)0x2A26, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A26, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic27 = pService2->createCharacteristic(
-      (uint16_t)0x2A27, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A27, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic28 = pService2->createCharacteristic(
-      (uint16_t)0x2A28, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A28, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
-      (uint16_t)0x2A29, BLECharacteristic::PROPERTY_READ);
+      (uint16_t)0x2A29, NIMBLE_PROPERTY::READ);
   pService2->start();
   // Preserve original device-information characteristic strings, not new IDs.
   pCharacteristic24->setValue("4");
@@ -266,17 +262,20 @@ void initBLE() {
   cRower[2] = cRower[3] = cRower[4] = 0;
   cRower[5] = cRower[6] = cRower[7] = 0;
   pFmfCharacteristic->setValue((uint8_t *)cRower, 8);
-  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
   uint8_t advData[] = {0x02, 0x01, 0x06, 0x05, 0x02, 0x26, 0x18, 0x0a, 0x18};
   String advDataStr;
   for (unsigned int i = 0; i < sizeof(advData); i++)
     advDataStr += (char)advData[i];
-  BLEAdvertisementData oAdvertisementData;
-  oAdvertisementData.addData(advDataStr);
+  NimBLEAdvertisementData oAdvertisementData;
+  oAdvertisementData.addData(std::string(advDataStr.c_str(),advDataStr.length()));
   pAdvertising->setScanResponse(true);
   pAdvertising->setAdvertisementData(oAdvertisementData);
-  pAdvertising->addServiceUUID(BLEUUID((uint16_t)FitnessMachineService));
-  BLEDevice::startAdvertising();
+  pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)FitnessMachineService));
+  NimBLEAdvertisementData scanResponse;
+  scanResponse.setName(BLE_SERVICE_NAME);
+  pAdvertising->setScanResponseData(scanResponse);
+  NimBLEDevice::startAdvertising();
   Serial.println();
 }
 
@@ -1181,11 +1180,11 @@ void setup() {
   // Optional second BLE role. If the full BLE stack used most heap,
   // preserve the working FTMS stream instead of risking a crash.
   const uint32_t beforeHr=ESP.getFreeHeap();
-  if(beforeHr>85000)
-    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",8192,
+  if(beforeHr>50000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",6144,
                                          nullptr,1,nullptr,0)==pdPASS;
   if(!hrTaskCreated)
-    hrState=(beforeHr<=85000)?HrState::LowMemory:HrState::InitFailed;
+    hrState=(beforeHr<=50000)?HrState::LowMemory:HrState::InitFailed;
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));
