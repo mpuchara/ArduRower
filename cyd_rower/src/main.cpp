@@ -953,13 +953,15 @@ void calibrationPage() {
   lastCalibrationPaint=0;
 }
 void pageLayout() {
+  const bool ghostWorkout=activeMode==Mode::Race &&
+   (ghost.phase==ghostrace::Phase::Armed || ghost.phase==ghostrace::Phase::Running);
   tft.fillScreen(backgroundColor); // only on view change
   tft.setTextDatum(TL_DATUM);
   tft.fillRect(0,0,320,24,panelColor);
   tft.setTextColor(whiteColor,panelColor);
-  tft.drawString("ARDUROWER",7,3,2);
+  tft.drawString(ghostWorkout?("DUCH "+String(ghost.targetMeters)+"m"):String("ARDUROWER"),7,3,2);
   // Header title: tap to enter Ghost Race; horizontal swipes are primary.
-  if(!detailPage) {
+  if(!detailPage && !ghostWorkout) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("<  GHOST  >",77,29,1);
   }
