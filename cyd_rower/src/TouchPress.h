@@ -43,7 +43,7 @@ class PressTracker {
     // A deliberate stationary tap, not a swipe, is handled after 160ms
     // even if the touch controller never indicates pressure release.
     if(!tapEmitted_ && samples_>=4 && elapsed>=160 && elapsed<900 &&
-       dx<=125 && dy<=125 && travel_<=250) {
+       dx<=175 && dy<=175 && travel_<=650) {
       tapEmitted_=true;
       return Event::Tap;
     }
