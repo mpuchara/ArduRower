@@ -28,6 +28,8 @@ jobs:
         run: python3 tests/cyd_display_refresh_test.py
       - name: Check all Ghost Race text indices are within UI cache bounds
         run: python3 tests/cyd_text_cache_test.py
+      - name: Check fail-closed browser installer version consistency
+        run: python3 tests/cyd_installer_integrity_test.py
       - name: Test ghost racing, record integrity and timing
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
