@@ -1016,7 +1016,10 @@ void updateUI() {
               whiteColor,backgroundColor,4);
     textPatch(6,224,166,95,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
-    textPatch(7,8,207,102,26,formatPace(metrics.pace()),
+    const String paceOrDelta=ghostWorkout ? (ghost.hasBest ?
+      String(ghost.meterLead(millis())>=0?"+":"")+String(ghost.meterLead(millis()),1)+" m" : "-- m") :
+      formatPace(metrics.pace());
+    textPatch(7,8,207,102,26,paceOrDelta,
               whiteColor,backgroundColor,4);
     textPatch(8,115,207,104,26,
               "~"+String((int)roundf(metrics.equivalentPower())),
@@ -1024,7 +1027,7 @@ void updateUI() {
     textPatch(9,224,207,95,26,String(metrics.strokes),
               whiteColor,backgroundColor,4);
     if(trendDrawn!=trendRevision) {
-      renderSharedTrend(9,91,302,54);
+      renderSharedTrend(9,91,302,54,ghostWorkout);
       trendDrawn=trendRevision;
     }
   }else{
