@@ -616,14 +616,13 @@ void touchTap(int16_t rx,int16_t ry) {
   if(ghost.phase!=ghostrace::Phase::Idle)return;
   int16_t x,y;
   if(!mappedTouch(rx,ry,x,y)) {
-    // Earlier versions launched a blocking three-point calibration wizard
-    // (up to 45 seconds) when any menu option was tapped without a stored
-    // mapping. That made Ghost Race look completely frozen and prevented
-    // swipe-back. Never auto-calibrate during a workout/menu.
-    selectedDistance=(selectedDistance+1)%3;
-    Serial.printf("GHOST: uncalibrated tap -> selected %u m; long BOOT starts\n",
-                  (unsigned)raceDistances[selectedDistance]);
-    return;
+    // CYD horizontal view: with XPT2046 rotation=0, physical screen Y is
+    // the reversed raw X axis. Unlike v0.09.8, tapping a row must choose
+    // THAT row, not cycle all distances. Do not start a calibration wizard.
+    x=160;
+    y=constrain((int)((4095L-(long)rx)*240L/4095L),0,239);
+    Serial.printf("GHOST: uncalibrated tap raw=%d,%d screenY~%d\n",
+                  (int)rx,(int)ry,(int)y);
   }
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
                 (int)x,(int)y,(unsigned)selectedDistance);
@@ -663,6 +662,9 @@ void updateTouch(uint32_t now) {
     }
   } else if(touchedLast) {
     touchedLast=false;
+    Serial.printf("TOUCH: UP raw=%d,%d duration=%lu mode=%d\n",
+                  (int)rawEndX,(int)rawEndY,
+                  (unsigned long)(now-touchPressedAt),(int)activeMode);
     const uint32_t held=now-touchPressedAt;
     if(swipeTriggered) {
       Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
@@ -1028,7 +1030,7 @@ void paintRaceLayout(uint8_t screen) {
   tft.drawString("GHOST RACE",9,4,2);
   tft.drawString(FIRMWARE_VERSION,109,8,1);
   tft.setTextColor(labelColor,panelColor);
-  tft.drawRightString("SWIPE: DASHBOARD",313,6,1);
+  tft.drawRightString("SWIPE: WROC",313,6,1);
   if(screen==0) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("WYBIERZ DYSTANS",11,31,2);
@@ -1044,8 +1046,7 @@ void paintRaceLayout(uint8_t screen) {
       tft.drawRightString(pb,297,yy+17,2);
     }
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString(touchCalibrated?"DOTKNIJ DYSTANS / SWIPE: WROC":
-                   "TAP/BOOT: WYBOR, BOOT 1.5s START",10,230,1);
+    tft.drawString("DOTKNIJ 500/1000/2000, SWIPE: WROC",10,230,1);
   } else if(screen==1) {
     tft.setTextColor(whiteColor,backgroundColor);
     tft.drawString("TY",12,33,2);
