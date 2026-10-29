@@ -648,9 +648,9 @@ void touchTap(int16_t rx,int16_t ry) {
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u calibrated=%d raw=%d,%d\n",
                 (int)x,(int)y,(unsigned)selectedDistance,calibrated?1:0,(int)rx,(int)ry);
   // Three entire rows are large touch targets with no small hitbox.
-  if(y>=53 && y<105) {Serial.println("GHOST: SELECT 500");startRace(0);}
-  else if(y>=112 && y<164) {Serial.println("GHOST: SELECT 1000");startRace(1);}
-  else if(y>=171 && y<223) {Serial.println("GHOST: SELECT 2000");startRace(2);}
+  if(y>=49 && y<108) {Serial.println("GHOST: SELECT 500");startRace(0);}
+  else if(y>=108 && y<168) {Serial.println("GHOST: SELECT 1000");startRace(1);}
+  else if(y>=168 && y<229) {Serial.println("GHOST: SELECT 2000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
   if(!touchReady || now-touchLastPollMs<12)return;
