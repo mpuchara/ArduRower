@@ -118,3 +118,11 @@ Ghost Race znowu sterowany swipem w lewo/prawo. Wcześniej brak kalibracji po ta
 **Ghost Race:** log v0.09.8 zawierał `TOUCH: DOWN #1` i `GHOST: LIVE SWIPE #1`, ale przez dziesiątki sekund licznik `touch=1 swipes=1` nie wzrastał, mimo prób nawigacji. W v0.09.6 błędnie usunęliśmy działające wcześniej przerwanie GPIO36 z `XPT2046_Touchscreen touch(33,36)`, zastępując je `touch(33)`; przywrócono obsługę T_IRQ z działającego v0.08 i log `TOUCH: UP`. W trybie Ghost Race nie ma automatycznego blokującego kreatora kalibracji ani zależności od przycisku BOOT. Wiersze **500 / 1000 / 2000 m** obsługiwane są dotknięciem (także orientacyjnie przy braku zapisanej kalibracji); przesunięcie palcem w lewo lub prawo przełącza Ghost Race ↔ Dashboard bez resetowania ESP32.
 
 Przyszły test fizyczny: FTMS połączone i wzrost `tx`, `HR: discover Garmin HR 180D on existing FTMS ACL`, wynik odkrywania 180D/2A37/2902, jeśli dostępne `HR: shared FTMS ACL BPM packet...`; trzy niezależne dotknięcia trzech wierszy, dwa swipy powrotne i logi `TOUCH: DOWN`/`TOUCH: UP`. Jeśli Garmin nie ma GATT HR service na wspólnym linku, nie próbować dalej podwójnych połączeń do identycznego adresu BLE.
+
+
+## 0.09.10 — pressure touch recovery and Garmin HR tracing
+
+- XPT2046 polls Z pressure continuously, not the GPIO36 IRQ latch; a dedicated PressTracker debounces release and can recover from a stuck DOWN without inventing a tap.
+- The existing 0x1826 FTMS/Connect IQ payload and one-ACL link architecture are preserved.
+- HR 0x2902 descriptor must belong to value handle 0x2A37. The client logs 180D/2A37 handles, CCCD readback and incoming GAP notifications to distinguish peripheral silence from a local callback filter issue.
+- Passing CI does not establish that the Garmin sends heart rate on the FTMS link. Test on physical hardware and examine `HR: raw NOTIFY`, `HR: CCCD readback` and `HR: single-ACL`.

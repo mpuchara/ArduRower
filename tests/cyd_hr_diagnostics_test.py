@@ -7,7 +7,7 @@ hr=(p/"cyd_rower/src/SharedLinkHr.h").read_text()
 page=(p/"index.html").read_text()
 ini=(p/"cyd_rower/platformio.ini").read_text()
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-for key in ('FIRMWARE_VERSION = "0.09.9"','ArduRower CYD v0.09.9',
+for key in ('FIRMWARE_VERSION = "0.09.10"','ArduRower CYD v0.09.10',
             'NimBLEDevice::createServer()','NimBLEDevice::init(BLE_SERVICE_NAME)',
             '#include "SharedLinkHr.h"',
             'NimBLEDevice::setCustomGapHandler(onHrGapEvent)',
@@ -18,6 +18,10 @@ for key in ('FIRMWARE_VERSION = "0.09.9"','ArduRower CYD v0.09.9',
 for key in ('ble_gattc_disc_svc_by_uuid(', 'ble_gattc_disc_chrs_by_uuid(',
             'ble_gattc_disc_all_dscs(', 'ble_gattc_write_flat(',
             'BLE_GAP_EVENT_NOTIFY_RX',
+            'chrValHandle==hrRemoteValueHandle',
+            'HR: raw NOTIFY',
+            'HR: CCCD readback=',
+            'ble_gattc_read(',
             'event->notify_rx.conn_handle!=hrFtmsHandle',
             'ble_uuid_cmp(', 'BLE_UUID16_INIT(0x180D)',
             'BLE_UUID16_INIT(0x2A37)', 'BLE_UUID16_INIT(0x2902)',
@@ -29,7 +33,7 @@ for key in ('ble_gattc_disc_svc_by_uuid(', 'ble_gattc_disc_chrs_by_uuid(',
 assert 'NimBLEDevice::createClient(' not in src and 'NimBLEDevice::createClient(' not in hr
 assert 'client->connect(' not in hr
 assert 'NimBLEDevice::getScan()' not in src and 'NimBLEDevice::getScan()' not in hr
-assert "const EXPECTED_PREFIX = '0.09.9-shared-gatt-touch-'" in page
+assert "const EXPECTED_PREFIX = '0.09.10-touch-hrdiag-'" in page
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
 print("PASS: HR GATT on existing incoming FTMS ACL, zero second BLE connections")
