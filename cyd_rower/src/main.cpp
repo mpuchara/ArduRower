@@ -542,6 +542,11 @@ void touchTap(int16_t rx,int16_t ry) {
       else speedCalibration=fminf(1.5f,speedCalibration+0.05f);
       motion.setCalibration(speedCalibration);
       saveMotionCalibration();
+      // Calibration invalidates any in-progress Ghost Race measurement.
+      // Never append samples under the new scale to an old-calibration race.
+      if(ghost.phase==ghostrace::Phase::Armed ||
+         ghost.phase==ghostrace::Phase::Running) ghost.cancel();
+      ghost.phase=ghostrace::Phase::Idle;
       // New calibration changes virtual meters. Invalidate race replay
       // compatibility through GhostRace::Record.scaleMilli.
       resetWorkout();loadBestTimes();
