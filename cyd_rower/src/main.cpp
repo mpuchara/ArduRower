@@ -23,11 +23,12 @@ extern "C" bool bleInUse(void) { return true; }
 #include "CydMotion.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
+#include "TouchPress.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.9";
+static constexpr const char *FIRMWARE_VERSION = "0.09.10";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -57,9 +58,10 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33,36); // working v0.08 IRQ-based touch release
+XPT2046_Touchscreen touch(33); // poll Z; GPIO36 IRQ may be floating on CYD
 bool touchReady = false;
 bool touchedLast = false;
+cydtouch::PressTracker touchTracker;
 bool swipeTriggered=false;
 uint32_t touchEvents=0;
 uint32_t touchSwipeEvents=0;
@@ -441,6 +443,7 @@ void openRaceMenu() {
 }
 void toggleMode() {
   if (activeMode == Mode::Dashboard) {
+    Serial.println("GHOST: ENTER");
     activeMode=Mode::Race;
     if (ghost.phase == ghostrace::Phase::Finished ||
         ghost.phase == ghostrace::Phase::Cancelled)
@@ -451,6 +454,8 @@ void toggleMode() {
     // Never launch a blocking touch-calibration wizard automatically when
     // entering the menu. BOOT can operate Ghost Race without touch setup.
   } else {
+    Serial.println("GHOST: EXIT");
+    if(ghost.phase==ghostrace::Phase::Running || ghost.phase==ghostrace::Phase::Armed)ghost.cancel();
     activeMode=Mode::Dashboard;
     pageRendered=false;
   }
@@ -636,89 +641,85 @@ void touchTap(int16_t rx,int16_t ry) {
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
                 (int)x,(int)y,(unsigned)selectedDistance);
   // Three entire rows are large touch targets with no small hitbox.
-  if(y>=53 && y<105) startRace(0);
-  else if(y>=112 && y<164) startRace(1);
-  else if(y>=171 && y<223) startRace(2);
+  if(y>=53 && y<105) {Serial.println("GHOST: SELECT 500");startRace(0);}
+  else if(y>=112 && y<164) {Serial.println("GHOST: SELECT 1000");startRace(1);}
+  else if(y>=171 && y<223) {Serial.println("GHOST: SELECT 2000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
-  if(!touchReady)return;
-  if(now-touchLastPollMs<12)return;
+  if(!touchReady || now-touchLastPollMs<12)return;
   touchLastPollMs=now;
-  const bool down=touch.touched();
-  if(down) {
-    const TS_Point pt=touch.getPoint();
-    if(!touchedLast){
-      touchedLast=true;touchPressedAt=now;swipeTriggered=false;
-      ++touchEvents;
-      Serial.printf("TOUCH: DOWN #%lu raw=%d,%d irq=%d\n",
-                    (unsigned long)touchEvents,pt.x,pt.y,digitalRead(36));
-      rawStartX=rawEndX=pt.x;
-      rawStartY=rawEndY=pt.y;
-    } else {
-      rawEndX=pt.x;rawEndY=pt.y;
-      const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
-      const float dY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-      if(!swipeTriggered && !calibrationScreen && now-touchPressedAt>=55 &&
-         cydtouch::pageSwipe(rawEndX-rawStartX,rawEndY-rawStartY,
-                             touchCalibrated,dX,dY)) {
-        swipeTriggered=true;
-        ++touchSwipeEvents;
-        Serial.printf("GHOST: LIVE SWIPE #%lu raw=(%d,%d), mode=%d\n",
-                      (unsigned long)touchSwipeEvents,
-                      rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
-        toggleMode();
-      }
+  // Read real Z pressure on every poll. The XPT2046 IRQ latch is not
+  // dependable across CYD revisions; it can suppress subsequent gestures.
+  const TS_Point pt=touch.getPoint();
+  const cydtouch::Event ev=touchTracker.sample(now,pt.z>=400,pt.x,pt.y);
+  if(ev==cydtouch::Event::None)return;
+  if(ev==cydtouch::Event::Recovery) {
+    Serial.printf("TOUCH: RECOVERY stuck contact z=%d irq=%d elapsed=%lu\n",
+                  (int)pt.z,digitalRead(36),(unsigned long)(now-touchPressedAt));
+    touchedLast=false;swipeTriggered=false;
+    return;
+  }
+  if(ev==cydtouch::Event::Down) {
+    touchedLast=true;touchPressedAt=now;swipeTriggered=false;
+    ++touchEvents;
+    rawStartX=rawEndX=pt.x;rawStartY=rawEndY=pt.y;
+    Serial.printf("TOUCH: DOWN #%lu raw=%d,%d z=%d irq=%d\n",
+                  (unsigned long)touchEvents,pt.x,pt.y,pt.z,digitalRead(36));
+    return;
+  }
+  if(ev==cydtouch::Event::Move) {
+    rawEndX=pt.x;rawEndY=pt.y;
+    const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+    const float dY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+    if(!swipeTriggered && !calibrationScreen && now-touchPressedAt>=55 &&
+       cydtouch::pageSwipe(rawEndX-rawStartX,rawEndY-rawStartY,
+                           touchCalibrated,dX,dY)) {
+      swipeTriggered=true;++touchSwipeEvents;
+      Serial.printf("GHOST: LIVE SWIPE #%lu raw=(%d,%d), mode=%d\n",
+                    (unsigned long)touchSwipeEvents,
+                    rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
+      toggleMode(); // one navigation per physical gesture
     }
-  } else if(touchedLast) {
-    touchedLast=false;
-    Serial.printf("TOUCH: UP raw=%d,%d duration=%lu mode=%d\n",
-                  (int)rawEndX,(int)rawEndY,
-                  (unsigned long)(now-touchPressedAt),(int)activeMode);
-    const uint32_t held=now-touchPressedAt;
-    if(swipeTriggered) {
-      Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
-      return;
+    return;
+  }
+  if(ev!=cydtouch::Event::Up)return;
+  touchedLast=false;
+  const uint32_t held=now-touchPressedAt;
+  Serial.printf("TOUCH: UP raw=%d,%d duration=%lu z=%d irq=%d mode=%d\n",
+                (int)rawEndX,(int)rawEndY,(unsigned long)held,
+                (int)pt.z,digitalRead(36),(int)activeMode);
+  if(swipeTriggered) {
+    Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
+    return;
+  }
+  const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
+  const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+  const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+  const bool horizontalSwipe=cydtouch::pageSwipe(rawEndX-rawStartX,
+      rawEndY-rawStartY,touchCalibrated,deltaX,deltaY);
+  if(max(dx,dy)>=160)
+    Serial.printf("TOUCH: deltaRaw=(%d,%d) mapped=(%.1f,%.1f) calibrated=%s swipe=%s\n",
+                  rawEndX-rawStartX,rawEndY-rawStartY,deltaX,deltaY,
+                  touchCalibrated?"yes":"no",horizontalSwipe?"yes":"no");
+  if(held>1100 && max(dx,dy)<420 && !horizontalSwipe &&
+     activeMode==Mode::Dashboard && !calibrationScreen) {
+    int16_t px,py;
+    if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
+      calibrationScreen=true;lastCalibrationPaint=255;
     }
-    const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
-    // Use calibrated screen coordinates so ONLY horizontal swipes navigate.
-    // Before first calibration, accept a dominant long raw-axis swipe to
-    // reach the calibration wizard without depending on the touch orientation.
-    bool horizontalSwipe=false;
-    // The XPT2046 axes may be swapped or inverted between CYD revisions.
-    // Even a saved touch calibration from a different firmware can turn a
-    // physical left/right swipe into a logical vertical move. Do NOT make
-    // the Ghost Race gesture depend exclusively on that calibration.
-    const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
-    const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-    horizontalSwipe=cydtouch::pageSwipe(rawEndX-rawStartX,
-                                       rawEndY-rawStartY,
-                                       touchCalibrated,deltaX,deltaY);
-    if(max(dx,dy)>=160)
-      Serial.printf("TOUCH: deltaRaw=(%d,%d) mapped=(%.1f,%.1f) calibrated=%s swipe=%s\n",
-                    rawEndX-rawStartX,rawEndY-rawStartY,
-                    deltaX,deltaY,touchCalibrated?"yes":"no",
-                    horizontalSwipe?"yes":"no");
-    if(held>1100 && max(dx,dy)<420 && !horizontalSwipe &&
-       activeMode==Mode::Dashboard && !calibrationScreen) {
-      int16_t px,py;
-      if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
-        calibrationScreen=true;
-        lastCalibrationPaint=255;
-      }
-    } else if(held>=45 && held<2000 && horizontalSwipe && !calibrationScreen) {
-      Serial.printf("GHOST: horizontal swipe detected; mode=%s -> %s\n",
-                    activeMode==Mode::Dashboard?"dashboard":"race",
-                    activeMode==Mode::Dashboard?"race":"dashboard");
-      toggleMode();
-    } else if(held>=60 && held<750 && max(dx,dy)<500) {
-      touchTap(rawEndX,rawEndY);
-    } else if(held>=1200 && max(dx,dy)<500 &&
-              activeMode==Mode::Race &&
-              (ghost.phase==ghostrace::Phase::Running ||
-               ghost.phase==ghostrace::Phase::Armed)) {
-      int16_t x,y;
-      if(mappedTouch(rawEndX,rawEndY,x,y) && y>=218)openRaceMenu();
-    }
+  } else if(held>=45 && held<2000 && horizontalSwipe && !calibrationScreen) {
+    Serial.printf("GHOST: horizontal swipe detected; mode=%s -> %s\n",
+                  activeMode==Mode::Dashboard?"dashboard":"race",
+                  activeMode==Mode::Dashboard?"race":"dashboard");
+    toggleMode();
+  } else if(held>=60 && held<750 && max(dx,dy)<500) {
+    touchTap(rawEndX,rawEndY);
+  } else if(held>=1200 && max(dx,dy)<500 &&
+            activeMode==Mode::Race &&
+            (ghost.phase==ghostrace::Phase::Running ||
+             ghost.phase==ghostrace::Phase::Armed)) {
+    int16_t x,y;
+    if(mappedTouch(rawEndX,rawEndY,x,y) && y>=218)openRaceMenu();
   }
 }
 
@@ -1222,7 +1223,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.9 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.10 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1232,7 +1233,7 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s, IRQ GPIO36 restored, CS33 SPI=25/39/32/33\n",
+  Serial.printf("Touch: %s, pressure polling; IRQ36 diagnostics, CS33 SPI=25/39/32/33\n",
                 touchReady ? "OK" : "unavailable");
   // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
   // retain BLE memory. Both hooks are strong overrides defined above.
