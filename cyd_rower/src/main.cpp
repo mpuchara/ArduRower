@@ -995,14 +995,16 @@ void pageLayout() {
   trendDrawn=UINT32_MAX;
 }
 void updateUI() {
-  if(activeMode==Mode::Race) {renderRaceUI();return;}
-  if(calibrationScreen) {calibrationPage();return;}
-  if(!pageRendered || detailPage!=displayedDetails)pageLayout();
+  const bool ghostWorkout=activeMode==Mode::Race &&
+   (ghost.phase==ghostrace::Phase::Armed || ghost.phase==ghostrace::Phase::Running);
+  if(activeMode==Mode::Race && !ghostWorkout) {renderRaceUI();return;}
+  if(calibrationScreen && !ghostWorkout) {calibrationPage();return;}
+  if(!pageRendered || detailPage!=displayedDetails || ghostWorkout!=displayedGhostWorkout)pageLayout();
   textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
   textPatch(1,250,2,70,19,String(hrStatus(displayedHrState(millis()))),
             liveHr(millis())?heartColor:labelColor,panelColor,2,true);
-  if(!detailPage){
+  if(!detailPage || ghostWorkout){
     const uint16_t bpm=liveHr(millis());
     textPatch(2,8,49,145,34,bpm?String(bpm)+" BPM":"-- BPM",
               heartColor,backgroundColor,4);
