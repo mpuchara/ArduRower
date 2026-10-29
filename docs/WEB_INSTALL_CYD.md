@@ -82,3 +82,10 @@ Po prawidłowym połączeniu, lecz braku pierwszego BPM przez 15 sekund, klient 
 ## CYD 0.09.4: niezależna diagnostyka CCCD i wejście do Ghost Race
 
 Wersja `0.09.4-hr-cccd-ghost-...` wymaga instalatora z pasującymi obrazami. Najpierw lokalna rejestracja GATT HR, potem zapis do CCCD `0x2902`, ze sprawdzeniem statusu obu operacji. Nowy status `HR CCCD` opisuje oczekiwanie na zapis deskryptora. Odbiór BPM nie jest gwarantowany przez samo podłączenie GATT. Działa wejście do wyścigów zarówno dotknięciem nagłówka dashboardu, jak i dwukrotnym przyciskiem BOOT; nie ma wymuszonej kalibracji dotyku przy otwieraniu menu. Pierwszy wyścig na nowym algorytmie tworzy nowy rekord, starsze rekordy nie są automatycznie konwertowane. Wyłącz pełne kasowanie flash, jeśli zachowujesz rekordy Ghost Race.
+
+
+## v0.09.5 — odbiór HR bez zakłócania aktywnego FTMS
+
+Aplikacja QZ (qdomyos-zwift) czyta Garmin Heart Rate przez systemowy stos Qt Bluetooth, nie przez biblioteki ESP32 Arduino BLE; używa standardu `180D/2A37` i zapisu CCCD `01 00`, który w naszych logach już zwraca powodzenie. Od 0.09.5 aktywne skanowanie BLE oraz GATT setup wykonywane są tylko wtedy, gdy Garmin nie jest aktualnie połączony z FTMS i od ostatniego ruchu minęło 15 s. Działający FTMS otrzymuje ciągły strumień co sekundę; odbiór HR po istniejącym linku pozostaje pasywny. Gdy FTMS przyłączy się podczas trwającego GATT setup, przerwiemy próbę przy najbliższym bezpiecznym punkcie, ale nie możemy przerwać wątku biblioteki blokującego się wewnątrz zapisu. Licznik zerwań FTMS trafia do logu. Nie obiecujemy twardych czasowych slotów RF, bo wykonuje je sam kontroler.
+
+Przy wejściu do Ghost Race preferowana jest zmiana strony gestem poziomym w LEWO lub w PRAWO (również przy zamienionych fizycznych osiach dotyku). Log `GHOST: horizontal swipe detected` pozwala odróżnić problem czujnika dotyku od warstwy menu. Awaryjna opcja to podwójne BOOT.
