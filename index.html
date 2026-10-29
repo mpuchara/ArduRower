@@ -62,8 +62,9 @@
   </section>
 
   <section class="card">
-    <h2>0.09.12 — naprawa dotyku i diagnostyka odbioru pulsu</h2>
+    <h2>0.09.12 — pulpit wyścigu z duchem</h2>
     <p><b>Ghost Race wyłącznie ekranem:</b> Logi fizycznego CYD pokazały Z około 3600 oraz IRQ=0 nawet po oderwaniu palca. Dlatego wybranie dystansu nie czeka już na zdarzenie UP: stabilny dotyk trwający około 160 ms wybiera wiersz bez zwolnienia. Po wykonaniu swipe lub wyborze ekranu sterownik natychmiast blokuje powtórzenie i pozwala zarejestrować następny, przestrzennie odrębny gest. Tap w wiersz 500, 1000 lub 2000 m wybiera dystans. Swipe w obie strony przełącza Ghost Race i ekran treningu. Nie trzeba przycisku BOOT.</p>
+    <p><b>Nowy widok:</b> po wybraniu 500/1000/2000m pojawia się pulpit DUCH z przygaszonym wykresem prędkości i pulsu. Przerywana linia obrazuje prędkość zapisanego ducha. Pole TEMPO /500m zastępuje ROZNICA / DUCH: metry przewagi lub straty. Bez wcześniejszego rekordu: -- m.</p>
     <p><b>Garmin FTMS i HR:</b> zachowujemy niezmienioną transmisję 1 Hz do Connect IQ. 0.09.9 potwierdziła, że Garmin odpowiada na GATT 180D/2A37 i subskrypcję na tym samym połączeniu FTMS, jednak żaden pakiet BPM nie dotarł. 0.09.12 weryfikuje powiązanie CCCD z 2A37, odczytuje CCCD po zapisie i loguje wszystkie przychodzące notyfikacje GAP. Nie tworzy drugiego połączenia BLE. Obecność usługi 180D i udana subskrypcja <b>nie gwarantują otrzymywania tętna</b>; bez fizycznego testu z Garminem status pozostaje eksperymentalny.</p>
     <p><b>Logi 115200:</b> <code>TOUCH: DOWN</code>, <code>TOUCH: UP</code>, <code>TOUCH: TAP without UP</code>, <code>TOUCH: RECOVERY</code>, <code>GHOST: SELECT</code>, <code>HR: 2A37 value</code>, <code>HR: CCCD readback</code>, <code>HR: raw NOTIFY</code>, <code>HR: single-ACL ready</code>. Rozróżniają problem kontrolera dotykowego od braku wysyłanych powiadomień z Garmina. Rekordy i kalibracja pozostają w NVS.</p>
   </section>
