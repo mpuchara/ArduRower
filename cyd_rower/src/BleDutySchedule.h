@@ -8,12 +8,11 @@
 namespace cydble {
 struct DutySchedule {
   static constexpr uint32_t kQuietAfterMotionMs=15000;
-  static constexpr uint32_t kStableFtmsMs=8000;
   static constexpr uint32_t kRetryMs=90000;
   static constexpr uint32_t kGuardAfterDropMs=180000;
   volatile uint32_t lastMotionMs=0, ftmsSinceMs=0, lastAttemptMs=0, lastDropMs=0;
   volatile uint32_t attempts=0, ftmsDrops=0;
-  volatile bool sawMotion=false, ftmsUp=false, oneAttemptWithFtms=false;
+  volatile bool sawMotion=false, ftmsUp=false;
   volatile bool hrSetupRunning=false, collisionGuard=false;
 
   void onMotion(uint32_t ms) { lastMotionMs=ms; sawMotion=true; }
@@ -21,7 +20,6 @@ struct DutySchedule {
     if(connected==ftmsUp)return;
     if(connected) {
       ftmsSinceMs=now;
-      oneAttemptWithFtms=false;
     } else {
       ++ftmsDrops;
       lastDropMs=now;
@@ -37,22 +35,19 @@ struct DutySchedule {
     if(attempts && (uint32_t)(now-lastAttemptMs)<kRetryMs)return false;
     if(collisionGuard &&
        (uint32_t)(now-lastDropMs)<kGuardAfterDropMs)return false;
-    // Once rowing has begun, never initiate another GATT discovery against
-    // an already-connected Garmin. This protects FTMS even after a pause.
-    // A previously established HR link can still receive notifications.
-    if(ftmsUp && sawMotion)return false;
-    if(ftmsUp && ((uint32_t)(now-ftmsSinceMs)<kStableFtmsMs ||
-                  oneAttemptWithFtms))return false;
+    // Strict FTMS priority: no scan, connect, GATT discovery or CCCD write
+    // while Garmin is using the FTMS peripheral. A PRE-ESTABLISHED HR link
+    // may still receive passive notifications with the radio scheduler.
+    if(ftmsUp)return false;
     return true;
   }
   void begin(uint32_t now) {
     ++attempts;lastAttemptMs=now;
     hrSetupRunning=true;
-    if(ftmsUp)oneAttemptWithFtms=true; // no scan/connect storm during FTMS
   }
   void end() {hrSetupRunning=false;}
   bool shouldYield(uint32_t now) const {
-    return !motionQuiet(now) ||
+    return ftmsUp || !motionQuiet(now) ||
            (collisionGuard && (uint32_t)(now-lastDropMs)<kGuardAfterDropMs);
   }
 };
