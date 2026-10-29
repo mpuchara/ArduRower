@@ -41,5 +41,5 @@ begin=src.index("void toggleMode() {")
 end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.6"' in src
+assert 'FIRMWARE_VERSION = "0.09.7"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
