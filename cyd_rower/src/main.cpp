@@ -370,6 +370,10 @@ void hrWorker(void*) {
     const uint32_t countBefore=hrNotifyPackets;
     setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER, no CCCD write");
     characteristic->registerForNotify(hrNotify,true,false);
+    // Library gives its internal semaphore before the observer hook runs,
+    // so await the same GATTC callback's status briefly before evaluation.
+    for(int tries=0;tries<50 && hrRegResult==0xff;++tries)
+      vTaskDelay(pdMS_TO_TICKS(10));
     Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\n",
                   (unsigned)hrRegResult);
     if(hrRegResult!=ESP_GATT_OK) {
@@ -380,6 +384,8 @@ void hrWorker(void*) {
     uint8_t enableNotify[2]={0x01,0x00};
     setHrState(HrState::Descriptor,"CCCD 0x2902 enable notifications ENTER");
     cccd->writeValue(enableNotify,2,true);
+    for(int tries=0;tries<50 && hrDescriptorResult==0xff;++tries)
+      vTaskDelay(pdMS_TO_TICKS(10));
     Serial.printf("HR: CCCD write RETURN result=%u\n",
                   (unsigned)hrDescriptorResult);
     if(hrDescriptorResult!=ESP_GATT_OK) {
