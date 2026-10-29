@@ -38,7 +38,7 @@ for marker in (
     "setHrState(HrState::LowMemory",
     "setHrState(HrState::NotFound",
     "hrState=HrState::Receiving",
-    "String(hrStatus(hrState))",
+    "String(hrStatus(displayedHrState(millis())))",
     "ArduRower CYD v0.09.3",
     'FIRMWARE_VERSION = "0.09.3"',
 ):
