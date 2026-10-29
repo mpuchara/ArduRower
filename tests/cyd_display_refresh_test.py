@@ -35,7 +35,7 @@ assert "tft.fillScreen(backgroundColor);" in source
 for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "loop"):
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
-assert "plottedRevision != historyRevision" in source
+assert "trendDrawn!=trendRevision" in source
 assert "max(dx,dy)>700" in source
 assert "ghost.start(now)" in source
 assert "saveBest(selectedDistance,ghost.attempt)" in source

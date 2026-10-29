@@ -20,9 +20,22 @@ public:
   uint64_t activeUs = 0;
   float speed = 0, strokeRate = 0;
   bool started = false, paused = false;
+  // Optional CYD-only telemetry source for a reversible strap reel.
+  // Legacy Heltec keeps the exact original pulse-based math by default.
+  bool externalTelemetry = false;
+  float externalDistance = 0;
+  void setExternalTelemetry(float distanceMeters, float speedMs,
+                            uint32_t strokeCount, float cadenceSpm) {
+    externalTelemetry=true;
+    externalDistance=distanceMeters;
+    speed=speedMs;
+    strokes=strokeCount;
+    strokeRate=cadenceSpm;
+  }
 
   void reset(uint32_t now) {
     pulses = strokes = 0; activeUs = 0;
+    externalTelemetry=false; externalDistance=0;
     speed = strokeRate = 0; started = paused = false;
     lastTick = lastPulse = sampleTime = now;
     samplePulses = 0; oldPulseRate = 0; holdoffPulses = 0;
@@ -89,7 +102,9 @@ public:
   }
 
   static float metersPerPulse() { return METERS_PER_REVOLUTION / MAGNETS_PER_REVOLUTION * DISTANCE_SCALE; }
-  float distance() const { return pulses * metersPerPulse(); }
+  float distance() const {
+    return externalTelemetry ? externalDistance : pulses * metersPerPulse();
+  }
   float seconds() const { return activeUs / 1000000.0; }
   float averageStrokeRate() const { return activeUs ? strokes * 60000000.0 / activeUs : 0; }
   float pace() const { return speed > 0.05f && !paused ? 500.0f / speed : 0; }

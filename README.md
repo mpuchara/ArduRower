@@ -104,3 +104,12 @@ Projekt bazuje na ArduRower autorstwa zpukr, wskazującym także WaterRino oraz 
 ## Ghost Race — ściganie ze sobą na CYD
 
 Firmware CYD ST7789/GPIO21 ma nowy tryb **Ghost Race**. Swipe w lewo/prawo przełącza dashboard i tryb wyścigu; menu pozwala wybrać 500/1000/2000 m, a zapisany rekord odtwarzany jest jako drugi wioślarz. Wyświetlane są przewaga w metrach i sekundach, czas, moc, prędkość i wykresy. Dane rekordu trafiają lokalnie do ESP32 NVS, ale nie ingerują w działające pole Garmin Connect IQ. [Instrukcja](cyd_rower/README.md) · [Instalator](https://mpuchara.github.io/ArduRower/).
+
+
+## CYD v0.09 — dwie fazy ruchu, puls i wspólny wykres
+
+Od wersji `0.09-motion-hr` firmware CYD ST7789/GPIO21 używa **eksperymentalnego** modelu taśmy o napędzie jednokierunkowym. Cztery magnesy są na zwijaczu, a nie na wirniku; nie ma pomiaru kierunku, dlatego fazy napęd/powrót są wnioskowane z dwóch spowolnień na pełny cykl. To nie jest odwzorowanie oryginalnego WaterRower S4. Poziom kalibracji nie jest potwierdzony niezależnym pomiarem i wymaga prób na Twoim ergometrze.
+
+Dashboard pokazuje duży puls i prędkość, wspólny wykres z 10 minut (seria czerwona HR, turkusowa km/h), duże wartości: czas, dystans, SPM, tempo, szacowana moc i ruchy. Dłuższe dotknięcie górnego paska otwiera regulację skali dystansu w granicach 0.30–1.50, co zmienia dane bieżące i powoduje pominięcie rekordów Ghost Race zapisanych przy innej kalibracji. Bez transmisji HR wyświetlane jest `-- BPM`.
+
+ESP32 próbuje łączyć się w drugim kanale BLE z usługą Heart Rate `0x180D`. Transmisja HR podczas aktywności musi być włączona na zegarku. Jednoczesna współpraca z dotychczasowym polem Connect IQ jest **do zweryfikowania na fizycznym Garminie**; format FTMS nie został zmieniony. Przy niedoborze RAM odbiornik HR nie uruchamia się, a trening i Garmin nadal otrzymują dotychczasową usługę BLE. Nie wybieraj pełnego kasowania flash przy aktualizacji, jeśli zachowujesz rekordy NVS.

@@ -13,6 +13,9 @@
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <Preferences.h>
+#include <BLEScan.h>
+#include <BLEClient.h>
+#include "CydMotion.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
@@ -27,6 +30,9 @@ static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
 static constexpr uint16_t QUEUE_SIZE = 256;
 static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
 static constexpr bool LOG_SENSOR_PULSES = false;
+static constexpr uint32_t TREND_SAMPLE_MS=2000;
+static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
+static constexpr uint32_t HR_TIMEOUT_MS=6500;
 
 // Original FTMS IDs, advertised name, service/characteristic structure and
 // notification frequency: do not change without an opt-in compatibility test.
@@ -53,6 +59,102 @@ bool touchCalibrated=false, pendingCalibration=false;
 uint8_t touchRotation=DEFAULT_ROTATION;
 
 RowerMetrics metrics;
+cydmotion::Engine motion;
+volatile uint16_t receivedHr=0;
+volatile uint32_t receivedHrAt=0;
+volatile bool hrConnected=false;
+bool hrTaskCreated=false;
+struct TrendPoint { uint16_t tenthKmh; uint8_t heartBpm; uint8_t reserved; };
+TrendPoint trends[TREND_SAMPLES] = {};
+uint16_t trendHead=0,trendCount=0;
+uint32_t trendLastMs=0,trendRevision=0,trendDrawn=UINT32_MAX;
+bool calibrationScreen=false;
+float speedCalibration=cydmotion::Engine::kDefaultCalibration;
+uint8_t lastCalibrationPaint=255;
+uint16_t liveHr(uint32_t nowMs) {
+  return (receivedHrAt && nowMs-receivedHrAt<HR_TIMEOUT_MS) ? receivedHr : 0;
+}
+void loadMotionCalibration() {
+  Preferences p;
+  if(p.begin("rower-motion",true)) {
+    speedCalibration=p.getFloat("scale",cydmotion::Engine::kDefaultCalibration);
+    p.end();
+  }
+  if(!isfinite(speedCalibration) || speedCalibration<0.3f || speedCalibration>1.5f)
+    speedCalibration=cydmotion::Engine::kDefaultCalibration;
+  motion.setCalibration(speedCalibration);
+}
+void saveMotionCalibration() {
+  Preferences p;
+  if(p.begin("rower-motion",false)) {
+    p.putFloat("scale",speedCalibration);
+    p.end();
+  }
+}
+// Heart rate is optional. An independent BLE client attempts to subscribe to
+// a broadcasting Garmin's standard Heart Rate Measurement (0x180D/0x2A37).
+// Any failure leaves the FTMS peripheral untouched and renders "-- BPM".
+static BLEAdvertisedDevice *hrCandidate=nullptr;
+class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
+ public:
+  void onResult(BLEAdvertisedDevice device) override {
+    if(!hrCandidate && device.haveServiceUUID() &&
+       device.isAdvertisingService(BLEUUID((uint16_t)0x180D))) {
+      hrCandidate=new BLEAdvertisedDevice(device);
+    }
+  }
+};
+static void hrNotify(BLERemoteCharacteristic*,uint8_t *buf,size_t size,bool) {
+  if(size<2)return;
+  const bool sixteen=buf[0]&1;
+  if(sixteen && size<3)return;
+  const uint16_t hr=sixteen ? (uint16_t)(buf[1]|(buf[2]<<8)) : buf[1];
+  if(hr>=35 && hr<=240) {
+    receivedHr=hr;
+    receivedHrAt=millis();
+  }
+}
+void hrWorker(void *) {
+  BLEScan *scanner=BLEDevice::getScan();
+  if(!scanner){vTaskDelete(nullptr);return;}
+  scanner->setAdvertisedDeviceCallbacks(new HrAdvertisements(),false);
+  scanner->setActiveScan(false);
+  scanner->setInterval(160);
+  scanner->setWindow(48); // low radio duty-cycle; protect Garmin FTMS stream
+  // Reuse the same client across scans; BLEDevice keeps its own reference.
+  BLEClient *client=BLEDevice::createClient();
+  if(!client) {vTaskDelete(nullptr);return;}
+  while(true) {
+    if(ESP.getFreeHeap()<50000) {
+      vTaskDelay(pdMS_TO_TICKS(20000));
+      continue;
+    }
+    hrCandidate=nullptr;
+    scanner->start(4,false);
+    scanner->clearResults();
+    BLEAdvertisedDevice *peer=hrCandidate;
+    hrCandidate=nullptr;
+    if(peer) {
+      bool subscribed=false;
+      if(client && client->connect(peer)) {
+        BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
+        BLERemoteCharacteristic *characteristic=service ?
+          service->getCharacteristic(BLEUUID((uint16_t)0x2A37)) : nullptr;
+        if(characteristic && characteristic->canNotify()) {
+          characteristic->registerForNotify(hrNotify);
+          subscribed=true;
+        }
+        hrConnected=subscribed;
+        if(subscribed)
+          while(client->isConnected())vTaskDelay(pdMS_TO_TICKS(1500));
+        client->disconnect();
+      }
+      hrConnected=false;
+      delete peer;
+    }
+    vTaskDelay(pdMS_TO_TICKS(18000));
+  }
+}
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
 BLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
@@ -75,7 +177,7 @@ HistorySample history[HISTORY_LENGTH] = {};
 uint8_t historyHead = 0;
 uint8_t historyCount = 0;
 uint16_t backgroundColor, panelColor, faintColor, gridColor;
-uint16_t powerColor, speedColor, labelColor, whiteColor;
+uint16_t powerColor, speedColor, labelColor, whiteColor, heartColor;
 uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
 bool pageRendered = false, displayedDetails = false;
 // Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
@@ -250,6 +352,12 @@ void resetWorkout() {
   droppedPulses = 0;
   metrics.reset(micros());
   portEXIT_CRITICAL(&pulseMux);
+  motion.reset(micros());
+  motion.setCalibration(speedCalibration);
+  trendHead=trendCount=0;
+  memset(trends,0,sizeof(trends));
+  trendRevision++;
+  trendDrawn=UINT32_MAX;
   historyHead = 0;
   historyCount = 0;
   memset(history, 0, sizeof(history));
@@ -270,10 +378,10 @@ bool loadBest(uint8_t index, ghostrace::Record &out) {
   const size_t read = (n == sizeof(out)) ?
       p.getBytes(raceKeys[index], &out, sizeof(out)) : 0;
   p.end();
-  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index]);
+  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index],motion.calibrationMilli());
 }
 bool saveBest(uint8_t index, const ghostrace::Record &record) {
-  if (!ghostrace::valid(record, raceDistances[index])) return false;
+  if (!ghostrace::valid(record, raceDistances[index],motion.calibrationMilli())) return false;
   Preferences p;
   if (!p.begin("rower-races", false)) return false;
   const bool ok = p.putBytes(raceKeys[index], &record, sizeof(record)) == sizeof(record);
@@ -288,7 +396,8 @@ void startRace(uint8_t index) {
   if (index >= 3) return;
   selectedDistance = index;
   const bool found = loadBest(index, storedGhost);
-  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr);
+  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,
+            motion.calibrationMilli());
   // Start a fresh interval, so race distance is not polluted by earlier
   // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
   resetWorkout();
@@ -426,6 +535,29 @@ bool calibrateRaceTouch() {
   return true;
 }
 void touchTap(int16_t rx,int16_t ry) {
+  if(calibrationScreen) {
+    int16_t x,y;
+    if(!mappedTouch(rx,ry,x,y)) return;
+    if(y>105 && y<160) {
+      if(x<158) speedCalibration=fmaxf(0.3f,speedCalibration-0.05f);
+      else speedCalibration=fminf(1.5f,speedCalibration+0.05f);
+      motion.setCalibration(speedCalibration);
+      saveMotionCalibration();
+      // Calibration invalidates any in-progress Ghost Race measurement.
+      // Never append samples under the new scale to an old-calibration race.
+      if(ghost.phase==ghostrace::Phase::Armed ||
+         ghost.phase==ghostrace::Phase::Running) ghost.cancel();
+      ghost.phase=ghostrace::Phase::Idle;
+      // New calibration changes virtual meters. Invalidate race replay
+      // compatibility through GhostRace::Record.scaleMilli.
+      resetWorkout();loadBestTimes();
+      lastCalibrationPaint=255;
+    } else if(y>=170) {
+      calibrationScreen=false;
+      pageRendered=false;
+    }
+    return;
+  }
   if(activeMode==Mode::Dashboard){detailPage=!detailPage;return;}
   if(ghost.phase==ghostrace::Phase::Finished ||
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
@@ -465,7 +597,14 @@ void updateTouch(uint32_t now) {
     } else {
       horizontalSwipe=max(dx,dy)>700 && max(dx,dy)>min(dx,dy)*1.6f;
     }
-    if(held>75 && held<1750 && horizontalSwipe) {
+    if(held>1100 && max(dx,dy)<420 &&
+       activeMode==Mode::Dashboard && !calibrationScreen) {
+      int16_t px,py;
+      if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
+        calibrationScreen=true;
+        lastCalibrationPaint=255;
+      }
+    } else if(held>75 && held<1750 && horizontalSwipe && !calibrationScreen) {
       toggleMode();
     } else if(held>=60 && held<750 && max(dx,dy)<500) {
       touchTap(rawEndX,rawEndY);
@@ -494,8 +633,20 @@ String formatTime(uint32_t seconds) {
 String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
 }
+void recordTrend(uint32_t now) {
+  const float kmh=motion.speed*3.6f;
+  const float tenth=fmaxf(0.0f,fminf(600.0f,kmh*10.0f));
+  trends[trendHead]={static_cast<uint16_t>(lroundf(tenth)),
+                     static_cast<uint8_t>(liveHr(now)),0};
+  trendHead=(trendHead+1)%TREND_SAMPLES;
+  if(trendCount<TREND_SAMPLES)++trendCount;
+  ++trendRevision;
+}
+const TrendPoint &trendAt(uint16_t i) {
+  return trends[(trendHead+TREND_SAMPLES-trendCount+i)%TREND_SAMPLES];
+}
 void recordHistory() {
-  history[historyHead] = {metrics.equivalentPower(), metrics.speed * 3.6f};
+  history[historyHead] = {(float)liveHr(millis()), metrics.speed * 3.6f};
   historyHead = (historyHead + 1) % HISTORY_LENGTH;
   if (historyCount < HISTORY_LENGTH) ++historyCount;
   ++historyRevision;
@@ -509,7 +660,7 @@ float sampleValue(uint8_t index, bool power) {
   return power ? s.power : s.speedKmh;
 }
 float historyMax(bool power) {
-  float result = power ? 10.0f : 2.0f;
+  float result = power ? 150.0f : 2.0f;
   for (uint8_t i = 0; i < historyCount; ++i)
     result = max(result, sampleValue(i, power));
   return result * 1.12f;
@@ -611,80 +762,147 @@ void plot(int x, int y, int w, int h, bool power) {
     if (scratchReady) scratch.pushSprite(x+left,y,0,0,part,h);
   }
 }
-void pageLayout() {
-  tft.fillScreen(backgroundColor);  // only at startup or on explicit view change
-  tft.fillRect(0,0,320,25,panelColor);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(whiteColor,panelColor);
-  tft.drawString("ARDUROWER",8,4,2);
-  if (!detailPage) {
-    for (int i=0;i<2;i++) {
-      const int x=i?163:8, y=32, w=149, h=123;
-      tft.fillRoundRect(x,y,w,h,6,panelColor);
-      tft.drawRoundRect(x,y,w,h,6,gridColor);
-      tft.setTextColor(labelColor,panelColor);
-      tft.drawString(i?"PREDKOSC":"MOC SZACOWANA",x+9,y+6,2);
-      tft.drawString(i?"km/h / 120 s":"W / 120 s",x+9,y+62,2);
+// Two independent units on one long graph, with a fixed mapping to avoid
+// rescaling mid-session. Heartbeat samples that are stale/absent break the HR
+// line; they must never be drawn as zero or mistaken for a real measurement.
+void renderSharedTrend(int x,int y,int width,int height) {
+  const int16_t speedMaxTenth=220; // 22.0 km/h right scale
+  const int hrMin=60,hrMax=190; // 60..190 BPM left scale
+  for(int left=0;left<width;left+=BUFFER_W) {
+    const int part=min((int)BUFFER_W,width-left);
+    if(scratchReady) {
+      scratch.fillSprite(panelColor);
+      for(int i=0;i<3;i++)
+        scratch.drawFastHLine(0,i*(height-1)/2,part,gridColor);
+    }else{
+      tft.fillRect(x+left,y,part,height,panelColor);
+      for(int i=0;i<3;i++)
+        tft.drawFastHLine(x+left,y+i*(height-1)/2,part,gridColor);
     }
-    const int pos[3]={8,115,225};
-    const char* names[6]={"CZAS","DYSTANS","SPM~","TEMPO / 500m","SR. ~W","RUCHY~"};
-    tft.setTextColor(labelColor,backgroundColor);
-    for (int i=0;i<6;i++) tft.drawString(names[i],pos[i%3],i<3?156:198,2);
-  } else {
-    tft.setTextColor(powerColor,backgroundColor);
-    tft.drawString("MOC ~W",8,29,2);
-    tft.setTextColor(speedColor,backgroundColor);
-    tft.drawString("PREDKOSC km/h",8,119,2);
-    tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("OSTATNIE 120 s",8,207,2);
-    tft.drawRightString("Dotknij, by wrocic",311,207,2);
-    tft.drawString("BOOT: krotko = widok; >1.5 s = reset",8,225,1);
+    int previousX=0,previousHrY=0,previousSpeedY=0;
+    bool prevHrValid=false,prevSpeedValid=false;
+    for(uint16_t i=0;i<trendCount;++i) {
+      const TrendPoint &sample=trendAt(i);
+      const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
+      const int hrY=height-1-(int)((constrain((int)sample.heartBpm,hrMin,hrMax)-hrMin)*
+                                  (height-1)/(hrMax-hrMin));
+      const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
+                                (int)speedMaxTenth))*(height-1)/speedMaxTenth);
+      bool hrValid=sample.heartBpm>=hrMin;
+      if(i>0 && xx>=left-2 && previousX<left+part) {
+        if(prevSpeedValid) {
+          if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedColor);
+          else tft.drawLine(x+previousX,y+previousSpeedY,x+xx,y+spY,speedColor);
+        }
+        if(hrValid && prevHrValid) {
+          if(scratchReady)scratch.drawLine(previousX-left,previousHrY,xx-left,hrY,heartColor);
+          else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,heartColor);
+        }
+      }
+      previousX=xx;previousHrY=hrY;previousSpeedY=spY;
+      prevHrValid=hrValid;prevSpeedValid=true;
+    }
+    if(scratchReady) scratch.pushSprite(x+left,y,0,0,part,height);
   }
-  pageRendered=true; displayedDetails=detailPage;
+}
+void calibrationPage() {
+  if(lastCalibrationPaint!=255)return;
+  tft.fillScreen(backgroundColor);
+  tft.setTextColor(whiteColor,backgroundColor);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("KALIBRACJA DYSTANSU",9,6,2);
+  tft.setTextColor(labelColor,backgroundColor);
+  tft.drawString("Skala wirtualna (nie S4)",9,36,2);
+  tft.setTextColor(whiteColor,backgroundColor);
+  tft.drawCentreString(String(speedCalibration,2)+" x",160,61,4);
+  tft.fillRoundRect(10,105,144,52,7,panelColor);
+  tft.fillRoundRect(166,105,144,52,7,panelColor);
+  tft.setTextColor(heartColor,panelColor);
+  tft.drawCentreString("-0.05",82,118,4);
+  tft.setTextColor(speedColor,panelColor);
+  tft.drawCentreString("+0.05",238,118,4);
+  tft.fillRoundRect(10,180,300,51,7,panelColor);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawCentreString("ZAPISZ I WROC",160,192,2);
+  lastCalibrationPaint=0;
+}
+void pageLayout() {
+  tft.fillScreen(backgroundColor); // only on view change
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(0,0,320,24,panelColor);
+  tft.setTextColor(whiteColor,panelColor);
+  tft.drawString("ARDUROWER",7,3,2);
+  if(!detailPage){
+    tft.setTextColor(heartColor,backgroundColor);
+    tft.drawString("PULS",8,27,2);
+    tft.setTextColor(speedColor,backgroundColor);
+    tft.drawString("PREDKOSC",165,27,2);
+    tft.fillRoundRect(7,87,306,62,4,panelColor);
+    tft.setTextColor(labelColor,backgroundColor);
+    const int xx[3]={8,115,224};
+    const char *names[6]={"CZAS","DYSTANS","SPM","TEMPO /500m","MOC ~W","RUCHY"};
+    for(int i=0;i<6;++i)
+      tft.drawString(names[i],xx[i%3],i<3?156:199,1);
+  }else{
+    tft.setTextColor(whiteColor,backgroundColor);
+    tft.drawString("ANALIZA CYKLU",9,28,2);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("FAZA",9,60,2);
+    tft.drawString("IMPULSY",178,60,2);
+    tft.drawString("RUCHY",9,114,2);
+    tft.drawString("ZMIANY KIERUNKU ~",178,114,2);
+    tft.fillRoundRect(8,176,304,43,4,panelColor);
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("DOTKNIJ, ABY WROCIC",12,224,1);
+  }
+  pageRendered=true;displayedDetails=detailPage;
   resetRenderCache();
+  trendDrawn=UINT32_MAX;
 }
 void updateUI() {
-  if (activeMode == Mode::Race) { renderRaceUI(); return; }
-  if (!pageRendered || detailPage != displayedDetails) pageLayout();
-  textPatch(0,155,3,85,20,deviceConnected?"BLE OK":"BLE ...",
+  if(activeMode==Mode::Race) {renderRaceUI();return;}
+  if(calibrationScreen) {calibrationPage();return;}
+  if(!pageRendered || detailPage!=displayedDetails)pageLayout();
+  textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
-  textPatch(1,244,3,76,20,metrics.paused?"PAUZA":formatTime((uint32_t)metrics.seconds()),
-            metrics.paused?powerColor:labelColor,panelColor,2,true);
-  if (!detailPage) {
-    cardValue(2,8,true);
-    cardValue(3,163,false);
-    textPatch(4,8,172,99,26,formatTime((uint32_t)metrics.seconds()),
+  textPatch(1,250,2,70,19,liveHr(millis())?"HR OK":"HR --",
+            liveHr(millis())?heartColor:labelColor,panelColor,2,true);
+  if(!detailPage){
+    const uint16_t bpm=liveHr(millis());
+    textPatch(2,8,49,145,34,bpm?String(bpm)+" BPM":"-- BPM",
+              heartColor,backgroundColor,4);
+    textPatch(3,164,49,149,34,String(metrics.speed*3.6f,1)+" km/h",
+              speedColor,backgroundColor,4);
+    textPatch(4,8,166,102,26,formatTime((uint32_t)metrics.seconds()),
               whiteColor,backgroundColor,4);
-    textPatch(5,115,172,105,26,String((uint32_t)metrics.distance())+" m",
+    textPatch(5,115,166,104,26,String((uint32_t)roundf(metrics.distance()))+" m",
               whiteColor,backgroundColor,4);
-    textPatch(6,225,172,92,26,String((uint32_t)roundf(metrics.strokeRate)),
+    textPatch(6,224,166,95,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
-    textPatch(7,8,214,99,26,formatPace(metrics.pace()),
+    textPatch(7,8,207,102,26,formatPace(metrics.pace()),
               whiteColor,backgroundColor,4);
-    textPatch(8,115,214,105,26,String((uint32_t)roundf(metrics.averageEquivalentPower())),
+    textPatch(8,115,207,104,26,
+              "~"+String((int)roundf(metrics.equivalentPower())),
               whiteColor,backgroundColor,4);
-    textPatch(9,225,214,92,26,String(metrics.strokes),
+    textPatch(9,224,207,95,26,String(metrics.strokes),
               whiteColor,backgroundColor,4);
-  } else {
-    textPatch(10,176,29,143,18,"MAX "+String((int)roundf(historyMax(true)))+" W",
-              labelColor,backgroundColor,2,true);
-    textPatch(11,165,119,154,18,"MAX "+String(historyMax(false),1)+" km/h",
-              labelColor,backgroundColor,2,true);
-  }
-  if (plottedRevision != historyRevision) {
-    if (detailPage) {
-      plot(9,53,302,54,true);
-      plot(9,143,302,54,false);
-    } else {
-      plot(18,113,129,32,true);
-      plot(173,113,129,32,false);
+    if(trendDrawn!=trendRevision) {
+      renderSharedTrend(9,91,302,54);
+      trendDrawn=trendRevision;
     }
-    plottedRevision=historyRevision;
-  }
-  if (!detailPage && droppedPulses) {
-    tft.fillRect(290,225,23,14,TFT_RED);
-    tft.setTextColor(TFT_WHITE,TFT_RED);
-    tft.drawString("!",298,224,2);
+  }else{
+    String phaseName=motion.phase==cydmotion::Phase::Drive?"NAPED" :
+      motion.phase==cydmotion::Phase::Return?"POWROT":"OCZEKIWANIE";
+    textPatch(10,9,82,159,26,phaseName,heartColor,backgroundColor,4);
+    textPatch(11,178,82,138,26,String(motion.pulses),
+              whiteColor,backgroundColor,4);
+    textPatch(21,9,138,155,26,String(motion.strokes),
+              whiteColor,backgroundColor,4);
+    textPatch(22,178,138,138,26,String(motion.transitions),
+              whiteColor,backgroundColor,4);
+    textPatch(23,13,183,150,30,
+              "Skala "+String(speedCalibration,2)+"   Faza z impulsow",
+              labelColor,panelColor,2);
   }
 }
 // Ghost UI: page changes perform one clear; every live field is replaced by
@@ -733,7 +951,7 @@ void paintRaceLayout(uint8_t screen) {
     tft.setTextColor(speedColor,backgroundColor);
     tft.drawString("DUCH",12,84,2);
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("MOC ~W",15,174,1);
+    tft.drawString("PULS",15,174,1);
     tft.drawString("km/h",174,174,1);
     tft.drawString("BOOT 1.5s: anuluj",9,228,1);
     tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
@@ -839,8 +1057,8 @@ void renderRaceUI() {
               leadSeconds>=0?speedColor:powerColor,backgroundColor,1,true);
   }
   textPatch(16,12,149,145,25,
-            "~"+String((int)roundf(metrics.equivalentPower()))+" W",
-            powerColor,backgroundColor,4);
+            liveHr(millis())?String(liveHr(millis()))+" BPM":"-- BPM",
+            heartColor,backgroundColor,4);
   textPatch(17,165,149,148,25,
             String(metrics.speed*3.6f,1)+" km/h",
             speedColor,backgroundColor,4);
@@ -850,9 +1068,8 @@ void renderRaceUI() {
             labelColor,panelColor,2,true);
   paintProgress(56,ghost.meters,powerColor);
   paintProgress(106,ghost.ghostMeters(now),speedColor);
-  if(plottedRevision!=historyRevision) {
-    plot(15,189,132,28,true);
-    plot(173,189,132,28,false);
+  if(trendDrawn!=trendRevision) {
+    renderSharedTrend(15,189,290,28);
     plottedRevision=historyRevision;
   }
 }
@@ -874,6 +1091,7 @@ void initDisplay() {
   gridColor = tft.color565(34, 48, 62);
   powerColor = tft.color565(255, 184, 64);
   speedColor = tft.color565(64, 215, 196);
+  heartColor = tft.color565(250, 91, 108);
   labelColor = tft.color565(145, 160, 175);
   whiteColor = TFT_WHITE;
   tft.fillScreen(backgroundColor);
@@ -904,6 +1122,7 @@ void setup() {
   if(touchReady)readTouchCalibration();
   Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
   initBLE();
+  loadMotionCalibration();
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
@@ -916,6 +1135,13 @@ void setup() {
   resetWorkout();
   loadBestTimes();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
+  // Optional second BLE role; do not start it under memory pressure.
+  if(ESP.getFreeHeap()>85000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",8192,
+                                         nullptr,1,nullptr,0)==pdPASS;
+  Serial.printf("HR client %s; heap %u\n",
+                hrTaskCreated?"enabled":"not started",
+                (unsigned)ESP.getFreeHeap());
   updateUI();
 }
 void loop() {
@@ -931,13 +1157,17 @@ void loop() {
     portEXIT_CRITICAL(&pulseMux);
     if (!available) { metrics.tick(pulseTime); break; }
     metrics.pulse(pulseTime);
+    motion.onPulse(pulseTime);
     if (LOG_SENSOR_PULSES) {
       Serial.print("P,"); Serial.print(pulseTime);
       Serial.print(','); Serial.print(metrics.pulses);
       Serial.print(','); Serial.println(metrics.strokes);
     }
   }
-  const uint32_t now = millis();
+  const uint32_t now=millis();
+  motion.tick(micros());
+  metrics.setExternalTelemetry(motion.meters,motion.speed,
+                               motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
   if (pendingCalibration && activeMode==Mode::Race &&
@@ -961,6 +1191,10 @@ void loop() {
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
     setCxRowerData();
+  }
+  if(now-trendLastMs>=TREND_SAMPLE_MS) {
+    trendLastMs=now;
+    recordTrend(now);
   }
   if (now - lastHistoryMs >= HISTORY_INTERVAL_MS) {
     lastHistoryMs = now;

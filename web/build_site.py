@@ -16,7 +16,7 @@ SITE = ROOT / "site"
 ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
 }
-VERSION = "0.08.1-ghostfix-" + os.environ.get("GITHUB_SHA", "local")[:7]
+VERSION = "0.09-motion-hr-" + os.environ.get("GITHUB_SHA", "local")[:7]
 
 
 def require(path):

@@ -11,8 +11,8 @@ namespace ghostrace {
 static constexpr uint16_t kIntervalMs = 2000;
 static constexpr uint16_t kSamples = 1024; // 34m 8s; 0.1m encoded as uint16
 static constexpr uint32_t kMagic = 0x47525731UL; // GRW1
-static constexpr uint16_t kVersion = 1;
-static const uint32_t kScaleMilli = static_cast<uint32_t>(DISTANCE_SCALE * 1000.0f + 0.5f);
+static constexpr uint16_t kVersion = 2; // new movement model: incompatible with previous pulse distances
+static const uint32_t kScaleMilli = 700; // default CYD motion calibration
 
 struct Record {
   uint32_t magic;
@@ -36,10 +36,11 @@ inline uint32_t hashRecord(const Record &r) {
   return h;
 }
 inline bool allowedDistance(uint16_t d) { return d == 500 || d == 1000 || d == 2000; }
-inline bool valid(const Record &r, uint16_t expectedTarget) {
+inline bool valid(const Record &r, uint16_t expectedTarget,
+                  uint32_t expectedCalibration = kScaleMilli) {
   if (r.magic != kMagic || r.version != kVersion ||
       r.targetMeters != expectedTarget || !allowedDistance(r.targetMeters) ||
-      r.scaleMilli != kScaleMilli || r.finishMs == 0 ||
+      r.scaleMilli != expectedCalibration || r.finishMs == 0 ||
       r.count == 0 || r.count > kSamples ||
       r.finishMs > static_cast<uint32_t>(kSamples) * kIntervalMs ||
       r.checksum != hashRecord(r)) return false;
@@ -94,20 +95,23 @@ class Race {
   Phase phase = Phase::Idle;
   bool hasBest = false, personalBest = false, overflow = false;
   uint16_t targetMeters = 0;
+  uint32_t calibrationMilli = kScaleMilli;
   uint32_t startMs = 0;
   uint32_t endMs = 0;
   float meters = 0;
 
-  void arm(uint16_t target, const Record *loadedBest) {
+  void arm(uint16_t target, const Record *loadedBest,
+           uint32_t activeCalibration = kScaleMilli) {
+    calibrationMilli = activeCalibration;
     targetMeters = target;
-    hasBest = loadedBest && valid(*loadedBest, target);
+    hasBest = loadedBest && valid(*loadedBest, target, calibrationMilli);
     if (hasBest) memcpy(&best, loadedBest, sizeof(best));
     else memset(&best, 0, sizeof(best));
     memset(&attempt, 0, sizeof(attempt));
     attempt.magic = kMagic;
     attempt.version = kVersion;
     attempt.targetMeters = target;
-    attempt.scaleMilli = kScaleMilli;
+    attempt.scaleMilli = calibrationMilli;
     attempt.count = 1;
     attempt.decimeters[0] = 0;
     phase = Phase::Armed;
