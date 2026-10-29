@@ -120,3 +120,78 @@ static bool awaitHrProcedure(uint16_t handle,const char *phase) {
 static void prepareHrProcedure() {
   hrProcedureDone=false;hrProcedureStatus=0xffff;
 }
+
+// We never create a second GAP connection to Garmin. Discovery is carried out
+// with NimBLE's low-level GATT client using the connection handle delivered
+// by our existing NimBLEServer (Garmin is already the central).
+static void hrWorker(void *) {
+  NimBLEDevice::setCustomGapHandler(onHrGapEvent);
+  Serial.println("HR: shared FTMS ACL GATT client enabled (NO second BLE connection)");
+  uint16_t processed=HR_INVALID_HANDLE;
+  uint32_t lastReport=0;
+  while(true) {
+    const uint16_t h=hrFtmsHandle;
+    if(h==HR_INVALID_HANDLE || !deviceConnected) {
+      processed=HR_INVALID_HANDLE;
+      if(hrState!=HrState::Paused)
+        setHrState(HrState::Paused,"waiting for Garmin FTMS link (GATT duplex)");
+      vTaskDelay(pdMS_TO_TICKS(500));continue;
+    }
+    if(processed==h) {
+      if((uint32_t)(millis()-lastReport)>8000) {
+        lastReport=millis();
+        Serial.printf("HR: single-ACL ready=%d bpm=%u packets=%lu FTMS tx=%lu\n",
+                      hrSameLinkReady?1:0,(unsigned)liveHr(millis()),
+                      (unsigned long)hrNotifyPackets,
+                      (unsigned long)ftmsNotifications);
+      }
+      vTaskDelay(pdMS_TO_TICKS(500));continue;
+    }
+    processed=h;
+    hrServiceStart=hrServiceEnd=0;
+    hrRemoteValueHandle=hrRemoteCccdHandle=0;
+    hrSameLinkReady=false;
+    setHrState(HrState::Service,"discover Garmin HR 180D on *existing* FTMS ACL");
+    prepareHrProcedure();
+    int rc=ble_gattc_disc_svc_by_uuid(h,&hrServiceUUID.u,onHrService,nullptr);
+    if(rc) {
+      Serial.printf("HR: shared ACL service discovery call error=%d\n",rc);
+      setHrState(HrState::InitFailed,"Garmin FTMS ACL service discovery rejected");
+      continue;
+    }
+    if(!awaitHrProcedure(h,"service 180D") || !hrServiceStart) {
+      setHrState(HrState::NotFound,"Garmin does not expose 180D on FTMS link");
+      continue;
+    }
+    setHrState(HrState::Characteristic,"discover 2A37 on same FTMS ACL");
+    prepareHrProcedure();
+    rc=ble_gattc_disc_chrs_by_uuid(h,hrServiceStart,hrServiceEnd,
+                                   &hrMeasureUUID.u,onHrCharacteristic,nullptr);
+    if(rc || !awaitHrProcedure(h,"characteristic 2A37") || !hrRemoteValueHandle) {
+      Serial.printf("HR: no remote measurement (rc=%d)\n",rc);
+      setHrState(HrState::NotFound,"no Garmin 2A37 on shared ACL");
+      continue;
+    }
+    setHrState(HrState::Descriptor,"discover Garmin CCCD on FTMS ACL");
+    prepareHrProcedure();
+    rc=ble_gattc_disc_all_dscs(h,hrRemoteValueHandle,hrServiceEnd,
+                               onHrDescriptor,nullptr);
+    if(rc || !awaitHrProcedure(h,"descriptor 2902") || !hrRemoteCccdHandle) {
+      Serial.printf("HR: no remote CCCD (rc=%d)\n",rc);
+      setHrState(HrState::InitFailed,"no 0x2902 CCCD on FTMS ACL");
+      continue;
+    }
+    setHrState(HrState::Subscribing,"enable Garmin HR notifications on FTMS ACL");
+    prepareHrProcedure();
+    const uint8_t notify[2]={0x01,0x00};
+    rc=ble_gattc_write_flat(h,hrRemoteCccdHandle,notify,sizeof(notify),
+                            onHrWrite,nullptr);
+    if(rc || !awaitHrProcedure(h,"subscribe CCCD")) {
+      Serial.printf("HR: subscribe 2902 error=%d\n",rc);
+      setHrState(HrState::InitFailed,"Garmin refused HR subscribe on FTMS ACL");
+      continue;
+    }
+    hrSameLinkReady=true;
+    setHrState(HrState::NoData,"shared ACL HR subscribed; waiting for Garmin BPM");
+  }
+}
