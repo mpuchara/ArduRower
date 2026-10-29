@@ -143,3 +143,14 @@ W logach 0.09.4 dwukrotnie stwierdzono poprawne odpowiedzi `GATT REG status=0` i
 Jeżeli chce się zweryfikować dwa kanały na tym samym Garminie, procedura: rozpocznij transmisję pulsu, włącz CYD *bez* aktywnego połączenia FTMS i sprawdź, czy zestawi HR i odbiera puls. Dopiero wtedy uruchom aktywność / połączenie FTMS w polu Connect IQ i sprawdź, czy HR utrzymuje się przy jednoczesnym wysyłaniu danych do zegarka. Jeżeli QZ działa tylko, gdy FTMS nie jest połączony, to może być ograniczenie liczby połączeń na zegarku; jeśli QZ działa przy jednoczesnym FTMS, wina leży po stronie naszego hosta ESP32/Bludroid. Nie wolno uruchamiać QZ jako drugiego odbiornika tego samego tętna podczas porównawczego testu CYD.
 
 **Ghost Race ma działać przede wszystkim przesunięciem palca w lewo lub prawo**. Dodano rozpoznawanie dominującej surowej osi nawet przy uszkodzonej/zamienionej kalibracji dotyku, z logiem `TOUCH: deltaRaw` i `GHOST: horizontal swipe detected`. Strzałki `< GHOST >` na dashboardzie wskazują przejście. Podwójny BOOT to tylko awaryjna opcja. Pamięć rekordów NVS pozostaje zachowana, choć rekordy z niezgodnego modelu dystansu nie są używane.
+
+
+## 0.09.6 — bez MQTT i bez Home Assistant: FTMS + puls przez NimBLE
+
+Test użytkownika rozstrzygnął, że Garmin fēnix 6X Pro Solar może równocześnie wysyłać puls do QZ na telefonie i odbierać dane treningowe z ArduRower. Wersja 0.09.5 pokazywała `HR PAUZ` dlatego, że harmonogram blokował próby HR przy aktywnym FTMS — zatem stan był skutkiem naszego kodu, nie ograniczenia zegarka.
+
+Od 0.09.6 CYD korzysta z **jednego stosu NimBLE-Arduino 1.4.3**, który obsługuje jednocześnie usługę FTMS (urządzenie peryferyjne) i klienta BLE HR (central). Zachowano nazwę `WR S4BL3`, UUID `0x1826/0x2AD1`, strukturę danych FTMS i ich częstotliwość ~1 Hz. Drugi klient wyszukuje standardowe `180D/2A37`, subskrybuje powiadomienia i zachowuje ciągłe połączenie w czasie wiosłowania. Nigdzie nie jest wymagany broker, Wi-Fi ani QZ uruchomione w tle. `HR PAUZ` nie jest już generowane przez moduł; ujemnym wynikiem będą `HR BRAK`, `HR BLAD` lub `HR DANE`.
+
+Użycie NimBLE jest eksperymentalną zmianą stosu radiowego: kompilacja i testy statyczne nie dowodzą współpracy z Connect IQ ani faktycznego odbioru tętna na konkretnej płytce. Po instalacji należy sprawdzić jednocześnie puls, FTMS i zachowanie po rozłączeniach. Unikaj pełnego kasowania flash, aby zachować rekordy i kalibrację.
+
+**Ghost Race:** teraz rozpoznajemy swipe w prawo i lewo **już podczas przesuwania palcem**, bez oczekiwania na podniesienie. Log `TOUCH: DOWN #` pokazuje, czy sterownik otrzymuje dotyk; `GHOST: LIVE SWIPE #` potwierdza zmianę trybu. Jeśli na ekranie działa dotyk, ale nie ma tych logów, problem leży po stronie inicjalizacji SPI/IRQ, a nie w progach rozpoznawania gestu. Tryb jest nadal dostępny awaryjnie przez dwukrotny BOOT.
