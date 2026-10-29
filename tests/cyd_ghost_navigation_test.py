@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard Ghost Race navigation and BLE subscribe compatibility regressions."""
+"""Guard touch-only Ghost Race navigation and no-blocking-wizard behavior."""
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 src = (root/"cyd_rower/src/main.cpp").read_text(encoding="utf-8")
@@ -32,7 +32,6 @@ checks = (
     'GHOST: alive phase=',
     'GHOST: uncalibrated tap raw=',
     'GHOST: automatic calibration suppressed',
-    'TAP/BOOT: WYBOR, BOOT 1.5s START',
     'XPT2046_Touchscreen touch(33,36);',
     'if(now-touchLastPollMs<12)return;',
     'NimBLEDevice::createServer()',
@@ -55,4 +54,4 @@ assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-
 assert 'FTMS: advertising recovery' in loop
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
 assert 'FIRMWARE_VERSION = "0.09.9"' in src
-print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
+print("PASS: Ghost Race touch row selection, restored IRQ release, two-way swipe, no blocking wizard")
