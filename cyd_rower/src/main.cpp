@@ -894,6 +894,8 @@ void plot(int x, int y, int w, int h, bool power) {
 void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false) {
   const int16_t speedMaxTenth=220; // 22.0 km/h right scale
   const int hrMin=60,hrMax=190; // 60..190 BPM left scale
+  const uint16_t speedInk=ghostTraining?(speedColor>>1)&0x7BEF:speedColor;
+  const uint16_t hrInk=ghostTraining?(heartColor>>1)&0x7BEF:heartColor;
   for(int left=0;left<width;left+=BUFFER_W) {
     const int part=min((int)BUFFER_W,width-left);
     if(scratchReady) {
