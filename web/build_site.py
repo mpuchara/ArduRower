@@ -16,7 +16,8 @@ SITE = ROOT / "site"
 ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
 }
-VERSION = "0.09-motion-hr-" + os.environ.get("GITHUB_SHA", "local")[:7]
+REVISION = os.environ.get("GITHUB_SHA", "local")[:12]
+VERSION = "0.09.1-installer-" + REVISION
 
 
 def require(path):
@@ -35,7 +36,7 @@ def main():
     (SITE / "manifests").mkdir(parents=True)
     shutil.copyfile(ROOT / "index.html", SITE / "index.html")
     (SITE / ".nojekyll").write_text("", encoding="utf-8")
-    version_info = {"version": VERSION, "revision": os.environ.get("GITHUB_SHA", "local")}
+    version_info = {"version": VERSION, "revision": REVISION}
     (SITE / "version.json").write_text(json.dumps(version_info, indent=2) + "\n", encoding="utf-8")
 
     for slug, env in ENVIRONMENTS.items():
@@ -48,18 +49,19 @@ def main():
         ]
         manifest_parts = []
         for offset, name, source in parts:
-            destination = SITE / "firmware" / f"{slug}-{name}.bin"
+            destination = SITE / "firmware" / f"{slug}-{name}-{REVISION}.bin"
             shutil.copyfile(source, destination)
             if offset + destination.stat().st_size > 0x400000:
                 raise ValueError(f"Flash component exceeds 4 MB: {source}")
             manifest_parts.append({"path": f"../firmware/{destination.name}", "offset": offset})
+        assert any(REVISION in p["path"] for p in manifest_parts)
         # NVS lives between 0x9000 and 0xDFFF. Neither the component ranges
         # nor full-flash erasure should touch that region in regular upgrades.
         assert all((part["offset"] >= 0xE000 or
                     part["offset"] + parts[i][2].stat().st_size <= 0x9000)
                    for i, part in enumerate(manifest_parts))
         manifest = {
-            "name": "ArduRower CYD Ghost Race " + slug,
+            "name": "ArduRower CYD " + VERSION + " " + slug,
             "version": VERSION,
             "new_install_prompt_erase": False,
             "builds": [{

@@ -61,3 +61,12 @@ Na stronie instalatora sprawdź oznaczenie `0.09-motion-hr` przed aktualizacją.
 Wersja 0.09 dodaje eksperymentalną detekcję faz pociągnięcie/powrót z jednego kontaktronu, model prędkości z wygaszaniem, niezależną skalę zapisaną w NVS, większe pola i wspólny 10-minutowy wykres pulsu/prędkości oraz opcjonalny odbiornik tętna BLE (`0x180D`). Jeżeli Garmin nie wysyła HR lub moduł nie zdoła połączyć się jako klient BLE, prędkość, licznik i FTMS nadal pracują, a puls ma wartość `--`. Jednoczesne połączenia z zegarkiem trzeba zweryfikować doświadczalnie.
 
 Przed pełnym treningiem wykonaj 30 spokojnych pociągnięć i sprawdź liczbę ruchów w trybie diagnostycznym: zmiana fazy na podstawie zwolnień NIE jest bezpośrednim pomiarem kierunku. Nie traktuj nowego dystansu jako skalibrowanego względem WaterRower S4.
+
+
+## v0.09.1: starszy dashboard mimo zakończenia instalacji?
+
+Poprzednio strona sprawdzała jedynie obecność manifestu i mogła umożliwić flashowanie starszych, buforowanych obrazów nawet po scaleniu nowszego kodu do `main`. Ponadto publikacja do GitHub Pages trwa dłużej niż kompilacja w PR. **Wydanie 0.09 zostało wdrożone do Pages dopiero 29.10.2026 o 11:52 czasu polskiego** (workflow `40860610696`).
+
+Od v0.09.1 strona **blokuje przycisk instalacji**, dopóki wersja `version.json` nie rozpoczyna się od `0.09.1-installer-`, wersja manifestu nie jest identyczna i wszystkie cztery obrazy BIN nie mają nazwy z dokładnie tym samym 12-znakowym identyfikatorem kompilacji. Adres manifestu zawiera parametr wersji, a obrazy mają unikatowe nazwy (brak zderzeń cache). Numer `0.09.1` jest drukowany na ekranie powitalnym i w nagłówkach dashboardu oraz Ghost Race. Zwykłe wgranie nie narusza NVS (rekordów).
+
+Otwórz `https://mpuchara.github.io/ArduRower/?v=0.09.1`, użyj Ctrl+F5 i sprawdź u dołu strony napis `Kompilacja: 0.09.1-installer-...`. Dopiero gdy pojawi się zielony napis `Gotowy do wgrania firmware`, kliknij instalację. Po restarcie płytki powinno być widoczne `v0.09.1`. Jeśli nie — możliwy jest nieudany flash, błędny port lub uruchomienie innego firmware; porównaj numer COM oraz logi wgrywania i monitora szeregowego. Nie wybieraj „erase all flash” jeśli chcesz zachować Ghost Race/NVS.

@@ -48,7 +48,7 @@
 <main class="wrap">
   <div class="kicker">ESP32-2432S028 · 2,8″ · BLE FTMS</div>
   <h1>ArduRower <span style="color:#79baff">CYD</span></h1>
-  <p class="lead">Wgraj firmware do żółtej płytki ESP32 z wyświetlaczem 320 × 240 i wykresami mocy oraz prędkości. Bez Arduino IDE — wystarczy Chrome lub Edge na komputerze i kabel micro-USB do transmisji danych.</p>
+  <p class="lead">Wgraj firmware do żółtej płytki ESP32 z wyświetlaczem 320 × 240, wspólnym wykresem pulsu i prędkości oraz nowym algorytmem ruchu. Bez Arduino IDE — wystarczy Chrome lub Edge na komputerze i kabel micro-USB do transmisji danych.</p>
 
   <section class="card alert">
     <strong>Ważne przed wgraniem</strong>
@@ -56,7 +56,7 @@
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09 — ruch i puls</h2>
+    <h2>ArduRower 0.09.1 — ruch, puls i bezpieczny instalator</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice"><b>Nowość:</b> wspólny wykres tętna i prędkości z ostatnich 10 minut, duże wartości oraz szacowana moc w dolnym rzędzie. Tętno odbieramy przez BLE tylko gdy Garmin nadaje je w standardowej usłudze HR (0x180D). Brak transmisji nie blokuje FTMS. Dłuższe dotknięcie nagłówka w dashboardzie otwiera regulację skali wirtualnego dystansu; nowy model wykrywa dwie fazy ruchu koła. To model eksperymentalny, nie pomiar oryginalnego S4.</p><p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
   </section>
@@ -69,18 +69,21 @@
       <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. <b>Podczas aktualizacji nie wybieraj pełnego kasowania pamięci</b>, jeśli chcesz zachować rekordy wyścigów. Kasowanie flash usuwa także rekordy NVS.</li>
       <li>Po wgraniu płytka powinna uruchomić dashboard ArduRower. Następnie sprawdź odbiór przez dotychczasowe pole Connect IQ w Garminie.</li>
     </ol>
-    <div id="install-ready">
+    <div id="install-ready" hidden>
       <div class="action">
         <p>Wybrano: <b>ST7789 / podświetlenie GPIO21</b></p>
-        <esp-web-install-button manifest="./manifests/st7789-gpio21.json">
-          <button slot="activate" type="button">Połącz i zainstaluj</button>
-          <span slot="unsupported" class="bad">Przeglądarka nie obsługuje Web Serial. Użyj Chrome lub Edge na komputerze.</span>
-          <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
-        </esp-web-install-button>
+        <div id="install-widget"></div>
       </div>
     </div>
+    <template id="install-template">
+      <esp-web-install-button>
+        <button slot="activate" type="button">Połącz i zainstaluj zweryfikowaną wersję</button>
+        <span slot="unsupported" class="bad">Przeglądarka nie obsługuje Web Serial. Użyj Chrome lub Edge na komputerze.</span>
+        <span slot="not-allowed" class="bad">Instalator wymaga strony HTTPS.</span>
+      </esp-web-install-button>
+    </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalator czeka na publikację firmware.</strong> W ustawieniach repozytorium GitHub przełącz <b>Settings → Pages → Build and deployment → Source</b> z „Deploy from a branch” na <b>GitHub Actions</b>. Następnie sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.1.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.1</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -96,31 +99,60 @@
   <footer>ArduRower CYD · instalator korzysta z ESP Web Tools i portu szeregowego w Twojej przeglądarce. Dane BLE do zegarka nie są zmieniane. <span id="build-label"></span></footer>
 </main>
 <script>
+  // Fail closed: an old manifest or cached BIN must NEVER be accepted as
+  // the requested update. In particular GitHub Pages can briefly serve files
+  // from different deployments while its CDN caches are being refreshed.
+  const EXPECTED_PREFIX = '0.09.1-installer-';
+  const MANIFEST_PATH = './manifests/st7789-gpio21.json';
+  async function checkedJSON(url) {
+    const response = await fetch(url, {cache: 'no-store'});
+    if (!response.ok) throw new Error('HTTP ' + response.status + ' ' + url);
+    return response.json();
+  }
   async function checkPublished() {
     const status = document.getElementById('status');
     const ready = document.getElementById('install-ready');
     const missing = document.getElementById('not-published');
+    ready.hidden = true; // Never allow flashing until all checks pass.
+    status.classList.remove('ok', 'bad');
     try {
-      const responses = await Promise.all([
-        fetch('./version.json', {cache:'no-store'}),
-        fetch('./manifests/st7789-gpio21.json', {cache:'no-store'})
-      ]);
-      if (!responses.every(r => r.ok)) throw new Error('brak manifestów');
-      const manifest = await responses[1].json();
-      if (!manifest.builds?.[0]?.parts?.[0] ||
-          !manifest.builds[0].parts[0].path.includes('st7789-gpio21')) {
-        throw new Error('niepoprawny manifest');
+      // Unique query prevents the browser and Pages CDN from supplying a
+      // previous release's version.json/manifest.json from their caches.
+      const cacheBust = Date.now();
+      const version = await checkedJSON('./version.json?check=' + cacheBust);
+      if (typeof version.version !== 'string' ||
+          !version.version.startsWith(EXPECTED_PREFIX) ||
+          !/^[0-9a-f]{12}$/.test(version.revision)) {
+        throw new Error('strona publikuje inny build: ' + (version.version || 'brak'));
       }
+      const manifestURL = MANIFEST_PATH + '?version=' + encodeURIComponent(version.version);
+      const manifest = await checkedJSON(manifestURL);
+      const parts = manifest.builds?.[0]?.parts;
+      if (manifest.version !== version.version ||
+          manifest.builds?.[0]?.chipFamily !== 'ESP32' ||
+          manifest.new_install_prompt_erase !== false ||
+          !Array.isArray(parts) || parts.length !== 4 ||
+          parts.some((p, i) => p.offset !== [0x1000,0x8000,0xE000,0x10000][i] ||
+            !p.path.endsWith('-' + version.revision + '.bin') ||
+            !p.path.startsWith('../firmware/st7789-gpio21-'))) {
+        throw new Error('manifest nie odpowiada najnowszej wersji ' + version.version);
+      }
+      // Attach the actual ESP Web Tools element only after validation. The
+      // manifest URL is versioned and each BIN has an immutable filename.
+      const fragment = document.getElementById('install-template').content.cloneNode(true);
+      const button = fragment.querySelector('esp-web-install-button');
+      button.setAttribute('manifest', manifestURL);
+      document.getElementById('install-widget').replaceChildren(fragment);
       ready.hidden = false;
       missing.hidden = true;
-      status.textContent = 'Obrazy firmware zostały opublikowane. Można rozpocząć instalację.';
+      status.textContent = 'Gotowy do wgrania firmware: ' + version.version;
       status.classList.add('ok');
-      const version = await responses[0].json();
-      if (version.version) document.getElementById('build-label').textContent = 'Kompilacja: ' + version.version;
-    } catch (e) {
+      document.getElementById('build-label').textContent = 'Kompilacja: ' + version.version;
+    } catch (error) {
       ready.hidden = true;
       missing.hidden = false;
-      status.textContent = 'Pliki instalacyjne nie są jeszcze dostępne na tej stronie.';
+      status.textContent = 'Wstrzymano instalację: ' + error.message +
+        '. Odśwież stronę (Ctrl+F5) i sprawdź publikację GitHub Actions.';
       status.classList.add('bad');
     }
   }

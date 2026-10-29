@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/cyd-motion-heart-dashboard-20261029
     paths:
       - "cyd_rower/**"
       - "ArduRower/RowerMetrics.h"
@@ -38,6 +37,7 @@ jobs:
           python3 tests/cyd_ble_contract_test.py
           python3 tests/cyd_display_refresh_test.py
           python3 tests/cyd_text_cache_test.py
+          python3 tests/cyd_installer_integrity_test.py
           g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
           /tmp/ghost_race_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
@@ -67,7 +67,12 @@ jobs:
           build = manifest["builds"][0]
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
+          version = json.loads((base / "version.json").read_text())
+          assert version["version"].startswith("0.09.1-installer-")
+          assert len(version["revision"]) == 12
+          assert manifest["version"] == version["version"]
           parts = build["parts"]
+          assert all(p["path"].endswith("-" + version["revision"] + ".bin") for p in parts)
           assert [p["offset"] for p in parts] == [0x1000, 0x8000, 0xE000, 0x10000]
           for part in parts:
               bin_file = (base / "manifests" / part["path"]).resolve()

@@ -94,3 +94,8 @@ Nowy wirtualny model prędkości **nie zwiększa prędkości na impulsach fazy p
 **Wykres:** oba przebiegi są rysowane w jednym szerokim polu bez legendy, 300 próbek co 2 s (10 min), stałe zakresy 60–190 BPM (czerwony) i 0–22 km/h (turkus). Pola pulsu i prędkości powyżej wykresu mają ten sam kolor co linie. Dwa dolne rzędy wyświetlają: czas, dystans, SPM, tempo, moc szacowaną w W, ruchy.
 
 **Ghost Race:** rekordy poprzedniej wersji (wyliczane ze stałego impulsowego dystansu) mają inny identyfikator modelu i **nie mogą być porównywane z aktualnymi**; stare dane pozostają w NVS do nadpisania nowym ukończonym rekordem. Nie wybieraj opcji pełnego kasowania flash. 
+
+
+## 0.09.1: jak sprawdzić, czy nowe firmware naprawdę się wgrało
+
+W poprzednim instalatorze wersja plików nie była weryfikowana przed włączeniem przycisku, więc możliwe było wgranie starszych obrazów z cache GitHub Pages. Od v0.09.1 urządzenie wyświetla numer firmware przy uruchamianiu i w nagłówku dashboardu/wyścigu. Otwórz stronę instalatora z parametrem `?v=0.09.1`, sprawdź `Kompilacja: 0.09.1-installer-...` i wgraj tylko zatwierdzoną przez stronę wersję. Proces zachowuje pamięć NVS z rekordami. Kod nie zmienia identyfikatorów ani formatu BLE FTMS.
