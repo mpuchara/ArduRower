@@ -34,7 +34,7 @@ for marker in (
 assert src.count("BLEDevice::init(")==1, "Never reinitialize Bluetooth when starting HR receiver"
 assert 'BLE_SERVICE_NAME "WR S4BL3"' in src, "Garmin must still see same FTMS peripheral"
 assert 'pDtCharacteristic->notify()' in src
-assert 'const bool SEND_EQUIVALENT_POWER = false' in src
+assert 'SEND_EQUIVALENT_POWER = false' in src
 assert 'const EXPECTED_PREFIX = ' in page
 assert 'const EXPECTED_PREFIX = \'0.09.2-hr-scan-\'' in page
 assert 'HR RAM' in page and 'HR BRAK' in page and 'HR OK' in page
