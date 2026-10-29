@@ -150,20 +150,20 @@ static void hrGattEvents(esp_gattc_cb_event_t event,esp_gatt_if_t,
   if(event==ESP_GATTC_REG_FOR_NOTIFY_EVT &&
      hrNotifyHandle && p->reg_for_notify.handle==hrNotifyHandle) {
     hrRegResult=static_cast<uint8_t>(p->reg_for_notify.status);
-    Serial.printf("HR: GATT notify registration status=%d handle=%u\\n",
+    Serial.printf("HR: GATT notify registration status=%d handle=%u\n",
                   (int)p->reg_for_notify.status,(unsigned)hrNotifyHandle);
   }
   if(event==ESP_GATTC_WRITE_DESCR_EVT &&
      hrDescriptorHandle && p->write.handle==hrDescriptorHandle) {
     hrDescriptorResult=static_cast<uint8_t>(p->write.status);
-    Serial.printf("HR: CCCD WRITE result=%d descriptor=%u\\n",
+    Serial.printf("HR: CCCD WRITE result=%d descriptor=%u\n",
                   (int)p->write.status,(unsigned)hrDescriptorHandle);
   }
   if(event==ESP_GATTC_NOTIFY_EVT &&
      hrNotifyHandle && p->notify.handle==hrNotifyHandle) {
     ++hrGattNotifications;
     if(hrGattNotifications<=5)
-      Serial.printf("HR: raw GATT notification len=%u n=%lu first=%02X\\n",
+      Serial.printf("HR: raw GATT notification len=%u n=%lu first=%02X\n",
                     (unsigned)p->notify.value_len,
                     (unsigned long)hrGattNotifications,
                     p->notify.value_len?p->notify.value[0]:0);
@@ -370,17 +370,17 @@ void hrWorker(void*) {
     const uint32_t countBefore=hrNotifyPackets;
     setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER, no CCCD write");
     characteristic->registerForNotify(hrNotify,true,false);
-    Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\\n",
+    Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\n",
                   (unsigned)hrRegResult);
     if(hrRegResult!=ESP_GATT_OK) {
       setHrState(HrState::InitFailed,"GATT notification registration failed");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
     }
-    const uint8_t enableNotify[2]={0x01,0x00};
+    uint8_t enableNotify[2]={0x01,0x00};
     setHrState(HrState::Descriptor,"CCCD 0x2902 enable notifications ENTER");
-    cccd->writeValue(const_cast<uint8_t*>(enableNotify),2,true);
-    Serial.printf("HR: CCCD write RETURN result=%u\\n",
+    cccd->writeValue(enableNotify,2,true);
+    Serial.printf("HR: CCCD write RETURN result=%u\n",
                   (unsigned)hrDescriptorResult);
     if(hrDescriptorResult!=ESP_GATT_OK) {
       setHrState(HrState::InitFailed,"CCCD enable failed; cannot receive BPM");
@@ -687,7 +687,7 @@ void startRace(uint8_t index) {
   // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
   resetWorkout();
   activeMode = Mode::Race;
-  Serial.printf("GHOST: armed target=%u, best=%s, calibration=%lu\\n",
+  Serial.printf("GHOST: armed target=%u, best=%s, calibration=%lu\n",
                 (unsigned)ghost.targetMeters,found?"yes":"no",
                 (unsigned long)motion.calibrationMilli());
   raceLayoutReady = false;
@@ -1509,7 +1509,7 @@ void loop() {
   }
   if (ghost.phase==ghostrace::Phase::Armed && metrics.started) {
     ghost.start(now);
-    Serial.printf("GHOST: started %u m at %lu, pulses=%lu\\n",
+    Serial.printf("GHOST: started %u m at %lu, pulses=%lu\n",
                   (unsigned)ghost.targetMeters,(unsigned long)now,
                   (unsigned long)metrics.pulses);
   }
@@ -1517,7 +1517,7 @@ void loop() {
     if (ghost.advance(now,metrics.distance())) {
       if (!saveBest(selectedDistance,ghost.attempt))recordSaveFailed=true;
       else personalBestMs[selectedDistance]=ghost.endMs;
-      Serial.printf("GHOST: finished %u m, time=%lu, saved=%s\\n",
+      Serial.printf("GHOST: finished %u m, time=%lu, saved=%s\n",
                     (unsigned)ghost.targetMeters,
                     (unsigned long)ghost.endMs,
                     recordSaveFailed?"no":"yes");
