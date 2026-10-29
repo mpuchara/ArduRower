@@ -26,8 +26,8 @@ for marker in (
     "hrState=HrState::NotFound",
     "hrState=HrState::Receiving",
     "String(hrStatus(hrState))",
-    "ArduRower CYD v0.09.2",
-    'FIRMWARE_VERSION = "0.09.2"',
+    "ArduRower CYD v0.09.3",
+    'FIRMWARE_VERSION = "0.09.3"',
 ):
     assert marker in src, marker
 
@@ -36,6 +36,6 @@ assert 'BLE_SERVICE_NAME "WR S4BL3"' in src, "Garmin must still see same FTMS pe
 assert 'pDtCharacteristic->notify()' in src
 assert 'SEND_EQUIVALENT_POWER = false' in src
 assert 'const EXPECTED_PREFIX = ' in page
-assert 'const EXPECTED_PREFIX = \'0.09.2-hr-scan-\'' in page
+assert 'const EXPECTED_PREFIX = \'0.09.3-hr-link-\'' in page
 assert 'HR RAM' in page and 'HR BRAK' in page and 'HR OK' in page
 print("PASS: BT FTMS retained, active HR scan and distinguishable error states")
