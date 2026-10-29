@@ -74,6 +74,14 @@ for characteristic in ("pDtCharacteristic", "pFmfCharacteristic", "pCtrCharacter
                        "pStCharacteristic", "pBatCharacteristic"):
     assert characteristic in old_ble and characteristic in new_ble
 
+# Garmin discovers FTMS by the advertised primary packet. NimBLE's
+# custom advertising setAdvertisementData() ignores addServiceUUID() added
+# separately; the device name must be in that same primary packet.
+assert 'oAdvertisementData.setName(BLE_SERVICE_NAME)' in CYD
+assert 'pAdvertising->setAdvertisementData(oAdvertisementData)' in CYD
+assert 'FTMS: primary advertising started=' in CYD
+assert 'FTMS: advertising recovery' in CYD
+assert 'pAdvertising->start()' in CYD
 assert "now - lastBleMs >= 1000" in OLD
 assert "now - lastBleMs >= 1000" in CYD
 print("PASS: preserved FTMS/Connect IQ payload, identifiers, advertising and cadence")
