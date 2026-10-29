@@ -56,9 +56,9 @@
   </section>
 
   <section class="card">
-    <h2>Wyświetlacz potwierdzony: ST7789 / GPIO21</h2>
+    <h2>ArduRower 0.09 — ruch i puls</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
-    <p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
+    <p class="notice"><b>Nowość:</b> wspólny wykres tętna i prędkości z ostatnich 10 minut, duże wartości oraz szacowana moc w dolnym rzędzie. Tętno odbieramy przez BLE tylko gdy Garmin nadaje je w standardowej usłudze HR (0x180D). Brak transmisji nie blokuje FTMS. Dłuższe dotknięcie nagłówka w dashboardzie otwiera regulację skali wirtualnego dystansu; nowy model wykrywa dwie fazy ruchu koła. To model eksperymentalny, nie pomiar oryginalnego S4.</p><p class="notice">Ekran zachowuje płynne odświeżanie. <b>Nowość: Ghost Race</b> — przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Pokonaj własny rekord i zobacz przewagę w metrach i sekundach. Jeśli zabraknie kalibracji, dotknij trzech znaków +; w menu BOOT krótko zmienia dystans, długie przytrzymanie wybiera.</p>
   </section>
 
   <section class="card">
@@ -88,7 +88,7 @@
   <section class="card">
     <h2>3. Podłączenie wioślarza i zegarka</h2>
     <p>Kontaktron: <code>GPIO22</code> + <code>GND</code> (nie GPIO2 — zajmuje go TFT). Sprawdź fizycznie pinout złącza P3 swojej rewizji płytki. Garmin: pozostaje dotychczasowa nazwa <code>WR S4BL3</code>, usługa FTMS i format danych BLE, kompatybilny z dotychczasowym polem Connect IQ.</p>
-    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Nowy tryb Ghost Race wymaga potwierdzenia działania na fizycznej płytce.</p>
+    <p class="muted">Moc i prędkość na wykresach są <b>estymowane</b>. Odczyty nie stanowią bezpośredniego pomiaru watów ani kalibracji Concept2. Wykrywanie faz i współpraca z równoczesną transmisją pulsu Garmina wymagają sprawdzenia na fizycznej płytce.</p>
     <p><a href="https://github.com/mpuchara/ArduRower/tree/main/cyd_rower">Instrukcja i dokumentacja firmware</a> ·
        <a href="https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor">Sterownik LCD z HA_UBOX_bridge</a> ·
        <a href="https://github.com/mpuchara/ArduRower/actions">Status kompilacji</a></p>
