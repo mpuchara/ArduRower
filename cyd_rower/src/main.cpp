@@ -17,11 +17,12 @@
 #include <BLEClient.h>
 #include <BLERemoteDescriptor.h>
 #include "CydMotion.h"
+#include "BleDutySchedule.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.4";
+static constexpr const char *FIRMWARE_VERSION = "0.09.5";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -62,6 +63,10 @@ uint8_t touchRotation=DEFAULT_ROTATION;
 
 RowerMetrics metrics;
 cydmotion::Engine motion;
+cydble::DutySchedule bleDuty;
+volatile uint32_t ftmsNotifications=0;
+volatile uint32_t ftmsConnectedAtMs=0;
+volatile uint32_t ftmsDisconnectedAtMs=0;
 volatile uint16_t receivedHr=0;
 volatile uint32_t receivedHrAt=0;
 volatile bool hrConnected=false;
@@ -72,7 +77,7 @@ bool hrTaskCreated=false;
 enum class HrState : uint8_t {
   Starting, Scan, NotFound, Connecting, GattConnected,
   Service, Characteristic, Subscribing, Descriptor, Receiving, NoData,
-  Disconnected, LowMemory, InitFailed, Stalled
+  Disconnected, LowMemory, InitFailed, Stalled, Paused
 };
 volatile HrState hrState=HrState::Starting;
 volatile uint16_t hrAdvertisers=0;
@@ -93,6 +98,7 @@ const char *hrStatus(HrState s) {
     case HrState::Subscribing: return "HR SUB";
     case HrState::Descriptor: return "HR CCCD";
     case HrState::Stalled: return "HR ZAW";
+    case HrState::Paused: return "HR PAUZ";
     case HrState::Receiving: return "HR OK";
     case HrState::NoData: return "HR DANE";
     case HrState::Disconnected: return "HR ROZ";
@@ -262,6 +268,12 @@ class HrClientCallbacks : public BLEClientCallbacks {
 };
 static HrClientCallbacks hrClientCallbacks;
 
+// All application-level HR discovery must yield to an active rowing workout.
+// The BLE controller handles microsecond connection-event radio scheduling;
+// we intentionally do NOT alternate FTMS and HR by disconnecting a peer.
+bool hrWorkAllowed() {
+  return bleDuty.canStart(millis());
+}
 void hrWorker(void*) {
   // Install once, before GATT client connections. It only observes events.
   BLEDevice::setCustomGattcHandler(hrGattEvents);
@@ -285,6 +297,16 @@ void hrWorker(void*) {
   client->setClientCallbacks(&hrClientCallbacks);
   uint8_t failedConnects=0;
   while(true) {
+    // HR service discovery, GAP scan and CCCD writes can occupy Bluedroid
+    // for tens of seconds. Only begin during an idle maintenance window.
+    // A single HR setup attempt is permitted per continuous FTMS session.
+    if(!hrWorkAllowed()) {
+      if(hrState!=HrState::Paused && !hrConnected)
+        setHrState(HrState::Paused,
+                   "FTMS priority; HR discovery postponed until idle");
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
     if(ESP.getFreeHeap()<50000) {
       setHrState(HrState::LowMemory,"scan paused: heap below 50 KB");
       vTaskDelay(pdMS_TO_TICKS(20000)); continue;
@@ -296,6 +318,11 @@ void hrWorker(void*) {
     }
     // All modifications to candidate are performed in BLE scan callbacks
     // while start() is executing and consumed only after the scan finishes.
+    bleDuty.begin(millis());
+    Serial.printf("HR: scheduled maintenance window, FTMS=%s, attempts=%lu, drops=%lu\n",
+                  deviceConnected?"connected":"disconnected",
+                  (unsigned long)bleDuty.attempts,
+                  (unsigned long)bleDuty.ftmsDrops);
     delete hrCandidate;hrCandidate=nullptr;
     hrCandidateScore=-100000;
     hrAdvertisers=hrMatches=0;
@@ -313,8 +340,15 @@ void hrWorker(void*) {
                   (unsigned)hrAdvertisers,(unsigned)hrMatches,
                   peer?peer->getAddress().toString().c_str():"none");
     if(!peer) {
+      bleDuty.end();
       setHrState(HrState::NotFound,"no 0x180D source detected");
       vTaskDelay(pdMS_TO_TICKS(14000));continue;
+    }
+    if(bleDuty.shouldYield(millis())) {
+      delete peer;
+      bleDuty.end();
+      setHrState(HrState::Paused,"movement or FTMS conflict during scan; postpone HR connect");
+      vTaskDelay(pdMS_TO_TICKS(2000));continue;
     }
     hrAttemptAddress=String(peer->getAddress().toString().c_str());
     const uint32_t attempt=millis();
@@ -327,19 +361,31 @@ void hrWorker(void*) {
     delete peer;
     hrConnected=false;
     if(!connected) {
+      bleDuty.end();
       ++failedConnects;
       setHrState(HrState::Disconnected,"connect failed, retry follows");
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
     }
     failedConnects=0;
+    if(bleDuty.shouldYield(millis())) {
+      Serial.println("HR: rower active after GATT link; skipping service discovery");
+      if(client->isConnected())client->disconnect();
+      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
+    }
     setHrState(HrState::Service,"getService(0x180D) ENTER");
     BLERemoteService* service=client->getService(BLEUUID((uint16_t)0x180D));
     Serial.printf("HR: getService(0x180D) RETURN %s\n",
                   service?"FOUND":"MISSING");
     if(!service) {
+      bleDuty.end();
       setHrState(HrState::InitFailed,"connected peer has no 0x180D");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    if(bleDuty.shouldYield(millis())) {
+      Serial.println("HR: FTMS priority after service discovery, abort HR setup");
+      if(client->isConnected())client->disconnect();
+      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
     }
     setHrState(HrState::Characteristic,"getCharacteristic(0x2A37) ENTER");
     BLERemoteCharacteristic* characteristic=
@@ -348,6 +394,7 @@ void hrWorker(void*) {
                   characteristic?"FOUND":"MISSING",
                   characteristic&&characteristic->canNotify()?"yes":"no");
     if(!characteristic || !characteristic->canNotify()) {
+      bleDuty.end();
       setHrState(HrState::InitFailed,"missing HR notifications characteristic");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
@@ -359,10 +406,16 @@ void hrWorker(void*) {
     BLERemoteDescriptor* cccd =
         characteristic->getDescriptor(BLEUUID((uint16_t)0x2902));
     if(!cccd) {
+      bleDuty.end();
       Serial.println("HR: missing CCCD 0x2902; cannot enable remote HR updates");
       setHrState(HrState::InitFailed,"HR CCCD missing; no notifications possible");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    if(bleDuty.shouldYield(millis())) {
+      Serial.println("HR: rowing or FTMS conflict; skipping CCCD subscription");
+      if(client->isConnected())client->disconnect();
+      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
     }
     hrNotifyHandle=characteristic->getHandle();
     hrDescriptorHandle=cccd->getHandle();
@@ -377,9 +430,15 @@ void hrWorker(void*) {
     Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\n",
                   (unsigned)hrRegResult);
     if(hrRegResult!=ESP_GATT_OK) {
+      bleDuty.end();
       setHrState(HrState::InitFailed,"GATT notification registration failed");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    if(bleDuty.shouldYield(millis())) {
+      Serial.println("HR: FTMS priority after GATT registration; defer CCCD");
+      if(client->isConnected())client->disconnect();
+      bleDuty.end();vTaskDelay(pdMS_TO_TICKS(2000));continue;
     }
     uint8_t enableNotify[2]={0x01,0x00};
     setHrState(HrState::Descriptor,"CCCD 0x2902 enable notifications ENTER");
@@ -389,12 +448,14 @@ void hrWorker(void*) {
     Serial.printf("HR: CCCD write RETURN result=%u\n",
                   (unsigned)hrDescriptorResult);
     if(hrDescriptorResult!=ESP_GATT_OK) {
+      bleDuty.end();
       setHrState(HrState::InitFailed,"CCCD enable failed; cannot receive BPM");
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
     }
     hrConnected=true;
-    setHrState(HrState::NoData,"CCCD enabled; waiting for first BPM");
+    bleDuty.end(); // subscription is now passive and may coexist with FTMS
+    setHrState(HrState::NoData,"CCCD enabled; passive HR notifications only");
     const uint32_t subscribedAt=millis();
     bool gotData=(hrNotifyPackets!=countBefore);
     uint32_t lastReport=0;
@@ -439,7 +500,9 @@ void hrWorker(void*) {
     hrConnected=false;
     hrNotifyHandle=hrDescriptorHandle=0;
     if(client->isConnected())client->disconnect(); // only HR GATT client
-    setHrState(HrState::Disconnected,"HR link closed; rescan");
+    setHrState(HrState::Disconnected,"HR client closed; backoff before scan");
+    // DutySchedule enforces >=90 seconds before next GATT setup and at
+    // most one setup during a continuous Garmin FTMS connection.
     vTaskDelay(pdMS_TO_TICKS(7000));
   }
 }
@@ -497,8 +560,20 @@ uint8_t lastRaceSelection=255;
 
 class MyServerCallbacks : public BLEServerCallbacks {
  public:
-  void onConnect(BLEServer *) override { deviceConnected = true; }
-  void onDisconnect(BLEServer *) override { deviceConnected = false; }
+  void onConnect(BLEServer *) override {
+    deviceConnected=true;
+    ftmsConnectedAtMs=millis();
+    Serial.printf("FTMS: CONNECTED at %lu, HR=%s, packets=%lu\n",
+                  (unsigned long)ftmsConnectedAtMs,
+                  hrStatus(hrState),(unsigned long)ftmsNotifications);
+  }
+  void onDisconnect(BLEServer *) override {
+    deviceConnected=false;
+    ftmsDisconnectedAtMs=millis();
+    Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
+                  (unsigned long)ftmsDisconnectedAtMs,
+                  hrStatus(hrState),(unsigned long)ftmsNotifications);
+  }
 };
 // Intentionally no-op: as in the existing firmware, FTMS Control Point procedures
 // are NOT implemented. Preserving the existing Connect IQ integration is paramount.
@@ -905,14 +980,22 @@ void updateTouch(uint32_t now) {
     // Before first calibration, accept a dominant long raw-axis swipe to
     // reach the calibration wizard without depending on the touch orientation.
     bool horizontalSwipe=false;
-    if(touchCalibrated) {
-      const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
-      const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-      horizontalSwipe=fabsf(deltaX)>55.0f &&
-                      fabsf(deltaX)>fabsf(deltaY)*1.45f;
-    } else {
-      horizontalSwipe=max(dx,dy)>700 && max(dx,dy)>min(dx,dy)*1.6f;
-    }
+    // The XPT2046 axes may be swapped or inverted between CYD revisions.
+    // Even a saved touch calibration from a different firmware can turn a
+    // physical left/right swipe into a logical vertical move. Do NOT make
+    // the Ghost Race gesture depend exclusively on that calibration.
+    const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
+    const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
+    const bool mappedSwipe=touchCalibrated && fabsf(deltaX)>=48.0f &&
+                           fabsf(deltaX)>fabsf(deltaY)*1.35f;
+    const bool rawSwipe=max(dx,dy)>=310 &&
+                        max(dx,dy)>min(dx,dy)*1.65f;
+    horizontalSwipe=mappedSwipe || rawSwipe;
+    if(max(dx,dy)>=160)
+      Serial.printf("TOUCH: deltaRaw=(%d,%d) mapped=(%.1f,%.1f) calibrated=%s swipe=%s\n",
+                    rawEndX-rawStartX,rawEndY-rawStartY,
+                    deltaX,deltaY,touchCalibrated?"yes":"no",
+                    horizontalSwipe?"yes":"no");
     if(held>1100 && max(dx,dy)<420 &&
        activeMode==Mode::Dashboard && !calibrationScreen) {
       int16_t px,py;
@@ -920,7 +1003,10 @@ void updateTouch(uint32_t now) {
         calibrationScreen=true;
         lastCalibrationPaint=255;
       }
-    } else if(held>75 && held<1750 && horizontalSwipe && !calibrationScreen) {
+    } else if(held>=45 && held<2000 && horizontalSwipe && !calibrationScreen) {
+      Serial.printf("GHOST: horizontal swipe detected; mode=%s -> %s\n",
+                    activeMode==Mode::Dashboard?"dashboard":"race",
+                    activeMode==Mode::Dashboard?"race":"dashboard");
       toggleMode();
     } else if(held>=60 && held<750 && max(dx,dy)<500) {
       touchTap(rawEndX,rawEndY);
@@ -1148,7 +1234,11 @@ void pageLayout() {
   tft.fillRect(0,0,320,24,panelColor);
   tft.setTextColor(whiteColor,panelColor);
   tft.drawString("ARDUROWER",7,3,2);
-  // Header title: tap to enter Ghost Race; short BOOT twice also works.
+  // Header title: tap to enter Ghost Race; horizontal swipes are primary.
+  if(!detailPage) {
+    tft.setTextColor(labelColor,backgroundColor);
+    tft.drawString("<  GHOST  >",77,29,1);
+  }
   tft.drawString(FIRMWARE_VERSION,108,8,1);
   if(!detailPage){
     tft.setTextColor(heartColor,backgroundColor);
@@ -1431,7 +1521,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.4 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.5 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1492,6 +1582,7 @@ void loop() {
     if (!available) { metrics.tick(pulseTime); break; }
     metrics.pulse(pulseTime);
     motion.onPulse(pulseTime);
+    bleDuty.onMotion(millis());
     if (LOG_SENSOR_PULSES) {
       Serial.print("P,"); Serial.print(pulseTime);
       Serial.print(','); Serial.print(metrics.pulses);
@@ -1499,6 +1590,7 @@ void loop() {
     }
   }
   const uint32_t now=millis();
+  bleDuty.onFtms(deviceConnected,now);
   checkHrStall(now);
   motion.tick(micros());
   metrics.setExternalTelemetry(motion.meters,motion.speed,
@@ -1534,6 +1626,7 @@ void loop() {
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
     setCxRowerData();
+    ++ftmsNotifications;
   }
   if(now-trendLastMs>=TREND_SAMPLE_MS) {
     trendLastMs=now;
