@@ -39,8 +39,8 @@ for marker in (
     "setHrState(HrState::NotFound",
     "hrState=HrState::Receiving",
     "String(hrStatus(displayedHrState(millis())))",
-    "ArduRower CYD v0.09.4",
-    'FIRMWARE_VERSION = "0.09.4"',
+    "ArduRower CYD v0.09.5",
+    'FIRMWARE_VERSION = "0.09.5"',
 ):
     assert marker in src, marker
 
@@ -49,7 +49,7 @@ assert 'BLE_SERVICE_NAME "WR S4BL3"' in src, "Garmin must still see same FTMS pe
 assert 'pDtCharacteristic->notify()' in src
 assert 'SEND_EQUIVALENT_POWER = false' in src
 assert 'const EXPECTED_PREFIX = ' in page
-assert 'const EXPECTED_PREFIX = \'0.09.4-hr-cccd-ghost-\'' in page
+assert 'const EXPECTED_PREFIX = \'0.09.5-ftms-priority-swipe-\'' in page
 assert 'HR RAM' in page and 'HR BRAK' in page and 'HR OK' in page
 assert "BLEDevice::deinit(" not in src, "Never reset existing FTMS host for HR"
 assert "esp_ble_gap_disconnect(" not in src, "Never disconnect Garmin physical FTMS link for HR retry"
