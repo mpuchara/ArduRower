@@ -27,6 +27,8 @@ checks = (
     'swipeTriggered=true;',
     'touchSwipeEvents',
     'TOUCH: DOWN #',
+    'XPT2046_Touchscreen touch(33);',
+    'if(now-touchLastPollMs<12)return;',
     'NimBLEDevice::createServer()',
 
 )
