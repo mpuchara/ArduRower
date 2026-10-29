@@ -18,6 +18,7 @@
 #include <BLERemoteDescriptor.h>
 #include "CydMotion.h"
 #include "BleDutySchedule.h"
+#include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
@@ -986,11 +987,9 @@ void updateTouch(uint32_t now) {
     // the Ghost Race gesture depend exclusively on that calibration.
     const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
     const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-    const bool mappedSwipe=touchCalibrated && fabsf(deltaX)>=48.0f &&
-                           fabsf(deltaX)>fabsf(deltaY)*1.35f;
-    const bool rawSwipe=max(dx,dy)>=310 &&
-                        max(dx,dy)>min(dx,dy)*1.65f;
-    horizontalSwipe=mappedSwipe || rawSwipe;
+    horizontalSwipe=cydtouch::pageSwipe(rawEndX-rawStartX,
+                                       rawEndY-rawStartY,
+                                       touchCalibrated,deltaX,deltaY);
     if(max(dx,dy)>=160)
       Serial.printf("TOUCH: deltaRaw=(%d,%d) mapped=(%.1f,%.1f) calibrated=%s swipe=%s\n",
                     rawEndX-rawStartX,rawEndY-rawStartY,
