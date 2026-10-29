@@ -13,6 +13,9 @@
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <Preferences.h>
+#include <BLEScan.h>
+#include <BLEClient.h>
+#include "CydMotion.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
@@ -27,6 +30,9 @@ static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
 static constexpr uint16_t QUEUE_SIZE = 256;
 static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
 static constexpr bool LOG_SENSOR_PULSES = false;
+static constexpr uint32_t TREND_SAMPLE_MS=2000;
+static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
+static constexpr uint32_t HR_TIMEOUT_MS=6500;
 
 // Original FTMS IDs, advertised name, service/characteristic structure and
 // notification frequency: do not change without an opt-in compatibility test.
@@ -53,6 +59,99 @@ bool touchCalibrated=false, pendingCalibration=false;
 uint8_t touchRotation=DEFAULT_ROTATION;
 
 RowerMetrics metrics;
+cydmotion::Engine motion;
+volatile uint16_t receivedHr=0;
+volatile uint32_t receivedHrAt=0;
+volatile bool hrConnected=false;
+bool hrTaskCreated=false;
+struct TrendPoint { uint16_t tenthKmh; uint8_t heartBpm; uint8_t reserved; };
+TrendPoint trends[TREND_SAMPLES] = {};
+uint16_t trendHead=0,trendCount=0;
+uint32_t trendLastMs=0,trendRevision=0,trendDrawn=UINT32_MAX;
+bool calibrationScreen=false;
+float speedCalibration=cydmotion::Engine::kDefaultCalibration;
+uint8_t lastCalibrationPaint=255;
+uint16_t liveHr(uint32_t nowMs) {
+  return (receivedHrAt && nowMs-receivedHrAt<HR_TIMEOUT_MS) ? receivedHr : 0;
+}
+void loadMotionCalibration() {
+  Preferences p;
+  if(p.begin("rower-motion",true)) {
+    speedCalibration=p.getFloat("scale",cydmotion::Engine::kDefaultCalibration);
+    p.end();
+  }
+  if(!isfinite(speedCalibration) || speedCalibration<0.3f || speedCalibration>1.5f)
+    speedCalibration=cydmotion::Engine::kDefaultCalibration;
+  motion.setCalibration(speedCalibration);
+}
+void saveMotionCalibration() {
+  Preferences p;
+  if(p.begin("rower-motion",false)) {
+    p.putFloat("scale",speedCalibration);
+    p.end();
+  }
+}
+// Heart rate is optional. An independent BLE client attempts to subscribe to
+// a broadcasting Garmin's standard Heart Rate Measurement (0x180D/0x2A37).
+// Any failure leaves the FTMS peripheral untouched and renders "-- BPM".
+static BLEAdvertisedDevice *hrCandidate=nullptr;
+class HrAdvertisements : public BLEAdvertisedDeviceCallbacks {
+ public:
+  void onResult(BLEAdvertisedDevice device) override {
+    if(!hrCandidate && device.haveServiceUUID() &&
+       device.isAdvertisingService(BLEUUID((uint16_t)0x180D))) {
+      hrCandidate=new BLEAdvertisedDevice(device);
+    }
+  }
+};
+static void hrNotify(BLERemoteCharacteristic*,uint8_t *buf,size_t size,bool) {
+  if(size<2)return;
+  const bool sixteen=buf[0]&1;
+  if(sixteen && size<3)return;
+  const uint16_t hr=sixteen ? (uint16_t)(buf[1]|(buf[2]<<8)) : buf[1];
+  if(hr>=35 && hr<=240) {
+    receivedHr=hr;
+    receivedHrAt=millis();
+  }
+}
+void hrWorker(void *) {
+  BLEScan *scanner=BLEDevice::getScan();
+  if(!scanner){vTaskDelete(nullptr);return;}
+  scanner->setAdvertisedDeviceCallbacks(new HrAdvertisements(),false);
+  scanner->setActiveScan(false);
+  scanner->setInterval(160);
+  scanner->setWindow(48); // low radio duty-cycle; protect Garmin FTMS stream
+  while(true) {
+    if(ESP.getFreeHeap()<50000) {
+      vTaskDelay(pdMS_TO_TICKS(20000));
+      continue;
+    }
+    hrCandidate=nullptr;
+    scanner->start(4,false);
+    scanner->clearResults();
+    BLEAdvertisedDevice *peer=hrCandidate;
+    hrCandidate=nullptr;
+    if(peer) {
+      BLEClient *client=BLEDevice::createClient();
+      bool subscribed=false;
+      if(client && client->connect(peer)) {
+        BLERemoteService *service=client->getService(BLEUUID((uint16_t)0x180D));
+        BLERemoteCharacteristic *characteristic=service ?
+          service->getCharacteristic(BLEUUID((uint16_t)0x2A37)) : nullptr;
+        if(characteristic && characteristic->canNotify())
+          subscribed=characteristic->registerForNotify(hrNotify);
+        hrConnected=subscribed;
+        if(subscribed)
+          while(client->isConnected())vTaskDelay(pdMS_TO_TICKS(1500));
+        client->disconnect();
+      }
+      hrConnected=false;
+      if(client)BLEDevice::deleteClient(client);
+      delete peer;
+    }
+    vTaskDelay(pdMS_TO_TICKS(18000));
+  }
+}
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr;
 BLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
@@ -250,6 +349,12 @@ void resetWorkout() {
   droppedPulses = 0;
   metrics.reset(micros());
   portEXIT_CRITICAL(&pulseMux);
+  motion.reset(micros());
+  motion.setCalibration(speedCalibration);
+  trendHead=trendCount=0;
+  memset(trends,0,sizeof(trends));
+  trendRevision++;
+  trendDrawn=UINT32_MAX;
   historyHead = 0;
   historyCount = 0;
   memset(history, 0, sizeof(history));
@@ -270,10 +375,10 @@ bool loadBest(uint8_t index, ghostrace::Record &out) {
   const size_t read = (n == sizeof(out)) ?
       p.getBytes(raceKeys[index], &out, sizeof(out)) : 0;
   p.end();
-  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index]);
+  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index],motion.calibrationMilli());
 }
 bool saveBest(uint8_t index, const ghostrace::Record &record) {
-  if (!ghostrace::valid(record, raceDistances[index])) return false;
+  if (!ghostrace::valid(record, raceDistances[index],motion.calibrationMilli())) return false;
   Preferences p;
   if (!p.begin("rower-races", false)) return false;
   const bool ok = p.putBytes(raceKeys[index], &record, sizeof(record)) == sizeof(record);
@@ -288,7 +393,8 @@ void startRace(uint8_t index) {
   if (index >= 3) return;
   selectedDistance = index;
   const bool found = loadBest(index, storedGhost);
-  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr);
+  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,
+            motion.calibrationMilli());
   // Start a fresh interval, so race distance is not polluted by earlier
   // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
   resetWorkout();
@@ -426,6 +532,24 @@ bool calibrateRaceTouch() {
   return true;
 }
 void touchTap(int16_t rx,int16_t ry) {
+  if(calibrationScreen) {
+    int16_t x,y;
+    if(!mappedTouch(rx,ry,x,y)) return;
+    if(y>67 && y<157) {
+      if(x<158) speedCalibration=fmaxf(0.3f,speedCalibration-0.05f);
+      else speedCalibration=fminf(1.5f,speedCalibration+0.05f);
+      motion.setCalibration(speedCalibration);
+      saveMotionCalibration();
+      // New calibration changes virtual meters. Invalidate race replay
+      // compatibility through GhostRace::Record.scaleMilli.
+      resetWorkout();loadBestTimes();
+      lastCalibrationPaint=255;
+    } else if(y>=170) {
+      calibrationScreen=false;
+      pageRendered=false;
+    }
+    return;
+  }
   if(activeMode==Mode::Dashboard){detailPage=!detailPage;return;}
   if(ghost.phase==ghostrace::Phase::Finished ||
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
@@ -465,7 +589,14 @@ void updateTouch(uint32_t now) {
     } else {
       horizontalSwipe=max(dx,dy)>700 && max(dx,dy)>min(dx,dy)*1.6f;
     }
-    if(held>75 && held<1750 && horizontalSwipe) {
+    if(held>1100 && max(dx,dy)<420 &&
+       activeMode==Mode::Dashboard && !calibrationScreen) {
+      int16_t px,py;
+      if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
+        calibrationScreen=true;
+        lastCalibrationPaint=255;
+      }
+    } else if(held>75 && held<1750 && horizontalSwipe && !calibrationScreen) {
       toggleMode();
     } else if(held>=60 && held<750 && max(dx,dy)<500) {
       touchTap(rawEndX,rawEndY);
@@ -493,6 +624,18 @@ String formatTime(uint32_t seconds) {
 }
 String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
+}
+void recordTrend(uint32_t now) {
+  const float kmh=motion.speed*3.6f;
+  const float tenth=fmaxf(0.0f,fminf(600.0f,kmh*10.0f));
+  trends[trendHead]={static_cast<uint16_t>(lroundf(tenth)),
+                     static_cast<uint8_t>(liveHr(now)),0};
+  trendHead=(trendHead+1)%TREND_SAMPLES;
+  if(trendCount<TREND_SAMPLES)++trendCount;
+  ++trendRevision;
+}
+const TrendPoint &trendAt(uint16_t i) {
+  return trends[(trendHead+TREND_SAMPLES-trendCount+i)%TREND_SAMPLES];
 }
 void recordHistory() {
   history[historyHead] = {metrics.equivalentPower(), metrics.speed * 3.6f};
@@ -904,6 +1047,7 @@ void setup() {
   if(touchReady)readTouchCalibration();
   Serial.printf("Touch: %s\n", touchReady ? "OK" : "unavailable");
   initBLE();
+  loadMotionCalibration();
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
@@ -916,6 +1060,13 @@ void setup() {
   resetWorkout();
   loadBestTimes();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
+  // Optional second BLE role; do not start it under memory pressure.
+  if(ESP.getFreeHeap()>85000)
+    hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",8192,
+                                         nullptr,1,nullptr,0)==pdPASS;
+  Serial.printf("HR client %s; heap %u\n",
+                hrTaskCreated?"enabled":"not started",
+                (unsigned)ESP.getFreeHeap());
   updateUI();
 }
 void loop() {
@@ -931,13 +1082,17 @@ void loop() {
     portEXIT_CRITICAL(&pulseMux);
     if (!available) { metrics.tick(pulseTime); break; }
     metrics.pulse(pulseTime);
+    motion.onPulse(pulseTime);
     if (LOG_SENSOR_PULSES) {
       Serial.print("P,"); Serial.print(pulseTime);
       Serial.print(','); Serial.print(metrics.pulses);
       Serial.print(','); Serial.println(metrics.strokes);
     }
   }
-  const uint32_t now = millis();
+  const uint32_t now=millis();
+  motion.tick(micros());
+  metrics.setExternalTelemetry(motion.meters,motion.speed,
+                               motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
   if (pendingCalibration && activeMode==Mode::Race &&
@@ -961,6 +1116,10 @@ void loop() {
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
     setCxRowerData();
+  }
+  if(now-trendLastMs>=TREND_SAMPLE_MS) {
+    trendLastMs=now;
+    recordTrend(now);
   }
   if (now - lastHistoryMs >= HISTORY_INTERVAL_MS) {
     lastHistoryMs = now;
