@@ -125,7 +125,6 @@ static void prepareHrProcedure() {
 // with NimBLE's low-level GATT client using the connection handle delivered
 // by our existing NimBLEServer (Garmin is already the central).
 static void hrWorker(void *) {
-  NimBLEDevice::setCustomGapHandler(onHrGapEvent);
   Serial.println("HR: shared FTMS ACL GATT client enabled (NO second BLE connection)");
   uint16_t processed=HR_INVALID_HANDLE;
   uint32_t lastReport=0;
