@@ -18,6 +18,11 @@ checks = (
     'if (ghost.phase==ghostrace::Phase::Armed && metrics.started)',
     'ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,',
     'if (ghost.advance(now,metrics.distance()))',
+    'TOUCH: deltaRaw=',
+    'GHOST: horizontal swipe detected;',
+    'horizontalSwipe=mappedSwipe || rawSwipe;',
+    'max(dx,dy)>=310',
+    'tft.drawString("<  GHOST  >"',
     'registerForNotify(hrNotify,true,false)',
     'cccd->writeValue(enableNotify,2,true)',
     'HR: CCCD WRITE result=',
@@ -35,5 +40,5 @@ begin=src.index("void toggleMode() {")
 end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.4"' in src
+assert 'FIRMWARE_VERSION = "0.09.5"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
