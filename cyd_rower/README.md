@@ -79,3 +79,18 @@ Współpraca Garmin Connect IQ i format BLE FTMS pozostają niezmienione. Testy 
 W v0.08 pamięć bufora napisów `previousField[12]` była za mała dla pól `textPatch(12–20)` z trybu wyścigu. Nadpisywało to sąsiednie dane, powodując możliwy restart ESP32 (ekran powitalny, po nim domyślny dashboard). W v0.08.1 oba bufory korzystają z jednej stałej długości 24, w funkcjach rysowania są kontrole granic, a skrypt `tests/cyd_text_cache_test.py` weryfikuje wszystkie użyte identyfikatory pól. Kod nie zmienia Garmin BLE ani sposobu zapisywania rekordów.
 
 Aby sprawdzić, czy wystąpił **rzeczywisty restart płytki**, podłącz micro-USB do komputera, uruchom monitor szeregowy 115200 (np. `pio device monitor -p COM4 -b 115200`, dobierz odpowiedni port COM) i obserwuj linię `ArduRower CYD Ghost Race v0.08.1 | reset reason=... | heap=...`. Jeśli linia pojawia się ponownie przy przejściu do wyścigu, skopiuj również komunikat bezpośrednio przed restartem oraz `rst:...`. Jeśli ekran tylko zmienia widoki bez tej linii, będzie to problem nawigacji/dotyku, nie restart ESP32.
+
+
+## Wersja 0.09 — fazy taśmy, puls i 10 minut korelacji
+
+**Budowa mechanizmu:** cztery magnesy na kole zwijającym taśmę; sprzęgło jednokierunkowe przekazuje moment na wirnik podczas pociągnięcia, ale pozwala mu kontynuować obroty podczas powrotu. Dwa lokalne spowolnienia na cykl służą jako *hipoteza* zmiany fazy. Jeden kontaktron nie mierzy kierunku — algorytm wykorzystuje liczbę impulsów, czas fazy oraz adaptacyjny próg przerwy. Gdy zmiana kierunku nie wywoła wyraźnej przerwy, detektor może źle policzyć pociągnięcia. Zobacz zakładkę analizy cyklu (dotknij zwykłego dashboardu), która pokazuje wykrytą fazę, impulsy, ruchy i liczbę przejść.
+
+Nowy wirtualny model prędkości **nie zwiększa prędkości na impulsach fazy powrotu**, lecz podczas niej wygasza prędkość z czasem bezwładności. Odległość jest całką z prędkości, a nie stałą liczbą metrów na *każdy* impuls. Bazowy współczynnik `0.14 m/impuls napędowy` oraz skala `0.70` są **prowizoryczne** i nie stanowią kalibracji oryginalnego monitora WaterRower S4. Wartości z testu 30 pociągnięć (41 wykrytych, 249 m, ~13 km/h, 1:15) uzasadniają eksperyment, ale nie określają prawdziwego dystansu.
+
+**Kalibracja:** w dashboardzie przytrzymaj palec na górnym pasku (około 1,2 sekundy), aby otworzyć ekran skali. Użyj `-0.05` lub `+0.05` i wybierz `ZAPISZ I WROC`. Skala zapisuje się w NVS i jest uwzględniona w identyfikacji rekordów Ghost Race. Przy zmianie współczynnika resetuje się bieżący trening. Wymagany będzie niezależny punkt odniesienia do kalibracji absolutnej.
+
+**Puls:** Garmin fēnix 6X Pro Solar może nadawać HR w trakcie aktywności. Nowy opcjonalny BLE-client ESP32 próbuje subskrybować standardową charakterystykę Heart Rate Measurement (`0x2A37`). Gdy pomiary nie przychodzą przez 6,5 s, wskazanie zmienia się na `-- BPM` i wykres ma przerwę. Samo pole Connect IQ odbierające FTMS działa jak wcześniej (bez zmian w pakiecie). Równoczesne działanie odbioru HR i FTMS **wymaga sprawdzenia na zegarku**. Przy małej ilości RAM odbiornik HR pozostaje nieaktywny, aby priorytet zachować dla FTMS.
+
+**Wykres:** oba przebiegi są rysowane w jednym szerokim polu bez legendy, 300 próbek co 2 s (10 min), stałe zakresy 60–190 BPM (czerwony) i 0–22 km/h (turkus). Pola pulsu i prędkości powyżej wykresu mają ten sam kolor co linie. Dwa dolne rzędy wyświetlają: czas, dystans, SPM, tempo, moc szacowaną w W, ruchy.
+
+**Ghost Race:** rekordy poprzedniej wersji (wyliczane ze stałego impulsowego dystansu) mają inny identyfikator modelu i **nie mogą być porównywane z aktualnymi**; stare dane pozostają w NVS do nadpisania nowym ukończonym rekordem. Nie wybieraj opcji pełnego kasowania flash. 
