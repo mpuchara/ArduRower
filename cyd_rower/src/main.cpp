@@ -6,6 +6,15 @@
 #include <NimBLEDevice.h>
 #include "esp32-hal-bt.h"  // force Arduino BT retention link before initArduino()
 #include "esp_bt.h"
+
+// Arduino-ESP32 3.3.12's initArduino() frees BLE controller memory unless
+// bleInUse() or an explicitly overridden btInUse() returns true. NimBLE-
+// Arduino 1.4.3 does not automatically install those retention hooks in this
+// PlatformIO framework, and the released memory cannot be reallocated during
+// the same boot. These strong C symbols override Arduino's WEAK defaults
+// before initArduino() runs, preventing esp_bt_controller_init() error 0x103.
+extern "C" bool btInUse(void) { return true; }
+extern "C" bool bleInUse(void) { return true; }
 #include <TFT_eSPI.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
@@ -1183,13 +1192,9 @@ void setup() {
   if(touchReady)readTouchCalibration();
   Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
                 touchReady ? "OK" : "unavailable");
-  // Arduino-ESP32 2.x calls btInUse() from initArduino() before setup().
-  // Without the strong btInUse() override in esp32-hal-bt.c, Arduino
-  // permanently releases BTDM memory, then NimBLE 1.4 esp_bt_controller_init()
-  // aborts with ESP_ERR_INVALID_STATE 0x103. Calling btStarted() here
-  // forces the linker to include esp32-hal-bt.c in the firmware at link time,
-  // replacing Arduino's weak btInUse()=false. Its *runtime* return value
-  // is not used to initialize or start any second BT controller.
+  // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
+  // retain BLE memory. Both hooks are strong overrides defined above.
+  // btStarted() is diagnostic only; it never starts a second controller.
   const bool controllerAlreadyStarted=btStarted();
   const int controllerStatus=(int)esp_bt_controller_get_status();
   Serial.printf("BT: Arduino btStarted=%d controllerStatus=%d (IDLE=0); retaining BLE memory\n",
