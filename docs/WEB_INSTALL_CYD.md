@@ -100,3 +100,10 @@ Logi CI ujawniły, że PlatformIO z `platform = espressif32` obecnie pobiera **f
 Firmware 0.09.7 dodaje **silne implementacje C** `btInUse()=true` i `bleInUse()=true`, dzięki którym Arduino nie zwolni pamięci potrzebnej NimBLE. Aplikacja nie uruchamia Bluetooth dwa razy; klasyczne BT pozostaje nieużywane. CI nie tylko kompiluje CYD, ale sprawdza w firmware ELF, czy oba symbole są silne (`T`), a nie słabe (`W`). Firmware loguje stan kontrolera BT przed startem usługi.
 
 Nie kasuj NVS przy reinstalacji — rekordy Ghost Race i kalibracja powinny pozostać. Gdy port COM rozłącza się w pętli restartów, użyj trybu flashowania: przytrzymaj przycisk BOOT podczas resetu/podłączania USB, następnie uruchom instalator i po zakończeniu odłącz/restartuj normalnie. Nie jest to test fizycznego odbioru BPM; najpierw zweryfikuj stabilny rozruch i połączenie FTMS.
+
+
+## 0.09.8 — pakiet advertising Garmin FTMS i nieblokujący Ghost Race
+
+W wersji 0.09.7 potwierdzono tętno od Garmin przez NimBLE, ale przez całą sesję `FTMS=0 tx=0`. Od 0.09.8 nazwa `WR S4BL3` jest także w **pierwszym pakiecie reklamowym**, wraz z oryginalnymi 9 bajtami usług/flag (0x1826 i 0x180A). Nie polegamy na metodzie NimBLE `addServiceUUID` po niestandardowym `setAdvertisementData`, bo te interfejsy się nie łączą. W logu: `FTMS: primary advertising started=yes`, `FTMS: advertising active`, `FTMS: CONNECTED`, a później liczniki `tx`. Jeżeli po migracji BLE poprzedni sensor zegarka ma niezgodną pamięć uchwytów GATT, należy usunąć i ponownie dodać `WR S4BL3` na zegarku; nie trzeba resetować ani czyścić NVS ESP32.
+
+Ghost Race znowu sterowany swipem w lewo/prawo. Wcześniej brak kalibracji po tapnięciu menu uruchamiał blokujący kreator dotykowy do 45 sekund, co wyglądało jak zamrożony ekran. Teraz żadne tapnięcie menu nie wywołuje kalibracji. Bez kalibracji: dotyk lub krótki BOOT zmienia dystans, długi BOOT (1,5 s) uzbraja wyścig. Log `GHOST: alive` co 6 s potwierdza działającą pętlę; powrót swipem jest zawsze dostępny.

@@ -27,7 +27,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.7";
+static constexpr const char *FIRMWARE_VERSION = "0.09.8";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -152,6 +152,8 @@ NimBLECharacteristic *pCtrCharacteristic = nullptr, *pDtCharacteristic = nullptr
 NimBLECharacteristic *pFmfCharacteristic = nullptr, *pStCharacteristic = nullptr;
 NimBLECharacteristic *pBatCharacteristic = nullptr;
 bool oldDeviceConnected = false;
+uint32_t lastFtmsAdvertCheckMs=0, lastFtmsAdvertReportMs=0;
+uint32_t lastGhostMenuHeartbeatMs=0;
 
 portMUX_TYPE pulseMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t pulseQueue[QUEUE_SIZE];
@@ -279,20 +281,28 @@ void initBLE() {
   cRower[5] = cRower[6] = cRower[7] = 0;
   pFmfCharacteristic->setValue((uint8_t *)cRower, 8);
   NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+  // Preserve the original Garmin FTMS advertisement prefix (Flags 0x06,
+  // advertised 16-bit services 0x1826 + 0x180A). During the migration to
+  // NimBLE, the name was only in a scan response and addServiceUUID() was
+  // called AFTER custom setAdvertisementData(), which NimBLE ignores for
+  // custom packets. Some Garmin clients filter the PRIMARY ad by name.
+  // Include WR S4BL3 in the primary packet as well as scan response.
+  // 9-byte original prefix + 10-byte name AD field = 19 bytes (<31).
   uint8_t advData[] = {0x02, 0x01, 0x06, 0x05, 0x02, 0x26, 0x18, 0x0a, 0x18};
-  String advDataStr;
-  for (unsigned int i = 0; i < sizeof(advData); i++)
-    advDataStr += (char)advData[i];
   NimBLEAdvertisementData oAdvertisementData;
-  oAdvertisementData.addData(std::string(advDataStr.c_str(),advDataStr.length()));
+  oAdvertisementData.addData(std::string((const char*)advData,sizeof(advData)));
+  oAdvertisementData.setName(BLE_SERVICE_NAME);
   pAdvertising->setScanResponse(true);
   pAdvertising->setAdvertisementData(oAdvertisementData);
-  pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)FitnessMachineService));
   NimBLEAdvertisementData scanResponse;
   scanResponse.setName(BLE_SERVICE_NAME);
   pAdvertising->setScanResponseData(scanResponse);
-  NimBLEDevice::startAdvertising();
-  Serial.println();
+  const bool advertisingStarted=pAdvertising->start();
+  Serial.printf("\nFTMS: primary advertising started=%s active=%s name=%s service=0x1826 adBytes=%u\n",
+                advertisingStarted?"yes":"no",
+                pAdvertising->isAdvertising()?"yes":"no",
+                BLE_SERVICE_NAME,
+                (unsigned)oAdvertisementData.getPayload().size());
 }
 
 uint16_t bounded16(float value) {
@@ -472,7 +482,11 @@ void updateButton(uint32_t now) {
          ghost.phase==ghostrace::Phase::Armed)ghost.cancel();
       resetWorkout();
     }
-    else if (ghost.phase == ghostrace::Phase::Idle) startRace(selectedDistance);
+    else if (ghost.phase == ghostrace::Phase::Idle) {
+      Serial.printf("GHOST: BOOT long start %u m\n",
+                    (unsigned)raceDistances[selectedDistance]);
+      startRace(selectedDistance);
+    }
     else if (ghost.phase == ghostrace::Phase::Running ||
              ghost.phase == ghostrace::Phase::Armed) openRaceMenu();
     else openRaceMenu();
@@ -594,7 +608,18 @@ void touchTap(int16_t rx,int16_t ry) {
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
   if(ghost.phase!=ghostrace::Phase::Idle)return;
   int16_t x,y;
-  if(!mappedTouch(rx,ry,x,y)) {pendingCalibration=true;return;}
+  if(!mappedTouch(rx,ry,x,y)) {
+    // Earlier versions launched a blocking three-point calibration wizard
+    // (up to 45 seconds) when any menu option was tapped without a stored
+    // mapping. That made Ghost Race look completely frozen and prevented
+    // swipe-back. Never auto-calibrate during a workout/menu.
+    selectedDistance=(selectedDistance+1)%3;
+    Serial.printf("GHOST: uncalibrated tap -> selected %u m; long BOOT starts\n",
+                  (unsigned)raceDistances[selectedDistance]);
+    return;
+  }
+  Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u\n",
+                (int)x,(int)y,(unsigned)selectedDistance);
   // Three entire rows are large touch targets with no small hitbox.
   if(y>=53 && y<105) startRace(0);
   else if(y>=112 && y<164) startRace(1);
@@ -1012,8 +1037,8 @@ void paintRaceLayout(uint8_t screen) {
       tft.drawRightString(pb,297,yy+17,2);
     }
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString(touchCalibrated?"DOTKNIJ DYSTANS, BY ZACZAC":
-                   "BOOT: 1x WYBOR / 1.5s START",10,230,1);
+    tft.drawString(touchCalibrated?"DOTKNIJ DYSTANS / SWIPE: WROC":
+                   "TAP/BOOT: WYBOR, BOOT 1.5s START",10,230,1);
   } else if(screen==1) {
     tft.setTextColor(whiteColor,backgroundColor);
     tft.drawString("TY",12,33,2);
@@ -1180,7 +1205,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.7 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.8 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1264,13 +1289,21 @@ void loop() {
                                motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
-  if (pendingCalibration && activeMode==Mode::Race &&
-      touchReady && !touchCalibrated) {
+  // Do not auto-launch calibrateRaceTouch() from Ghost menu.
+  // Its synchronous 3x15s wait previously locked the main loop and FTMS.
+  if(pendingCalibration) {
     pendingCalibration=false;
-    if(!calibrateRaceTouch())Serial.println("Touch calibration unavailable: BOOT menu works");
-    raceLayoutReady=false;
-    pageRendered=false;
-    touchedLast=false;
+    Serial.println("GHOST: automatic calibration suppressed to protect UI and FTMS");
+  }
+  if(activeMode==Mode::Race &&
+     (uint32_t)(now-lastGhostMenuHeartbeatMs)>=6000) {
+    lastGhostMenuHeartbeatMs=now;
+    Serial.printf("GHOST: alive phase=%u selected=%u touch=%lu swipes=%lu FTMS=%d tx=%lu\n",
+                  (unsigned)ghost.phase,
+                  (unsigned)raceDistances[selectedDistance],
+                  (unsigned long)touchEvents,
+                  (unsigned long)touchSwipeEvents,
+                  deviceConnected?1:0,(unsigned long)ftmsNotifications);
   }
   if (ghost.phase==ghostrace::Phase::Armed && metrics.started) {
     ghost.start(now);
@@ -1288,8 +1321,26 @@ void loop() {
                     recordSaveFailed?"no":"yes");
     }
   }
-  if (!deviceConnected && oldDeviceConnected) pServer->startAdvertising();
-  oldDeviceConnected = deviceConnected;
+  if(!deviceConnected && oldDeviceConnected) {
+    Serial.println("FTMS: disconnected; restart advertising");
+    pServer->startAdvertising();
+  }
+  oldDeviceConnected=deviceConnected;
+  // Host may interrupt peripheral advertising during dual-role HR scanning.
+  // Keep WR S4BL3 discoverable without disconnecting the successful HR link.
+  if(!deviceConnected && (uint32_t)(now-lastFtmsAdvertCheckMs)>=5000) {
+    lastFtmsAdvertCheckMs=now;
+    NimBLEAdvertising *adv=pServer->getAdvertising();
+    if(!adv->isAdvertising()) {
+      const bool ok=adv->start();
+      Serial.printf("FTMS: advertising recovery %s, HR=%s\n",
+                    ok?"started":"FAILED",hrStatus(hrState));
+    } else if((uint32_t)(now-lastFtmsAdvertReportMs)>=30000) {
+      lastFtmsAdvertReportMs=now;
+      Serial.printf("FTMS: advertising active; waiting for Garmin, HR=%s tx=%lu\n",
+                    hrStatus(hrState),(unsigned long)ftmsNotifications);
+    }
+  }
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
     setCxRowerData();

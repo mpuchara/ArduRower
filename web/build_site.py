@@ -17,7 +17,7 @@ ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
 }
 REVISION = os.environ.get("GITHUB_SHA", "local")[:12]
-VERSION = "0.09.7-nimble-boot-" + REVISION
+VERSION = "0.09.8-ftms-ghost-" + REVISION
 
 
 def require(path):
