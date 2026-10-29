@@ -15,12 +15,13 @@
 #include <Preferences.h>
 #include <BLEScan.h>
 #include <BLEClient.h>
+#include <BLERemoteDescriptor.h>
 #include "CydMotion.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.3";
+static constexpr const char *FIRMWARE_VERSION = "0.09.4";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -70,7 +71,7 @@ bool hrTaskCreated=false;
 // FTMS connection, not to the reverse HR connection.
 enum class HrState : uint8_t {
   Starting, Scan, NotFound, Connecting, GattConnected,
-  Service, Characteristic, Subscribing, Receiving, NoData,
+  Service, Characteristic, Subscribing, Descriptor, Receiving, NoData,
   Disconnected, LowMemory, InitFailed, Stalled
 };
 volatile HrState hrState=HrState::Starting;
@@ -90,6 +91,7 @@ const char *hrStatus(HrState s) {
     case HrState::Service: return "HR USL";
     case HrState::Characteristic: return "HR CHAR";
     case HrState::Subscribing: return "HR SUB";
+    case HrState::Descriptor: return "HR CCCD";
     case HrState::Stalled: return "HR ZAW";
     case HrState::Receiving: return "HR OK";
     case HrState::NoData: return "HR DANE";
@@ -133,6 +135,40 @@ void saveMotionCalibration() {
 // per-call timeout. Report stalled stages WITHOUT deleting the BLE task,
 // reinitializing BLE, or disconnecting the physical Garmin BLE link (which
 // could take down the FTMS subscription as well).
+// ESP32 Arduino Bluedroid calls the custom GATTC handler AFTER dispatching
+// the same event to its BLEClient/RemoteCharacteristic. Observe real status
+// codes instead of assuming registerForNotify() returning means CCCD succeeded.
+// This hook must never disconnect the GAP peer or alter the FTMS server.
+static volatile uint16_t hrNotifyHandle=0;
+static volatile uint16_t hrDescriptorHandle=0;
+static volatile uint8_t hrRegResult=0xff;
+static volatile uint8_t hrDescriptorResult=0xff;
+static volatile uint32_t hrGattNotifications=0;
+static void hrGattEvents(esp_gattc_cb_event_t event,esp_gatt_if_t,
+                         esp_ble_gattc_cb_param_t* p) {
+  if(!p)return;
+  if(event==ESP_GATTC_REG_FOR_NOTIFY_EVT &&
+     hrNotifyHandle && p->reg_for_notify.handle==hrNotifyHandle) {
+    hrRegResult=static_cast<uint8_t>(p->reg_for_notify.status);
+    Serial.printf("HR: GATT notify registration status=%d handle=%u\n",
+                  (int)p->reg_for_notify.status,(unsigned)hrNotifyHandle);
+  }
+  if(event==ESP_GATTC_WRITE_DESCR_EVT &&
+     hrDescriptorHandle && p->write.handle==hrDescriptorHandle) {
+    hrDescriptorResult=static_cast<uint8_t>(p->write.status);
+    Serial.printf("HR: CCCD WRITE result=%d descriptor=%u\n",
+                  (int)p->write.status,(unsigned)hrDescriptorHandle);
+  }
+  if(event==ESP_GATTC_NOTIFY_EVT &&
+     hrNotifyHandle && p->notify.handle==hrNotifyHandle) {
+    ++hrGattNotifications;
+    if(hrGattNotifications<=5)
+      Serial.printf("HR: raw GATT notification len=%u n=%lu first=%02X\n",
+                    (unsigned)p->notify.value_len,
+                    (unsigned long)hrGattNotifications,
+                    p->notify.value_len?p->notify.value[0]:0);
+  }
+}
 static BLEAdvertisedDevice *hrCandidate=nullptr;
 static int hrCandidateScore=-100000;
 static String hrPreferredAddress;
@@ -154,7 +190,7 @@ void setHrState(HrState state,const char* description) {
 bool isHrBlockingStage(HrState state) {
   return state==HrState::Connecting || state==HrState::GattConnected ||
          state==HrState::Service || state==HrState::Characteristic ||
-         state==HrState::Subscribing;
+         state==HrState::Subscribing || state==HrState::Descriptor;
 }
 HrState displayedHrState(uint32_t nowMs) {
   HrState state=hrState;
@@ -227,6 +263,8 @@ class HrClientCallbacks : public BLEClientCallbacks {
 static HrClientCallbacks hrClientCallbacks;
 
 void hrWorker(void*) {
+  // Install once, before GATT client connections. It only observes events.
+  BLEDevice::setCustomGattcHandler(hrGattEvents);
   BLEScan* scanner=BLEDevice::getScan();
   if(!scanner) {
     setHrState(HrState::InitFailed,"scanner unavailable");
@@ -314,15 +352,49 @@ void hrWorker(void*) {
       if(client->isConnected())client->disconnect();
       vTaskDelay(pdMS_TO_TICKS(7000));continue;
     }
-    // registerForNotify() enables the 0x2902 CCCD when present. Old
-    // Bluedroid API returns void, so distinguish local registration from
-    // first ACTUAL notification; never mark this as HR OK prematurely.
+    // The older Arduino BLE wrapper enables CCCD *before* waiting for the
+    // GATT registration completion. This can stall, and status is void.
+    // Split the operations: first subscribe the local GATT notify callback,
+    // then explicitly enable the peer's CCCD and inspect GATT status.
+    BLERemoteDescriptor* cccd =
+        characteristic->getDescriptor(BLEUUID((uint16_t)0x2902));
+    if(!cccd) {
+      Serial.println("HR: missing CCCD 0x2902; cannot enable remote HR updates");
+      setHrState(HrState::InitFailed,"HR CCCD missing; no notifications possible");
+      if(client->isConnected())client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    hrNotifyHandle=characteristic->getHandle();
+    hrDescriptorHandle=cccd->getHandle();
+    hrRegResult=hrDescriptorResult=0xff;
     const uint32_t countBefore=hrNotifyPackets;
-    setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER");
-    characteristic->registerForNotify(hrNotify);
-    Serial.println("HR: registerForNotify(0x2A37) RETURN");
+    setHrState(HrState::Subscribing,"registerForNotify(0x2A37) ENTER, no CCCD write");
+    characteristic->registerForNotify(hrNotify,true,false);
+    // Library gives its internal semaphore before the observer hook runs,
+    // so await the same GATTC callback's status briefly before evaluation.
+    for(int tries=0;tries<50 && hrRegResult==0xff;++tries)
+      vTaskDelay(pdMS_TO_TICKS(10));
+    Serial.printf("HR: registerForNotify() RETURN; GATT status=%u\n",
+                  (unsigned)hrRegResult);
+    if(hrRegResult!=ESP_GATT_OK) {
+      setHrState(HrState::InitFailed,"GATT notification registration failed");
+      if(client->isConnected())client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
+    uint8_t enableNotify[2]={0x01,0x00};
+    setHrState(HrState::Descriptor,"CCCD 0x2902 enable notifications ENTER");
+    cccd->writeValue(enableNotify,2,true);
+    for(int tries=0;tries<50 && hrDescriptorResult==0xff;++tries)
+      vTaskDelay(pdMS_TO_TICKS(10));
+    Serial.printf("HR: CCCD write RETURN result=%u\n",
+                  (unsigned)hrDescriptorResult);
+    if(hrDescriptorResult!=ESP_GATT_OK) {
+      setHrState(HrState::InitFailed,"CCCD enable failed; cannot receive BPM");
+      if(client->isConnected())client->disconnect();
+      vTaskDelay(pdMS_TO_TICKS(7000));continue;
+    }
     hrConnected=true;
-    setHrState(HrState::NoData,"registered; waiting for first BPM");
+    setHrState(HrState::NoData,"CCCD enabled; waiting for first BPM");
     const uint32_t subscribedAt=millis();
     bool gotData=(hrNotifyPackets!=countBefore);
     uint32_t lastReport=0;
@@ -365,6 +437,7 @@ void hrWorker(void*) {
       vTaskDelay(pdMS_TO_TICKS(1500));
     }
     hrConnected=false;
+    hrNotifyHandle=hrDescriptorHandle=0;
     if(client->isConnected())client->disconnect(); // only HR GATT client
     setHrState(HrState::Disconnected,"HR link closed; rescan");
     vTaskDelay(pdMS_TO_TICKS(7000));
@@ -385,6 +458,10 @@ uint32_t lastDisplayMs = 0, lastBleMs = 0, lastHistoryMs = 0;
 bool detailPage = false, buttonDown = false, longPressDone = false;
 bool rawButtonDown = false;
 uint32_t buttonChangedMs = 0, buttonPressedMs = 0;
+// Two quick BOOT clicks open Ghost Race even without touch calibration.
+// A single click still toggles the dashboard details after a short delay.
+uint8_t dashboardBootClicks=0;
+uint32_t dashboardBootClickAt=0;
 
 struct HistorySample { float power; float speedKmh; };
 HistorySample history[HISTORY_LENGTH] = {};
@@ -616,6 +693,9 @@ void startRace(uint8_t index) {
   // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
   resetWorkout();
   activeMode = Mode::Race;
+  Serial.printf("GHOST: armed target=%u, best=%s, calibration=%lu\n",
+                (unsigned)ghost.targetMeters,found?"yes":"no",
+                (unsigned long)motion.calibrationMilli());
   raceLayoutReady = false;
   lastRacePaintMs = 0;
   recordSaveFailed=false;
@@ -636,7 +716,8 @@ void toggleMode() {
     else if (ghost.phase == ghostrace::Phase::Idle)
       loadBestTimes();
     raceLayoutReady=false;
-    if (touchReady && !touchCalibrated) pendingCalibration=true;
+    // Never launch a blocking touch-calibration wizard automatically when
+    // entering the menu. BOOT can operate Ghost Race without touch setup.
   } else {
     activeMode=Mode::Dashboard;
     pageRendered=false;
@@ -650,12 +731,24 @@ void updateButton(uint32_t now) {
     buttonDown=down;
     if (down) { buttonPressedMs=now; longPressDone=false; }
     else if (!longPressDone) {
-      if (activeMode == Mode::Dashboard) detailPage=!detailPage;
-      else if (ghost.phase == ghostrace::Phase::Idle)
+      if (activeMode == Mode::Dashboard) {
+        if(dashboardBootClicks==1 && now-dashboardBootClickAt<=480) {
+          dashboardBootClicks=0;
+          toggleMode(); // explicit physical fallback for Ghost Race
+          Serial.println("GHOST: entered menu using double BOOT click");
+        } else {
+          dashboardBootClicks=1;
+          dashboardBootClickAt=now;
+        }
+      } else if (ghost.phase == ghostrace::Phase::Idle)
         selectedDistance=(selectedDistance+1)%3;
       else if (ghost.phase == ghostrace::Phase::Finished ||
                ghost.phase == ghostrace::Phase::Cancelled) openRaceMenu();
     }
+  }
+  if(dashboardBootClicks && now-dashboardBootClickAt>480) {
+    dashboardBootClicks=0;
+    if(activeMode==Mode::Dashboard) detailPage=!detailPage;
   }
   if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
     longPressDone=true;
@@ -772,7 +865,16 @@ void touchTap(int16_t rx,int16_t ry) {
     }
     return;
   }
-  if(activeMode==Mode::Dashboard){detailPage=!detailPage;return;}
+  if(activeMode==Mode::Dashboard) {
+    int16_t x,y;
+    // Short tap on upper-left header is a one-step Ghost Race entry.
+    // Long header hold still opens virtual-distance calibration.
+    if(mappedTouch(rx,ry,x,y) && x<104 && y<27) {
+      toggleMode();
+      Serial.println("GHOST: entered menu using dashboard title tap");
+    } else detailPage=!detailPage;
+    return;
+  }
   if(ghost.phase==ghostrace::Phase::Finished ||
      ghost.phase==ghostrace::Phase::Cancelled){openRaceMenu();return;}
   if(ghost.phase!=ghostrace::Phase::Idle)return;
@@ -1046,6 +1148,7 @@ void pageLayout() {
   tft.fillRect(0,0,320,24,panelColor);
   tft.setTextColor(whiteColor,panelColor);
   tft.drawString("ARDUROWER",7,3,2);
+  // Header title: tap to enter Ghost Race; short BOOT twice also works.
   tft.drawString(FIRMWARE_VERSION,108,8,1);
   if(!detailPage){
     tft.setTextColor(heartColor,backgroundColor);
@@ -1160,7 +1263,8 @@ void paintRaceLayout(uint8_t screen) {
       tft.drawRightString(pb,297,yy+17,2);
     }
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("DOTKNIJ DYSTANS, BY ZACZAC",10,230,1);
+    tft.drawString(touchCalibrated?"DOTKNIJ DYSTANS, BY ZACZAC":
+                   "BOOT: 1x WYBOR / 1.5s START",10,230,1);
   } else if(screen==1) {
     tft.setTextColor(whiteColor,backgroundColor);
     tft.drawString("TY",12,33,2);
@@ -1286,7 +1390,7 @@ void renderRaceUI() {
   paintProgress(106,ghost.ghostMeters(now),speedColor);
   if(trendDrawn!=trendRevision) {
     renderSharedTrend(15,189,290,28);
-    plottedRevision=historyRevision;
+    trendDrawn=trendRevision;
   }
 }
 
@@ -1327,7 +1431,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.3 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.4 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1409,12 +1513,20 @@ void loop() {
     pageRendered=false;
     touchedLast=false;
   }
-  if (ghost.phase==ghostrace::Phase::Armed && metrics.started)
+  if (ghost.phase==ghostrace::Phase::Armed && metrics.started) {
     ghost.start(now);
+    Serial.printf("GHOST: started %u m at %lu, pulses=%lu\n",
+                  (unsigned)ghost.targetMeters,(unsigned long)now,
+                  (unsigned long)metrics.pulses);
+  }
   if (ghost.phase==ghostrace::Phase::Running) {
     if (ghost.advance(now,metrics.distance())) {
       if (!saveBest(selectedDistance,ghost.attempt))recordSaveFailed=true;
       else personalBestMs[selectedDistance]=ghost.endMs;
+      Serial.printf("GHOST: finished %u m, time=%lu, saved=%s\n",
+                    (unsigned)ghost.targetMeters,
+                    (unsigned long)ghost.endMs,
+                    recordSaveFailed?"no":"yes");
     }
   }
   if (!deviceConnected && oldDeviceConnected) pServer->startAdvertising();

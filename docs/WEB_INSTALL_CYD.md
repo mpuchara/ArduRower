@@ -77,3 +77,8 @@ Otwórz `https://mpuchara.github.io/ArduRower/?v=0.09.1`, użyj Ctrl+F5 i sprawd
 Poprawa jest ograniczona do opcjonalnego odbiornika pulsu przez BLE; serwer FTMS i działające pole Connect IQ Garmina pozostają bez zmian. Nowe logi w monitorze portu szeregowego odróżniają blokowanie w `connect()`, znalezienie usługi `0x180D`, charakterystyki `0x2A37`, włączenie powiadomień i faktyczne otrzymanie BPM. Gdy etap trwa >16 sekund, górny status HR pokazuje `HR ZAW`. Należy przesłać kilka ostatnich linii `HR:`, bez konieczności wykonywania ręcznego restartu. Nie jest to twardy timeout zrywający połączenie — starsza biblioteka nie ma bezpiecznego publicznego anulowania `connect()`, a rozłączanie adresu przez GAP może zerwać FTMS.
 
 Po prawidłowym połączeniu, lecz braku pierwszego BPM przez 15 sekund, klient HR bezpiecznie się rozłącza i ponawia próbę. Nowe pliki instalatora mają identyfikator `0.09.3-hr-link-` i nie nadpisują partycji NVS.
+
+
+## CYD 0.09.4: niezależna diagnostyka CCCD i wejście do Ghost Race
+
+Wersja `0.09.4-hr-cccd-ghost-...` wymaga instalatora z pasującymi obrazami. Najpierw lokalna rejestracja GATT HR, potem zapis do CCCD `0x2902`, ze sprawdzeniem statusu obu operacji. Nowy status `HR CCCD` opisuje oczekiwanie na zapis deskryptora. Odbiór BPM nie jest gwarantowany przez samo podłączenie GATT. Działa wejście do wyścigów zarówno dotknięciem nagłówka dashboardu, jak i dwukrotnym przyciskiem BOOT; nie ma wymuszonej kalibracji dotyku przy otwieraniu menu. Pierwszy wyścig na nowym algorytmie tworzy nowy rekord, starsze rekordy nie są automatycznie konwertowane. Wyłącz pełne kasowanie flash, jeśli zachowujesz rekordy Ghost Race.
