@@ -27,6 +27,10 @@ checks = (
     'swipeTriggered=true;',
     'touchSwipeEvents',
     'TOUCH: DOWN #',
+    'GHOST: alive phase=',
+    'GHOST: uncalibrated tap -> selected',
+    'GHOST: automatic calibration suppressed',
+    'TAP/BOOT: WYBOR, BOOT 1.5s START',
     'XPT2046_Touchscreen touch(33);',
     'if(now-touchLastPollMs<12)return;',
     'NimBLEDevice::createServer()',
@@ -41,5 +45,5 @@ begin=src.index("void toggleMode() {")
 end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.7"' in src
+assert 'FIRMWARE_VERSION = "0.09.8"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
