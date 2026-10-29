@@ -89,3 +89,14 @@ Wersja `0.09.4-hr-cccd-ghost-...` wymaga instalatora z pasującymi obrazami. Naj
 Aplikacja QZ (qdomyos-zwift) czyta Garmin Heart Rate przez systemowy stos Qt Bluetooth, nie przez biblioteki ESP32 Arduino BLE; używa standardu `180D/2A37` i zapisu CCCD `01 00`, który w naszych logach już zwraca powodzenie. Od 0.09.5 aktywne skanowanie BLE oraz GATT setup wykonywane są tylko wtedy, gdy Garmin nie jest aktualnie połączony z FTMS i od ostatniego ruchu minęło 15 s. Działający FTMS otrzymuje ciągły strumień co sekundę; odbiór HR po istniejącym linku pozostaje pasywny. Gdy FTMS przyłączy się podczas trwającego GATT setup, przerwiemy próbę przy najbliższym bezpiecznym punkcie, ale nie możemy przerwać wątku biblioteki blokującego się wewnątrz zapisu. Licznik zerwań FTMS trafia do logu. Nie obiecujemy twardych czasowych slotów RF, bo wykonuje je sam kontroler.
 
 Przy wejściu do Ghost Race preferowana jest zmiana strony gestem poziomym w LEWO lub w PRAWO (również przy zamienionych fizycznych osiach dotyku). Log `GHOST: horizontal swipe detected` pozwala odróżnić problem czujnika dotyku od warstwy menu. Awaryjna opcja to podwójne BOOT.
+
+
+## v0.09.7 — krytyczna naprawa bootloopa NimBLE na Arduino-ESP32 3.3.12
+
+Użytkownik zgłosił `ESP_ERR_INVALID_STATE (0x103)` w `NimBLEDevice::init()` / `esp_bt_controller_init()`, plik `NimBLEDevice.cpp:880`. Nie jest to problem z czujnikiem, dotykiem, NVS ani danymi Garmin: kontroler BLE nie zostaje poprawnie uruchomiony.
+
+Logi CI ujawniły, że PlatformIO z `platform = espressif32` obecnie pobiera **framework-arduinoespressif32 3.3.12** (nie 2.x, jak poprzednio zakładaliśmy). W tej wersji `initArduino()` sprawdza `btInUse()` i `bleInUse()`, a przy ich domyślnym `false` bezpowrotnie zwalnia pamięć kontrolera BLE podczas tego startu. Stara biblioteka NimBLE-Arduino 1.4.3 nie aktywowała tych nowych hooków. W efekcie `esp_bt_controller_init()` zwraca 0x103. Samo przywołanie `btStarted()` niczego nie zmieniało w 3.3.x, ponieważ `btInUse()` z `esp32-hal-bt.c` jest teraz słabym aliasem również zwracającym `false`.
+
+Firmware 0.09.7 dodaje **silne implementacje C** `btInUse()=true` i `bleInUse()=true`, dzięki którym Arduino nie zwolni pamięci potrzebnej NimBLE. Aplikacja nie uruchamia Bluetooth dwa razy; klasyczne BT pozostaje nieużywane. CI nie tylko kompiluje CYD, ale sprawdza w firmware ELF, czy oba symbole są silne (`T`), a nie słabe (`W`). Firmware loguje stan kontrolera BT przed startem usługi.
+
+Nie kasuj NVS przy reinstalacji — rekordy Ghost Race i kalibracja powinny pozostać. Gdy port COM rozłącza się w pętli restartów, użyj trybu flashowania: przytrzymaj przycisk BOOT podczas resetu/podłączania USB, następnie uruchom instalator i po zakończeniu odłącz/restartuj normalnie. Nie jest to test fizycznego odbioru BPM; najpierw zweryfikuj stabilny rozruch i połączenie FTMS.

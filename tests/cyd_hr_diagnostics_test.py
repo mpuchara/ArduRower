@@ -8,8 +8,8 @@ ini=(root/"cyd_rower/platformio.ini").read_text()
 page=(root/"index.html").read_text()
 for v in ('NimBLEDevice::createServer()', 'NimBLEDevice::init(BLE_SERVICE_NAME)',
           'NIMBLE_PROPERTY::NOTIFY', 'pDtCharacteristic->notify()',
-          '#include "NimbleHr.h"', 'FIRMWARE_VERSION = "0.09.6"',
-          'ArduRower CYD v0.09.6', 'BLE_SERVICE_NAME "WR S4BL3"',
+          '#include "NimbleHr.h"', 'FIRMWARE_VERSION = "0.09.7"',
+          'ArduRower CYD v0.09.7', 'BLE_SERVICE_NAME "WR S4BL3"',
           'String(hrStatus(displayedHrState(millis())))'):
     assert v in src,v
 for v in ('NimBLEDevice::getScan()', 'NimBLEDevice::createClient()',
@@ -20,7 +20,13 @@ for v in ('NimBLEDevice::getScan()', 'NimBLEDevice::createClient()',
           'client->setConnectTimeout(6)', 'HR_STALLED_AFTER_MS'):
     assert v in hr,v
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-assert 'const EXPECTED_PREFIX = \'0.09.6-nimble-ghost-\'' in page
+assert '#include "esp32-hal-bt.h"' in src
+assert 'const bool controllerAlreadyStarted=btStarted();' in src, "Force link Arduino BT retention hook"
+assert 'esp_bt_controller_get_status()' in src, "Must expose BT controller state diagnostic"
+assert 'extern "C" bool btInUse(void) { return true; }' in src
+assert 'extern "C" bool bleInUse(void) { return true; }' in src
+
+assert 'const EXPECTED_PREFIX = \'0.09.7-nimble-boot-\'' in page
 assert 'HR PAUZ' not in hr, "Never block HR because Garmin is receiving FTMS"
 assert 'BLEDevice::deinit(' not in src and 'esp_ble_gap_disconnect(' not in src
 assert src.count('NimBLEDevice::init(')==1

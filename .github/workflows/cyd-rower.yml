@@ -69,6 +69,19 @@ jobs:
         run: pip install platformio
       - name: Compile CYD (${{ matrix.lcd }})
         run: pio run -d cyd_rower -e ${{ matrix.lcd }}
+      - name: Verify Arduino BT retention linked (prevent 0x103 bootloop)
+        run: |
+          set -euo pipefail
+          ELF=cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.elf
+          NM="$(find "$HOME/.platformio/packages" -type f -name 'xtensa*-nm' -print -quit)"
+          test -f "$ELF"
+          test -n "$NM"
+          test -x "$NM"
+          "$NM" "$ELF" | grep -E ' T btInUse'
+          "$NM" "$ELF" | grep -E ' T bleInUse'
+          echo "PASS: BT memory retention hooks override Arduino defaults"
+          echo "PASS: strong Arduino BT memory retention hook linked"
+
       - name: Publish compiled firmware BIN
         uses: actions/upload-artifact@v4
         with:

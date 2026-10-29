@@ -59,6 +59,19 @@ jobs:
           set -euo pipefail
           pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21
 
+      - name: Verify Arduino BT retention linked (prevent 0x103 bootloop)
+        run: |
+          set -euo pipefail
+          ELF=cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.elf
+          NM="$(find "$HOME/.platformio/packages" -type f -name 'xtensa*-nm' -print -quit)"
+          test -f "$ELF"
+          test -n "$NM"
+          test -x "$NM"
+          "$NM" "$ELF" | grep -E ' T btInUse'
+          "$NM" "$ELF" | grep -E ' T bleInUse'
+          echo "PASS: BT memory retention hooks override Arduino defaults"
+          echo "PASS: strong Arduino BT memory retention hook linked"
+
       - name: Publish separate flash images while preserving NVS records
         run: python web/build_site.py
 
@@ -74,7 +87,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.6-nimble-ghost-")
+          assert version["version"].startswith("0.09.7-nimble-boot-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]

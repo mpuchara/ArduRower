@@ -4,6 +4,17 @@
 // BLE FTMS wire contract follows original ArduRower.ino and must stay unchanged.
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include "esp32-hal-bt.h"  // force Arduino BT retention link before initArduino()
+#include "esp_bt.h"
+
+// Arduino-ESP32 3.3.12's initArduino() frees BLE controller memory unless
+// bleInUse() or an explicitly overridden btInUse() returns true. NimBLE-
+// Arduino 1.4.3 does not automatically install those retention hooks in this
+// PlatformIO framework, and the released memory cannot be reallocated during
+// the same boot. These strong C symbols override Arduino's WEAK defaults
+// before initArduino() runs, preventing esp_bt_controller_init() error 0x103.
+extern "C" bool btInUse(void) { return true; }
+extern "C" bool bleInUse(void) { return true; }
 #include <TFT_eSPI.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
@@ -16,7 +27,7 @@
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.6";
+static constexpr const char *FIRMWARE_VERSION = "0.09.7";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -1169,7 +1180,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.6 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.7 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1181,6 +1192,13 @@ void setup() {
   if(touchReady)readTouchCalibration();
   Serial.printf("Touch: %s, SPI polling no IRQ, CS33 SPI=25/39/32/33\n",
                 touchReady ? "OK" : "unavailable");
+  // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
+  // retain BLE memory. Both hooks are strong overrides defined above.
+  // btStarted() is diagnostic only; it never starts a second controller.
+  const bool controllerAlreadyStarted=btStarted();
+  const int controllerStatus=(int)esp_bt_controller_get_status();
+  Serial.printf("BT: Arduino btStarted=%d controllerStatus=%d (IDLE=0); retaining BLE memory\n",
+                controllerAlreadyStarted?1:0,controllerStatus);
   initBLE();
   loadMotionCalibration();
   {
