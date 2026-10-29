@@ -349,6 +349,11 @@ void hrWorker(void*) {
         Serial.println("HR: no BPM for 15s; disconnecting HR client for retry");
         break;
       }
+      if(gotData && receivedHrAt &&
+         (uint32_t)(now-receivedHrAt)>20000) {
+        Serial.println("HR: no fresh BPM for 20s; reconnect HR GATT client");
+        break;
+      }
       if((uint32_t)(now-lastReport)>=8000) {
         lastReport=now;
         Serial.printf("HR: linked=%s packets=%lu bpm=%u age=%lu ms\n",
