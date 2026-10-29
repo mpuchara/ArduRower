@@ -179,6 +179,7 @@ uint16_t backgroundColor, panelColor, faintColor, gridColor;
 uint16_t powerColor, speedColor, labelColor, whiteColor, heartColor;
 uint32_t historyRevision = 0, plottedRevision = UINT32_MAX;
 bool pageRendered = false, displayedDetails = false;
+bool displayedGhostWorkout=false;
 // Text slots 0..11 = dashboard, 12..20 = Ghost Race. The old
 // 12-element String array was indexed at 12..20 in race mode, overwriting
 // adjacent global memory and causing spontaneous ESP32 resets.
@@ -427,6 +428,8 @@ void startRace(uint8_t index) {
   // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
   resetWorkout();
   activeMode = Mode::Race;
+  detailPage=false;pageRendered=false;
+  Serial.println("GHOST: DASHBOARD enabled after distance choice");
   Serial.printf("GHOST: armed target=%u, best=%s, calibration=%lu\n",
                 (unsigned)ghost.targetMeters,found?"yes":"no",
                 (unsigned long)motion.calibrationMilli());
