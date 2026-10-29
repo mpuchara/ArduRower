@@ -40,7 +40,9 @@ class Engine {
   }
   void tick(uint32_t nowUs) {
     uint32_t duration=nowUs-lastTickUs;
-    if(!duration)return;
+    // Queued ISR timestamps can predate a recent loop tick if BLE/TFT work
+    // delayed processing. Never mistake a stale sample for a 71-minute gap.
+    if(!duration || duration>0x7fffffffUL)return;
     // Cap a single integration window; after long sleep the speed should
     // decay rather than produce an enormous phantom distance.
     float dt=(duration>250000 ? 250000 : duration)/1000000.0f;
