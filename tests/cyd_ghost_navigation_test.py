@@ -13,7 +13,7 @@ checks = (
     'GHOST: armed target=',
     'GHOST: started',
     'GHOST: finished',
-    'BOOT: 1x WYBOR / 1.5s START',
+    'TAP/BOOT: WYBOR, BOOT 1.5s START',
     'trendDrawn=trendRevision;',
     'if (ghost.phase==ghostrace::Phase::Armed && metrics.started)',
     'ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,',
@@ -44,6 +44,11 @@ for marker in checks:
 begin=src.index("void toggleMode() {")
 end=src.index("void updateButton(",begin)
 assert "pendingCalibration=true" not in src[begin:end]
+tap=src[src.index("void touchTap("):src.index("void updateTouch(")]
+assert "pendingCalibration=true" not in tap, "Ghost menu taps must never schedule blocking calibration"
+loop=src[src.index("void loop()"):]
+assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-second touch wizard in the main loop"
+assert 'FTMS: advertising recovery' in loop
 assert "ghost.cancel();" in src, "Preserve active race cancellation"
 assert 'FIRMWARE_VERSION = "0.09.8"' in src
 print("PASS: race menu touch/double-BOOT fallback, no forced wizard, HR CCCD status tracing")
