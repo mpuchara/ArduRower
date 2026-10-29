@@ -149,3 +149,39 @@ void hrWorker(void*) {
     const uint32_t subscribedAt=millis();
     bool hasData=false;
     uint32_t lastReport=millis();
+    while(client->isConnected()) {
+      const uint32_t now=millis();
+      if(hrNotifyPackets!=beforeCount) {
+        hasData=true;
+        hrState=liveHr(now)?HrState::Receiving:HrState::NoData;
+        if(!hrPreferredSaved && hrAttemptAddress.length()) {
+          Preferences p;
+          if(p.begin("rower-hr",false)) {
+            hrPreferredSaved=p.putString("addr",hrAttemptAddress)>0;
+            p.end();
+            if(hrPreferredSaved)hrPreferredAddress=hrAttemptAddress;
+          }
+        }
+      }
+      if(!hasData && (uint32_t)(now-subscribedAt)>45000) {
+        Serial.println("HR: 45s without BPM; reconnect central only");
+        break;
+      }
+      if(hasData && receivedHrAt && (uint32_t)(now-receivedHrAt)>25000) {
+        Serial.println("HR: stale BPM 25s; reconnect central only");
+        break;
+      }
+      if((uint32_t)(now-lastReport)>8000) {
+        lastReport=now;
+        Serial.printf("HR: active=%d packets=%lu BPM=%u FTMS=%d tx=%lu\n",
+                      client->isConnected()?1:0,
+                      (unsigned long)hrNotifyPackets,(unsigned)liveHr(now),
+                      deviceConnected?1:0,(unsigned long)ftmsNotifications);
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    hrConnected=false;
+    if(client->isConnected())client->disconnect();
+    vTaskDelay(pdMS_TO_TICKS(HR_BACKOFF_MS));
+  }
+}
