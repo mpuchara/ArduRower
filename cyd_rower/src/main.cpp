@@ -237,17 +237,17 @@ void initBLE() {
   pBatteryService->start();
   NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
   NimBLECharacteristic *pCharacteristic24 = pService2->createCharacteristic(
-      (uint16_t)0x2A24, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A24), NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic25 = pService2->createCharacteristic(
-      (uint16_t)0x2A25, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A25), NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic26 = pService2->createCharacteristic(
-      (uint16_t)0x2A26, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A26), NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic27 = pService2->createCharacteristic(
-      (uint16_t)0x2A27, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A27), NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic28 = pService2->createCharacteristic(
-      (uint16_t)0x2A28, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A28), NIMBLE_PROPERTY::READ);
   NimBLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
-      (uint16_t)0x2A29, NIMBLE_PROPERTY::READ);
+      NimBLEUUID((uint16_t)0x2A29), NIMBLE_PROPERTY::READ);
   pService2->start();
   // Preserve original device-information characteristic strings, not new IDs.
   pCharacteristic24->setValue("4");
