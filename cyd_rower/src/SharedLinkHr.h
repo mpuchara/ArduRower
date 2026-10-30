@@ -22,6 +22,8 @@ static ble_addr_t hrScanCandidate={};
 static volatile bool hrCandidateValid=false;
 static volatile int hrCandidateScore=-200;
 static volatile uint32_t hrScanSeen=0,hrScanMatched=0,hrSecondAclAttempts=0;
+static volatile uint32_t hrLastSecondAclAttemptMs=0;
+static volatile bool hrDisabledAfterFtmsDrop=false;
 static uint8_t hrStaticAddr[6]={};
 static bool hrOwnRandomReady=false;
 static volatile uint16_t hrServiceStart=0,hrServiceEnd=0;
@@ -48,6 +50,11 @@ static void onFtmsHandleReady(uint16_t handle) {
                 (unsigned)handle);
 }
 static void onFtmsHandleClosed() {
+  if(hrLastSecondAclAttemptMs &&
+     (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000) {
+    hrDisabledAfterFtmsDrop=true;
+    Serial.println("HR: circuit breaker: FTMS dropped during dual-identity experiment; HR disabled until reboot");
+  }
   hrFtmsHandle=HR_INVALID_HANDLE;
   // Only the HR worker is allowed to terminate its own central link.
   // Never call ble_gap_terminate() on the Garmin FTMS handle.
@@ -292,6 +299,7 @@ static bool scanAndConnectHr() {
   cp.min_ce_len=0;cp.max_ce_len=0;
   hrConnectDone=false;hrConnectStatus=0xffff;hrConnecting=true;
   ++hrSecondAclAttempts;
+  hrLastSecondAclAttemptMs=millis();
   setHrState(HrState::Connecting,"RANDOM central + whitelist connect; no FTMS changes");
   rc=ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,7000,&cp,
                      onHrCentralGapEvent,nullptr);
@@ -326,6 +334,11 @@ static void hrWorker(void *) {
       vTaskDelay(pdMS_TO_TICKS(600));continue;
     }
     const uint16_t h=hrClientHandle;
+    if(hrDisabledAfterFtmsDrop) {
+      if(hrState!=HrState::Paused)
+        setHrState(HrState::Paused,"dual HR disabled after FTMS loss; protect Connect IQ");
+      vTaskDelay(pdMS_TO_TICKS(1500));continue;
+    }
     if(h==HR_INVALID_HANDLE) {
       const uint32_t backoff=failures>=3?120000UL:20000UL;
       if(lastAttempt && (uint32_t)(now-lastAttempt)<backoff) {
