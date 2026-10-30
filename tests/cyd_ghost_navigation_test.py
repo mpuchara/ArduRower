@@ -41,5 +41,5 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.14"' in src
+assert 'FIRMWARE_VERSION = "0.09.15"' in src
 print("PASS: HA-style IRQ contact/release, calibrated menu, single Ghost toggle per finger")
