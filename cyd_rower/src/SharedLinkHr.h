@@ -26,6 +26,12 @@ static String hrCandidateAddressText;
 static bool hrSavedWorkingPeer=false;
 static volatile uint32_t hrScanSeen=0,hrScanMatched=0,hrSecondAclAttempts=0;
 static volatile uint32_t hrLastSecondAclAttemptMs=0;
+static volatile bool hrSecondAclAttemptWasWithFtms=false;
+static constexpr uint32_t HR_FTMS_JOIN_GRACE_MS=30000UL;
+static constexpr uint32_t HR_FTMS_RETRY_COOLDOWN_MS=120000UL;
+static volatile uint32_t hrSuspendAttemptsUntilMs=0;
+static volatile uint32_t hrConnectedAtMs=0;
+static volatile uint32_t hrPacketsAtSubscription=0;
 static volatile bool hrDisabledAfterFtmsDrop=false;
 static uint8_t hrStaticAddr[6]={};
 static bool hrOwnRandomReady=false;
@@ -53,9 +59,9 @@ static void onFtmsHandleReady(uint16_t handle) {
                 (unsigned)handle);
 }
 static void onFtmsHandleClosed() {
-  if(hrClientHandle!=HR_INVALID_HANDLE ||
-     (hrLastSecondAclAttemptMs &&
-      (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000)) {
+  if(hrSecondAclAttemptWasWithFtms &&
+     hrLastSecondAclAttemptMs &&
+     (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000) {
     hrDisabledAfterFtmsDrop=true;
     Serial.println("HR: circuit breaker: FTMS dropped during dual-identity experiment; HR disabled until reboot");
   }
@@ -156,22 +162,21 @@ static int onHrReadCccd(uint16_t handle,const ble_gatt_error *e,
 static bool awaitHrProcedure(uint16_t handle,const char *phase) {
   const uint32_t started=millis();
   while(!hrProcedureDone && (uint32_t)(millis()-started)<6000) {
-    if(!deviceConnected || hrClientHandle!=handle)return false;
+    if(hrClientHandle!=handle)return false;
     vTaskDelay(pdMS_TO_TICKS(20));
   }
-  Serial.printf("HR: shared ACL %s done=%d status=%u elapsed=%lu ms\n",phase,
+  Serial.printf("HR: central ACL %s done=%d status=%u elapsed=%lu ms\n",phase,
                 hrProcedureDone?1:0,(unsigned)hrProcedureStatus,
                 (unsigned long)(millis()-started));
   return hrProcedureDone && hrProcedureStatus==0 &&
-         deviceConnected && hrClientHandle==handle;
+         hrClientHandle==handle;
 }
 static void prepareHrProcedure() {
   hrProcedureDone=false;hrProcedureStatus=0xffff;
 }
 
-// We never create a second GAP connection to Garmin. Discovery is carried out
-// with NimBLE's low-level GATT client using the connection handle delivered
-// by our existing NimBLEServer (Garmin is already the central).
+// HR client runs on its own central ACL with a STATIC-RANDOM local identity.
+// FTMS always uses the original public peripheral identity.
 
 static bool configureHrRandomIdentity() {
   if(hrOwnRandomReady)return true;
@@ -269,8 +274,12 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
   return 0;
 }
 static bool scanAndConnectHr() {
-  if(!deviceConnected || hrFtmsHandle==HR_INVALID_HANDLE)return false;
-  if(!configureHrRandomIdentity())return false;
+  // Bootstrap HR while the PUBLIC FTMS service is still advertising.
+  // On fēnix, the 180D advertisement may disappear after FTMS connects.
+  if(hrDisabledAfterFtmsDrop || !configureHrRandomIdentity())return false;
+  Serial.printf("HR: attempt order=%s FTMS=%d ftmsACL=%u\n",
+      deviceConnected?"FTMS_FIRST":"HR_FIRST",
+      deviceConnected?1:0,(unsigned)hrFtmsHandle);
   if(hrPreviouslyWorkingAddress.isEmpty()) {
     Preferences prefs;
     if(prefs.begin("rower-hr",true)) {
@@ -296,7 +305,6 @@ static bool scanAndConnectHr() {
   while(!hrScanDone && (uint32_t)(millis()-began)<3400 && deviceConnected)
     vTaskDelay(pdMS_TO_TICKS(30));
   if(!hrScanDone)ble_gap_disc_cancel();
-  if(!deviceConnected)return false;
   Serial.printf("HR: private scan seen=%lu HR=%lu candidate=%d score=%d mac=%s\n",
                 (unsigned long)hrScanSeen,(unsigned long)hrScanMatched,
                 hrCandidateValid?1:0,(int)hrCandidateScore,
@@ -323,6 +331,7 @@ static bool scanAndConnectHr() {
   hrConnectDone=false;hrConnectStatus=0xffff;hrConnecting=true;
   ++hrSecondAclAttempts;
   hrLastSecondAclAttemptMs=millis();
+  hrSecondAclAttemptWasWithFtms=deviceConnected;
   setHrState(HrState::Connecting,"RANDOM central + whitelist connect; no FTMS changes");
   rc=ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,7000,&cp,
                      onHrCentralGapEvent,nullptr);
@@ -336,33 +345,50 @@ static bool scanAndConnectHr() {
   while(!hrConnectDone && (uint32_t)(millis()-connStarted)<8000 && deviceConnected)
     vTaskDelay(pdMS_TO_TICKS(30));
   if(!hrConnectDone && hrConnecting)ble_gap_conn_cancel();
-  return deviceConnected && hrConnectDone && hrConnectStatus==0 &&
+  return hrConnectDone && hrConnectStatus==0 &&
          hrClientHandle!=HR_INVALID_HANDLE &&
          hrClientHandle!=hrFtmsHandle;
 }
 
 static void hrWorker(void *) {
-  Serial.println("HR: EXPERIMENT two identities: PUBLIC FTMS, RANDOM central HR");
+  Serial.println("HR: coexist v0.09.15 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
   uint32_t lastReport=0,lastAttempt=0,connectedAt=0;
   uint8_t failures=0;
   while(true) {
     const uint32_t now=millis();
-    if(!deviceConnected || hrFtmsHandle==HR_INVALID_HANDLE) {
-      if(hrClientHandle!=HR_INVALID_HANDLE)
-        ble_gap_terminate(hrClientHandle,BLE_ERR_REM_USER_CONN_TERM);
-      processedEpoch=UINT32_MAX;
-      if(hrState!=HrState::Paused)
-        setHrState(HrState::Paused,"FTMS disconnected; HR central disabled");
-      vTaskDelay(pdMS_TO_TICKS(600));continue;
-    }
     const uint16_t h=hrClientHandle;
+    // Preserve HR during the FTMS join attempt; never disconnect it just
+    // because Garmin has not connected as an FTMS central yet.
     if(hrDisabledAfterFtmsDrop) {
+      if(h!=HR_INVALID_HANDLE)
+        ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM); // HR ONLY
       if(hrState!=HrState::Paused)
-        setHrState(HrState::Paused,"dual HR disabled after FTMS loss; protect Connect IQ");
+        setHrState(HrState::Paused,"HR circuit breaker: preserve Garmin FTMS");
       vTaskDelay(pdMS_TO_TICKS(1500));continue;
     }
+    // If the watch cannot join FTMS while HR is connected, yield HR
+    // automatically after 30 seconds. Keep FTMS advertisement intact.
+    if(h!=HR_INVALID_HANDLE && !deviceConnected && hrConnectedAtMs &&
+       (uint32_t)(now-hrConnectedAtMs)>HR_FTMS_JOIN_GRACE_MS) {
+      Serial.println("HR: HR-first without FTMS for 30s; release HR ONLY to restore FTMS");
+      hrSuspendAttemptsUntilMs=now+HR_FTMS_RETRY_COOLDOWN_MS;
+      hrConnectedAtMs=0;
+      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
+      vTaskDelay(pdMS_TO_TICKS(500));continue;
+    }
     if(h==HR_INVALID_HANDLE) {
+      if(hrSuspendAttemptsUntilMs &&
+         (int32_t)(now-hrSuspendAttemptsUntilMs)<0) {
+        if(hrState!=HrState::Paused)
+          setHrState(HrState::Paused,"FTMS priority: HR retry cooldown");
+        vTaskDelay(pdMS_TO_TICKS(1000));continue;
+      }
+      if(deviceConnected && !bleDuty.motionQuiet(now)) {
+        if(hrState!=HrState::Paused)
+          setHrState(HrState::Paused,"rowing: defer HR discovery to protect FTMS");
+        vTaskDelay(pdMS_TO_TICKS(750));continue;
+      }
       const uint32_t backoff=failures>=3?120000UL:20000UL;
       if(lastAttempt && (uint32_t)(now-lastAttempt)<backoff) {
         vTaskDelay(pdMS_TO_TICKS(600));continue;
@@ -370,6 +396,10 @@ static void hrWorker(void *) {
       lastAttempt=now;
       if(scanAndConnectHr()) {
         failures=0;connectedAt=millis();processedEpoch=UINT32_MAX;
+        hrConnectedAtMs=connectedAt;
+        receivedHr=0;receivedHrAt=0;
+        Serial.printf("HR: central ready, FTMS=%d; waiting for both BLE roles\n",
+                      deviceConnected?1:0);
       } else {
         if(failures<5)++failures;
         setHrState(HrState::Disconnected,"RANDOM HR ACL not available (FTMS intact)");
@@ -396,7 +426,7 @@ static void hrWorker(void *) {
                       (unsigned long)ftmsNotifications,
                       (unsigned)hrFtmsHandle,(unsigned)hrClientHandle);
       }
-      const bool noBpm=hrNotifyPackets==0 &&
+      const bool noBpm=hrNotifyPackets==hrPacketsAtSubscription &&
           (uint32_t)(now-connectedAt)>45000UL;
       const bool staleBpm=receivedHrAt!=0 &&
           (uint32_t)(now-receivedHrAt)>25000UL;
@@ -444,6 +474,7 @@ static void hrWorker(void *) {
       ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
     }
     hrDualReady=true;
+    hrPacketsAtSubscription=hrNotifyPackets;
     const int readRc=ble_gattc_read(h,hrRemoteCccdHandle,onHrReadCccd,nullptr);
     if(readRc)Serial.printf("HR: CCCD readback call error=%d\n",readRc);
     setHrState(HrState::NoData,"dual-identity HR subscribed; waiting for BPM");
