@@ -5,61 +5,41 @@ root = Path(__file__).resolve().parents[1]
 src = (root/"cyd_rower/src/main.cpp").read_text(encoding="utf-8")
 
 checks = (
-    'dashboardBootClicks==1 && now-dashboardBootClickAt<=480',
-    'toggleMode(); // explicit physical fallback for Ghost Race',
-    'GHOST: entered menu using double BOOT click',
-    'GHOST: entered menu using dashboard title tap',
-    'if(mappedTouch(rx,ry,x,y) && x<104 && y<27)',
+    'XPT2046_Touchscreen touch(33,36);',
+    'const bool pressed=touch.touched();',
+    'if(++touchReleasedSamples<2)return;',
+    'touchLastCompletedMs=now;',
+    'TOUCH_REARM_MS=550',
+    'GHOST: RELEASE SWIPE',
+    'cydtouch::pageSwipe(dx,dy,touchCalibrated,mappedDx,mappedDy)',
+    'if(touchReady && !touchCalibrated)',
+    'const bool ok=calibrateRaceTouch();',
+    'tc_force',
+    'TOUCH: first-run calibration',
+    'TOUCH: calibration requested from Ghost menu',
+    'ESP.restart();',
+    'tft.drawRightString("KALIBRUJ",309,33,2)',
     'GHOST: armed target=',
     'GHOST: started',
     'GHOST: finished',
     'DOTKNIJ 500/1000/2000, SWIPE: WROC',
-    '4095L-(long)rx',
-    'TOUCH: UP raw=',
-    'trendDrawn=trendRevision;',
-    'if (ghost.phase==ghostrace::Phase::Armed && metrics.started)',
-    'ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,',
-    'if (ghost.advance(now,metrics.distance()))',
-    'TOUCH: deltaRaw=',
-    'GHOST: horizontal swipe detected;',
-    'horizontalSwipe=cydtouch::pageSwipe(',
-    '#include "TouchGestures.h"',
-    'tft.drawString("<  GHOST  >"',
-    'GHOST: LIVE SWIPE #',
-    'swipeTriggered=true;',
-    'touchSwipeEvents',
-    'TOUCH: DOWN #',
-    'GHOST: alive phase=',
-    'GHOST: uncalibrated tap raw=',
-    'GHOST: automatic calibration suppressed',
-    'XPT2046_Touchscreen touch(33);',
-    '#include "TouchPress.h"',
-    'TOUCH: RECOVERY',
-    'TOUCH: TAP without UP',
-    'touchTracker.consume(now,pt.x,pt.y)',
     'GHOST: SELECT 500',
-    'GHOST: EXIT',
-    'now-touchLastPollMs<12',
-    'NimBLEDevice::createServer()',
-
+    'GHOST: SELECT 1000',
+    'GHOST: SELECT 2000',
+    'ghostWorkout!=displayedGhostWorkout',
+    'ghost.meterLead(millis())',
+    'FTMS: advertising recovery',
 )
+
 for marker in checks:
     assert marker in src, marker
 
-# Entering the race menu must not force the user into a time-consuming touch
-# calibration wizard; the BOOT button navigation path works without it.
-begin=src.index("void toggleMode() {")
-end=src.index("void updateButton(",begin)
-assert "pendingCalibration=true" not in src[begin:end]
-tap=src[src.index("void touchTap("):src.index("void updateTouch(")]
-assert "pendingCalibration=true" not in tap, "Ghost menu taps must never schedule blocking calibration"
-assert 'startRace(0);' in tap and 'startRace(1);' in tap and 'startRace(2);' in tap
-assert 'selectedDistance=(selectedDistance+1)%3;' not in tap, "Touch must select row, never cycle"
-loop=src[src.index("void loop()"):]
-assert "if(!calibrateRaceTouch())" not in loop, "Ghost Race must never run a 45-second touch wizard in the main loop"
-assert 'FTMS: advertising recovery' in loop
-assert "ghost.cancel();" in src, "Preserve active race cancellation"
-assert 'FIRMWARE_VERSION = "0.09.13"' in src
-assert 'ghostWorkout!=displayedGhostWorkout' in src
-assert 'ghost.meterLead(millis())' in src
-print("PASS: Ghost Race touch row selection, pressure-polled release/recovery, two-way swipe, no blocking wizard")
+assert src.index('const bool ok=calibrateRaceTouch();') < src.index('  initBLE();'), "Calibration must precede BLE"
+touch=src[src.index('void updateTouch('):src.index('String formatTime(',src.index('void updateTouch('))]
+assert 'touchTracker.sample(' not in touch
+assert 'toggleMode();' in touch
+assert 'touch.touched()' in touch
+assert touch.count('toggleMode();')==1
+assert 'GHOST: LIVE SWIPE' not in touch
+assert 'FIRMWARE_VERSION = "0.09.14"' in src
+print("PASS: HA-style IRQ contact/release, calibrated menu, single Ghost toggle per finger")
