@@ -1,39 +1,67 @@
 #!/usr/bin/env python3
-"""Guard single-ACL Garmin HR GATT client: BLE standard forbids second ACL to same peer."""
+"""Guard experimental dual-identity HR without touching Garmin Connect IQ FTMS.
+
+The firmware MUST keep the public-address FTMS GATT server and create the
+second HR link through a distinct static-random BLE identity. The host
+NimBLE 1.4.3 refuses direct duplicate-peer initiations, so we intentionally
+use a one-peer whitelist with a null peer_addr argument. Controller/watch may
+still reject the second ACL; the code must leave FTMS untouched in that case.
+"""
 from pathlib import Path
+
 p=Path(__file__).resolve().parents[1]
 src=(p/"cyd_rower/src/main.cpp").read_text()
 hr=(p/"cyd_rower/src/SharedLinkHr.h").read_text()
 page=(p/"index.html").read_text()
 ini=(p/"cyd_rower/platformio.ini").read_text()
+for marker in (
+    'FIRMWARE_VERSION = "0.09.13"',
+    'ArduRower CYD v0.09.13',
+    '#include "SharedLinkHr.h"',
+    'NimBLEDevice::init(BLE_SERVICE_NAME)',
+    'NimBLEDevice::createServer()',
+    'NimBLEDevice::setCustomGapHandler(onHrGapEvent)',
+    'onFtmsHandleReady(desc->conn_handle)',
+    'pDtCharacteristic->notify()',
+    'BLE_SERVICE_NAME "WR S4BL3"',
+):
+    assert marker in src,marker
+for marker in (
+    'ble_hs_id_gen_rnd(0,&generated)',
+    'ble_hs_id_set_rnd(hrStaticAddr)',
+    'BLE_OWN_ADDR_RANDOM',
+    'BLE_GAP_EVENT_DISC',
+    'BLE_GAP_EVENT_CONNECT',
+    'BLE_GAP_EVENT_DISCONNECT',
+    'ble_hs_adv_parse_fields(',
+    'ble_gap_disc(',
+    'ble_gap_wl_set(&peer,1)',
+    'ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr',
+    'ble_gap_terminate(hrClientHandle,',
+    'ble_gattc_disc_svc_by_uuid(',
+    'ble_gattc_disc_chrs_by_uuid(',
+    'ble_gattc_disc_all_dscs(',
+    'ble_gattc_write_flat(',
+    'ble_gattc_read(',
+    'event->notify_rx.conn_handle!=hrClientHandle',
+    'BLE_GAP_EVENT_NOTIFY_RX',
+    'HR: dual-identity Garmin BPM packet',
+    'dual-ACL ready=',
+    'hrFtmsHandle=handle',
+    'hrClientHandle=event->connect.conn_handle',
+    'hrFtmsHandle=HR_INVALID_HANDLE',
+    'return deviceConnected && hrConnectDone',
+    '0x180d',
+    'BLE_UUID16_INIT(0x2A37)',
+    'BLE_UUID16_INIT(0x2902)',
+):
+    assert marker in hr,marker
+assert 'NimBLEDevice::setOwnAddrType(' not in hr, "Do not mutate global FTMS address type"
+assert 'ble_gap_terminate(hrFtmsHandle,' not in hr, "Never terminate Garmin FTMS ACL"
+assert 'ble_gap_connect(BLE_OWN_ADDR_RANDOM,&peer' not in hr
+assert 'NimBLEDevice::createClient(' not in hr
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-for key in ('FIRMWARE_VERSION = "0.09.12"','ArduRower CYD v0.09.12',
-            'NimBLEDevice::createServer()','NimBLEDevice::init(BLE_SERVICE_NAME)',
-            '#include "SharedLinkHr.h"',
-            'NimBLEDevice::setCustomGapHandler(onHrGapEvent)',
-            'onFtmsHandleReady(desc->conn_handle)',
-            'onFtmsHandleClosed()',
-            'pDtCharacteristic->notify()'):
-    assert key in src,key
-for key in ('ble_gattc_disc_svc_by_uuid(', 'ble_gattc_disc_chrs_by_uuid(',
-            'ble_gattc_disc_all_dscs(', 'ble_gattc_write_flat(',
-            'BLE_GAP_EVENT_NOTIFY_RX',
-            'chrValHandle==hrRemoteValueHandle',
-            'HR: raw NOTIFY',
-            'HR: CCCD readback=',
-            'ble_gattc_read(',
-            'event->notify_rx.conn_handle!=hrFtmsHandle',
-            'ble_uuid_cmp(', 'BLE_UUID16_INIT(0x180D)',
-            'BLE_UUID16_INIT(0x2A37)', 'BLE_UUID16_INIT(0x2902)',
-            'HR: shared FTMS ACL BPM packet',
-            'HR: reuse incoming FTMS ACL handle',
-            'client' if False else 'NimBLEDevice::setCustomGapHandler' ):
-    if key=='NimBLEDevice::setCustomGapHandler':continue
-    assert key in hr,key
-assert 'NimBLEDevice::createClient(' not in src and 'NimBLEDevice::createClient(' not in hr
-assert 'client->connect(' not in hr
-assert 'NimBLEDevice::getScan()' not in src and 'NimBLEDevice::getScan()' not in hr
-assert "const EXPECTED_PREFIX = '0.09.12-ghost-chart-'" in page
+assert "const EXPECTED_PREFIX = '0.09.13-dual-identity-'" in page
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
-print("PASS: HR GATT on existing incoming FTMS ACL, zero second BLE connections")
+print("PASS: separate BLE identities, whitelist HR central, FTMS-safe fallback")
