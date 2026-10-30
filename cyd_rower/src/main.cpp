@@ -28,7 +28,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.13";
+static constexpr const char *FIRMWARE_VERSION = "0.09.14";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -58,9 +58,13 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33); // poll Z; GPIO36 IRQ may be floating on CYD
+XPT2046_Touchscreen touch(33,36); // identical IRQ wiring to working HA_UBOX_bridge
 bool touchReady = false;
 bool touchedLast = false;
+uint8_t touchReleasedSamples=0;
+uint32_t touchLastCompletedMs=0;
+static constexpr uint32_t TOUCH_REARM_MS=550;
+static constexpr uint32_t TOUCH_PRESS_LIMIT_MS=2500;
 cydtouch::PressTracker touchTracker;
 bool swipeTriggered=false;
 uint32_t touchEvents=0;
@@ -1274,7 +1278,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.13 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.14 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1284,8 +1288,13 @@ void setup() {
   touchReady = touch.begin(touchSPI);
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
-  Serial.printf("Touch: %s, pressure polling; IRQ36 diagnostics, CS33 SPI=25/39/32/33\n",
-                touchReady ? "OK" : "unavailable");
+  // Like HA_UBOX_bridge: calibrate BEFORE BLE starts, never while sending FTMS.
+  if(touchReady && !touchCalibrated) {
+    const bool ok=calibrateRaceTouch();
+    Serial.printf("TOUCH: first-run calibration %s\n",ok?"OK":"FAILED");
+  }
+  Serial.printf("Touch: %s, IRQ36 calibrated=%d, CS33 SPI=25/39/32/33\n",
+                touchReady ? "OK" : "unavailable",touchCalibrated?1:0);
   // Arduino-ESP32 checks btInUse()/bleInUse() BEFORE setup() and must
   // retain BLE memory. Both hooks are strong overrides defined above.
   // btStarted() is diagnostic only; it never starts a second controller.
@@ -1350,12 +1359,8 @@ void loop() {
                                motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
-  // Do not auto-launch calibrateRaceTouch() from Ghost menu.
-  // Its synchronous 3x15s wait previously locked the main loop and FTMS.
-  if(pendingCalibration) {
-    pendingCalibration=false;
-    Serial.println("GHOST: automatic calibration suppressed to protect UI and FTMS");
-  }
+  // Calibration always runs before BLE on boot; never block FTMS here.
+  if(pendingCalibration)pendingCalibration=false;
   if(activeMode==Mode::Race &&
      (uint32_t)(now-lastGhostMenuHeartbeatMs)>=6000) {
     lastGhostMenuHeartbeatMs=now;
