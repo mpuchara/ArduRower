@@ -75,6 +75,7 @@ for required in (
   'cydble::CoexistPolicy::inRetryCooldown(',
   'cydble::CoexistPolicy::noCurrentSessionBpm(',
   'hrPacketsAtSubscription=hrNotifyPackets',
+  'hrDualReady && hrNotifyPackets>hrPacketsAtSubscription',
   'HR: HR-first without FTMS for 30s',
 ):
   assert required in hr,required
