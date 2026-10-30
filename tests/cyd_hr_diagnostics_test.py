@@ -15,8 +15,8 @@ hr=(p/"cyd_rower/src/SharedLinkHr.h").read_text()
 page=(p/"index.html").read_text()
 ini=(p/"cyd_rower/platformio.ini").read_text()
 for marker in (
-    'FIRMWARE_VERSION = "0.09.14"',
-    'ArduRower CYD v0.09.14',
+    'FIRMWARE_VERSION = "0.09.15"',
+    'ArduRower CYD v0.09.15',
     '#include "SharedLinkHr.h"',
     'NimBLEDevice::init(BLE_SERVICE_NAME)',
     'NimBLEDevice::createServer()',
@@ -50,7 +50,7 @@ for marker in (
     'hrFtmsHandle=handle',
     'hrClientHandle=event->connect.conn_handle',
     'hrFtmsHandle=HR_INVALID_HANDLE',
-    'return deviceConnected && hrConnectDone',
+    'return hrConnectDone && hrConnectStatus==0',
     '0x180d',
     'BLE_UUID16_INIT(0x2A37)',
     'BLE_UUID16_INIT(0x2902)',
@@ -61,7 +61,21 @@ assert 'ble_gap_terminate(hrFtmsHandle,' not in hr, "Never terminate Garmin FTMS
 assert 'ble_gap_connect(BLE_OWN_ADDR_RANDOM,&peer' not in hr
 assert 'NimBLEDevice::createClient(' not in hr
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-assert "const EXPECTED_PREFIX = '0.09.14-ha-touch-'" in page
+assert "const EXPECTED_PREFIX = '0.09.15-ble-coexist-'" in page
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
-print("PASS: separate BLE identities, whitelist HR central, FTMS-safe fallback")
+for required in (
+  '#include "BleCoexistPolicy.h"',
+  'HR_FIRST', 'FTMS_FIRST',
+  'cydble::CoexistPolicy::ftmsCollisionPossible(',
+  'cydble::CoexistPolicy::shouldYieldHrForFtms(',
+  'cydble::CoexistPolicy::inRetryCooldown(',
+  'cydble::CoexistPolicy::noCurrentSessionBpm(',
+  'hrPacketsAtSubscription=hrNotifyPackets',
+  'HR: HR-first without FTMS for 30s',
+):
+  assert required in hr,required
+assert 'if(!deviceConnected || hrFtmsHandle==HR_INVALID_HANDLE)return false;' not in hr
+assert 'if(!deviceConnected || hrClientHandle!=handle)return false;' not in hr
+assert 'ble_gap_terminate(hrFtmsHandle,' not in hr
+print("PASS: safe dual BLE identity, HR-first bootstrap, FTMS priority, per-session BPM timeout")

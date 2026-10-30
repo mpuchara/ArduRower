@@ -173,3 +173,8 @@ realnie wysyłał BPM. Adres aktualnego kandydata jest teraz widoczny w logu
 `HR: private scan seen=... mac=...`. Drugi link do tego samego zegarka
 nadal pozostaje eksperymentem — bez logów z rzeczywistego treningu nie można
 potwierdzić odbierania pulsu.
+
+
+## ArduRower 0.09.15 — BLE audit and coexistence policy
+
+Historical version 0.09.8 really received BLE GATT 0x180D/0x2A37 notifications from Garmin. Version 0.09.14 required FTMS to be connected *before* scanning HR and terminated HR whenever FTMS was absent. These conditions made successful HR-first acquisition, before the watch stops advertising 0x180D, impossible. Version 0.09.15 permits HR first over a separate STATIC-RANDOM local BLE identity while WR S4BL3 stays a PUBLIC FTMS peripheral. FTMS can join after HR. If no FTMS connection appears 30 seconds after the HR ACL starts, release HR only and pause further HR attempts for 120 seconds. No real rowing session is interrupted for HR discovery. The subscribed-BPM watchdog tracks packets for each HR ACL, not cumulative packets. FTMS name, UUIDs, encoder, advertising, 1 Hz telemetry and touch/3-point calibration remain unchanged. **Two concurrent connections are still a hardware hypothesis**. To verify capture: `HR: attempt order=HR_FIRST`, `HR: RANDOM central CONNECTED`, `HR: dual-identity Garmin BPM packet`, `FTMS: CONNECTED` and increasing FTMS tx.\n

@@ -12,6 +12,7 @@
 #include "nimble/nimble/host/include/host/ble_hs_adv.h"
 #include "nimble/porting/nimble/include/os/os_mbuf.h"
 #include <stdint.h>
+#include "BleCoexistPolicy.h"
 
 static constexpr uint16_t HR_INVALID_HANDLE=0xffff;
 static volatile uint16_t hrFtmsHandle=HR_INVALID_HANDLE;
@@ -27,8 +28,7 @@ static bool hrSavedWorkingPeer=false;
 static volatile uint32_t hrScanSeen=0,hrScanMatched=0,hrSecondAclAttempts=0;
 static volatile uint32_t hrLastSecondAclAttemptMs=0;
 static volatile bool hrSecondAclAttemptWasWithFtms=false;
-static constexpr uint32_t HR_FTMS_JOIN_GRACE_MS=30000UL;
-static constexpr uint32_t HR_FTMS_RETRY_COOLDOWN_MS=120000UL;
+
 static volatile uint32_t hrSuspendAttemptsUntilMs=0;
 static volatile uint32_t hrConnectedAtMs=0;
 static volatile uint32_t hrPacketsAtSubscription=0;
@@ -59,9 +59,8 @@ static void onFtmsHandleReady(uint16_t handle) {
                 (unsigned)handle);
 }
 static void onFtmsHandleClosed() {
-  if(hrSecondAclAttemptWasWithFtms &&
-     hrLastSecondAclAttemptMs &&
-     (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000) {
+  if(cydble::CoexistPolicy::ftmsCollisionPossible(
+       millis(),hrLastSecondAclAttemptMs,hrSecondAclAttemptWasWithFtms)) {
     hrDisabledAfterFtmsDrop=true;
     Serial.println("HR: circuit breaker: FTMS dropped during dual-identity experiment; HR disabled until reboot");
   }
@@ -369,17 +368,17 @@ static void hrWorker(void *) {
     }
     // If the watch cannot join FTMS while HR is connected, yield HR
     // automatically after 30 seconds. Keep FTMS advertisement intact.
-    if(h!=HR_INVALID_HANDLE && !deviceConnected && hrConnectedAtMs &&
-       (uint32_t)(now-hrConnectedAtMs)>HR_FTMS_JOIN_GRACE_MS) {
+    if(cydble::CoexistPolicy::shouldYieldHrForFtms(
+         now,hrConnectedAtMs,h!=HR_INVALID_HANDLE,deviceConnected)) {
       Serial.println("HR: HR-first without FTMS for 30s; release HR ONLY to restore FTMS");
-      hrSuspendAttemptsUntilMs=now+HR_FTMS_RETRY_COOLDOWN_MS;
+      hrSuspendAttemptsUntilMs=now+cydble::CoexistPolicy::kRetryCooldownMs;
       hrConnectedAtMs=0;
       ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
       vTaskDelay(pdMS_TO_TICKS(500));continue;
     }
     if(h==HR_INVALID_HANDLE) {
-      if(hrSuspendAttemptsUntilMs &&
-         (int32_t)(now-hrSuspendAttemptsUntilMs)<0) {
+      if(cydble::CoexistPolicy::inRetryCooldown(
+           now,hrSuspendAttemptsUntilMs)) {
         if(hrState!=HrState::Paused)
           setHrState(HrState::Paused,"FTMS priority: HR retry cooldown");
         vTaskDelay(pdMS_TO_TICKS(1000));continue;
@@ -426,8 +425,8 @@ static void hrWorker(void *) {
                       (unsigned long)ftmsNotifications,
                       (unsigned)hrFtmsHandle,(unsigned)hrClientHandle);
       }
-      const bool noBpm=hrNotifyPackets==hrPacketsAtSubscription &&
-          (uint32_t)(now-connectedAt)>45000UL;
+      const bool noBpm=cydble::CoexistPolicy::noCurrentSessionBpm(
+          now,connectedAt,hrNotifyPackets,hrPacketsAtSubscription);
       const bool staleBpm=receivedHrAt!=0 &&
           (uint32_t)(now-receivedHrAt)>25000UL;
       if(hrDualReady && (noBpm || staleBpm)) {

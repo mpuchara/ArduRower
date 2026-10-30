@@ -46,6 +46,8 @@ jobs:
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
           /tmp/cyd_ble_duty_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_coexist_test.cpp -o /tmp/cyd_ble_coexist_test
+          /tmp/cyd_ble_coexist_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
           /tmp/cyd_touch_swipe_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_state_test.cpp -o /tmp/cyd_touch_state_test
