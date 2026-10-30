@@ -12,6 +12,6 @@ inline bool pageSwipe(int rawDx,int rawDy,
   const int minor=ax<ay?ax:ay;
   const bool mapped=calibrationValid && mx>=42.0f && mx>my*1.35f;
   const bool fallback=major>=245 && major>minor*1.65f;
-  return mapped || fallback; // either left or right, raw X or raw Y
+  return calibrationValid ? mapped : fallback; // calibrated: only physical horizontal gesture counts
 }
 }
