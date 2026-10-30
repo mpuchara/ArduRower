@@ -135,3 +135,12 @@ Porównanie z wersją 0.08: wcześniejszy wybór dystansu następował po `touch
 
 ## Plan dla 0.09.12
 Pulpit ducha, przygaszone wykresy i różnica dystansu, bez zmiany FTMS.
+
+
+## 0.09.13 — eksperyment z dwiema tożsamościami BLE dla fēnix 6X
+
+Dotychczasowa implementacja `SharedLinkHr.h` odczytywała GATT `180D/2A37` z istniejącego FTMS ACL. Zegarek akceptował CCCD `01 00`, ale nie przysyłał żadnych `NOTIFY_RX`. Zapisana implementacja z wersji 0.09.8 wykazywała natomiast faktyczny odbiór BPM po aktywnym połączeniu klienta. Ta wersja **nie przywraca** Bluedroid i **nie zmienia** publicznego FTMS `WR S4BL3`, jego UUID, pakietów i tempa notyfikacji. GATT klient HR działa jako oddzielna, statyczno-losowa tożsamość BLE (utrwalona w NVS), podczas gdy FTMS nadal używa publicznego adresu.
+
+**Techniczne zastrzeżenie:** NimBLE-Arduino 1.4.3 odrzuca drugi `ble_gap_connect` do znanego adresu odbiorcy w trybie direct. Dlatego używamy wyłącznie znalezionego podczas skanowania reklamodawcy `180D` na liście dozwolonych i inicjujemy `ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,...)`. Omija to sprawdzanie duplikatu po stronie hosta, jednak kontroler ESP32 lub Garmin nadal mogą odmówić drugiej sesji. Brak gwarancji działania bez testów na prawdziwym sprzęcie.
+
+Monitor USB 115200: `HR: PRIVATE central identity`, `HR: private scan seen=... HR=...`, `HR: second-identity connect attempt=... rc=...`, `HR: RANDOM central CONNECTED`, `HR: dual-identity Garmin BPM packet`. Po nieudanej próbie kod zachowuje FTMS i wykonuje rzadkie ponowienia. Jeśli FTMS zniknie, zrywana jest tylko dodatkowa sesja HR.
