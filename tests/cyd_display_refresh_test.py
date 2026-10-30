@@ -36,7 +36,7 @@ for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "pa
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
 assert "trendDrawn!=trendRevision" in source
-assert "horizontalSwipe=cydtouch::pageSwipe(" in source
+assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
 assert "ghost.start(now)" in source
 assert "saveBest(selectedDistance,ghost.attempt)" in source
