@@ -37,7 +37,7 @@ for marker in (
     'ble_gap_disc(',
     'ble_gap_wl_set(&peer,1)',
     'ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr',
-    'ble_gap_terminate(hrClientHandle,',
+    'ble_gap_terminate(h,',
     'ble_gattc_disc_svc_by_uuid(',
     'ble_gattc_disc_chrs_by_uuid(',
     'ble_gattc_disc_all_dscs(',
