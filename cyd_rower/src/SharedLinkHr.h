@@ -75,10 +75,10 @@ static int onHrGapEvent(struct ble_gap_event *event,void *) {
   const uint16_t bpm=wide? (uint16_t)(data[1]|(uint16_t(data[2])<<8)):data[1];
   if(bpm>=35 && bpm<=240) {
     receivedHr=bpm;receivedHrAt=millis();
-    ++hrNotifyPackets;++hrSameLinkPackets;
+    ++hrNotifyPackets;++hrDualPackets;
     hrConnected=true;hrState=HrState::Receiving;
-    if(hrSameLinkPackets<=5)Serial.printf("HR: dual-identity Garmin BPM packet #%lu bpm=%u\n",
-                   (unsigned long)hrSameLinkPackets,(unsigned)bpm);
+    if(hrDualPackets<=5)Serial.printf("HR: dual-identity Garmin BPM packet #%lu bpm=%u\n",
+                   (unsigned long)hrDualPackets,(unsigned)bpm);
   }
   return 0;
 }
@@ -240,7 +240,7 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
       Serial.printf("HR: RANDOM central disconnected reason=%d; FTMS=%d\n",
                     event->disconnect.reason,deviceConnected?1:0);
       hrClientHandle=HR_INVALID_HANDLE;
-      hrSameLinkReady=false;
+      hrDualReady=false;
       hrConnected=false;receivedHr=0;receivedHrAt=0;
       ++hrLinkEpoch;
     }
@@ -345,13 +345,13 @@ static void hrWorker(void *) {
       if((uint32_t)(now-lastReport)>8000) {
         lastReport=now;
         Serial.printf("HR: dual-ACL ready=%d bpm=%u packets=%lu rawNotify=%lu FTMS tx=%lu FTMS=%u HR=%u\n",
-                      hrSameLinkReady?1:0,(unsigned)liveHr(now),
+                      hrDualReady?1:0,(unsigned)liveHr(now),
                       (unsigned long)hrNotifyPackets,
                       (unsigned long)hrGapNotifies,
                       (unsigned long)ftmsNotifications,
                       (unsigned)hrFtmsHandle,(unsigned)hrClientHandle);
       }
-      if(hrSameLinkReady && hrNotifyPackets==0 &&
+      if(hrDualReady && hrNotifyPackets==0 &&
          (uint32_t)(now-connectedAt)>45000UL) {
         Serial.println("HR: dual ACL subscribed but no BPM after 45s; recycle ONLY HR central");
         ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
@@ -361,7 +361,7 @@ static void hrWorker(void *) {
     processedEpoch=epoch;
     hrServiceStart=hrServiceEnd=0;
     hrRemoteValueHandle=hrRemoteCccdHandle=0;
-    hrSameLinkReady=false;
+    hrDualReady=false;
     setHrState(HrState::Service,"discover Garmin HR 180D on RANDOM central ACL");
     prepareHrProcedure();
     int rc=ble_gattc_disc_svc_by_uuid(h,&hrServiceUUID.u,onHrService,nullptr);
@@ -394,7 +394,7 @@ static void hrWorker(void *) {
       setHrState(HrState::InitFailed,"remote HR CCCD write failed");
       ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
     }
-    hrSameLinkReady=true;
+    hrDualReady=true;
     const int readRc=ble_gattc_read(h,hrRemoteCccdHandle,onHrReadCccd,nullptr);
     if(readRc)Serial.printf("HR: CCCD readback call error=%d\n",readRc);
     setHrState(HrState::NoData,"dual-identity HR subscribed; waiting for BPM");
