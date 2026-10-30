@@ -15,8 +15,8 @@ hr=(p/"cyd_rower/src/SharedLinkHr.h").read_text()
 page=(p/"index.html").read_text()
 ini=(p/"cyd_rower/platformio.ini").read_text()
 for marker in (
-    'FIRMWARE_VERSION = "0.09.17"',
-    'ArduRower CYD v0.09.17',
+    'FIRMWARE_VERSION = "0.09.19"',
+    'ArduRower CYD v0.09.19',
     '#include "SharedLinkHr.h"',
     'NimBLEDevice::init(BLE_SERVICE_NAME)',
     'NimBLEDevice::createServer()',
@@ -64,7 +64,7 @@ assert 'ble_gap_terminate(hrFtmsHandle,' not in hr, "Never terminate Garmin FTMS
 assert 'ble_gap_connect(BLE_OWN_ADDR_RANDOM,&peer' not in hr
 assert 'NimBLEDevice::createClient(' not in hr
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-assert "const EXPECTED_PREFIX = '0.09.17-ble-coexist-'" in page
+assert "const EXPECTED_PREFIX = '0.09.19-ble-coexist-'" in page
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
 for required in (
@@ -88,3 +88,12 @@ assert src.index('  configureHrRandomIdentity();') < src.index('const bool adver
 assert src.index('if(scanAndConnectHr())') < src.index('const bool advertisingStarted=pAdvertising->start();')
 assert hr.index('hrPacketsAtSubscription=hrNotifyPackets',hr.index('setHrState(HrState::Subscribing')) < hr.index('rc=ble_gattc_write_flat')
 assert 'BLE_GAP_EVENT_NOTIFY_TX' in hr and 'ftmsTxComplete' in src
+
+read=hr[hr.index("static int onHrMeasurementRead"):hr.index("static bool configureHrRandomIdentity")]
+assert "receivedHrAt=" not in read
+assert "++hrNotifyPackets" not in read
+assert "NOT a live sample" in read
+
+assert "ble_gatts_notify_custom(hrFtmsHandle,ftmsValueHandle,packet)" in src
+assert "subscription on HR-initiated PUBLIC ACL" in hr
+assert "event->subscribe.attr_handle==ftmsValueHandle" in hr

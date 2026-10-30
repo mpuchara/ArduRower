@@ -29,7 +29,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostHeart.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.17";
+static constexpr const char *FIRMWARE_VERSION = "0.09.19";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -238,6 +238,12 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
 class MyCallbacks : public NimBLECharacteristicCallbacks {
  public:
   void onWrite(NimBLECharacteristic *) override {}
+  void onRead(NimBLECharacteristic *c,ble_gap_conn_desc *d) override {
+    if(hrPublicSessionTest && d)
+      Serial.printf("FTMS: GATT READ uuid=%s acl=%u role=%u hrACL=%u\n",
+        c->getUUID().toString().c_str(),(unsigned)d->conn_handle,
+        (unsigned)d->role,(unsigned)hrClientHandle);
+  }
 };
 
 void initBLE() {
@@ -259,6 +265,7 @@ void initBLE() {
   pFmfCharacteristic = pService->createCharacteristic(
       NimBLEUUID((uint16_t)FitnessMachineFeature),
       NIMBLE_PROPERTY::READ);
+  pFmfCharacteristic->setCallbacks(new MyCallbacks());
   pCtrCharacteristic = pService->createCharacteristic(
       NimBLEUUID((uint16_t)FitnessMachineControlPoint),
       NIMBLE_PROPERTY::WRITE);
@@ -327,7 +334,8 @@ void initBLE() {
   Preferences testPrefs;
   if(testPrefs.begin("rower-test",false)) {
     extendedHrTest=testPrefs.getBool("hrfirst",false);
-    testPrefs.putBool("hrfirst",false);testPrefs.end();
+    hrPublicSessionTest=testPrefs.getBool("public",false);
+    testPrefs.putBool("hrfirst",false);testPrefs.putBool("public",false);testPrefs.end();
   }
   const uint32_t hrBootBegan=millis();
   if(extendedHrTest)hrFtmsJoinGraceMs=180000UL;
@@ -374,7 +382,13 @@ void setCxRowerData() {
   }
   put16(data, offset, bounded16(metrics.seconds()));
   pDtCharacteristic->setValue(data, offset);
-  pDtCharacteristic->notify();
+  if(ftmsOnHrAcl && hrFtmsHandle!=HR_INVALID_HANDLE) {
+    // NimBLE's high-level subscriber list only tracks server GAP callbacks.
+    // On an HR-initiated ACL, send the same encoded bytes to the proved CCCD.
+    os_mbuf *packet=ble_hs_mbuf_from_flat(data,offset);
+    const int rc=packet?ble_gatts_notify_custom(hrFtmsHandle,ftmsValueHandle,packet):BLE_HS_ENOMEM;
+    if(rc)Serial.printf("FTMS: shared PUBLIC notify rc=%d\n",rc);
+  } else pDtCharacteristic->notify();
   // GPIO33 on CYD is the touch CS, NOT the Heltec battery ADC. The board is
   // USB-powered; keep the existing Battery Service present but report full
   // external power availability instead of reading bogus touch-pin voltages.
@@ -592,7 +606,7 @@ bool readCalPoint(int x,int y,int &rx,int &ry,int index) {
     delay(10);
   }
   if(!releasedAt || millis()-releasedAt<120)return false;
-  while (millis()-began<15000UL) {
+  while (millis()-began<60000UL) {
     if (touch.touched()) {
       long xx=0,yy=0;int n=0;
       const uint32_t hold=millis();
@@ -1310,7 +1324,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.17 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.19 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1385,8 +1399,15 @@ void loop() {
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
-          p.putBool("hrfirst",true);p.end();
+          p.putBool("hrfirst",true);p.putBool("public",false);p.end();
           Serial.println("HR: requested one-shot 30s HR-first startup test");
+          Serial.flush();ESP.restart();
+        }
+      } else if(strcmp(usbCommand,"hrpublic")==0) {
+        Preferences p;
+        if(p.begin("rower-test",false)) {
+          p.putBool("hrfirst",true);p.putBool("public",true);p.end();
+          Serial.println("HR: requested PUBLIC HR-first + bidirectional GATT test");
           Serial.flush();ESP.restart();
         }
       }

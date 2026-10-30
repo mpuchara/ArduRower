@@ -42,6 +42,9 @@ static volatile uint16_t hrProcedureStatus=0xffff;
 static volatile bool hrProcedureDone=false,hrDualReady=false;
 static bool hrSharedTransport=false,hrSharedTried=false;
 static bool hrReadAllowed=false,hrReadPending=false,hrReadTried=false;
+static bool hrPublicSessionTest=false;
+static bool ftmsOnHrAcl=false;
+static volatile uint16_t hrPublicCentralHandle=HR_INVALID_HANDLE;
 static uint32_t hrLastReadMs=0;
 static volatile uint32_t hrDualPackets=0;
 static volatile uint32_t hrGapNotifies=0,hrGapOtherAttributes=0,hrLinkEpoch=0;
@@ -80,6 +83,30 @@ static void onFtmsHandleClosed() {
 }
 
 static int onHrGapEvent(struct ble_gap_event *event,void *) {
+  if(event->type==BLE_GAP_EVENT_CONNECT) {
+    ble_gap_conn_desc d={};
+    if(event->connect.status==0 && ble_gap_conn_find(event->connect.conn_handle,&d)==0)
+      Serial.printf("GAP: CONNECT acl=%u role=%u localType=%u peer=%02x:%02x:%02x:%02x:%02x:%02x\n",
+        (unsigned)d.conn_handle,(unsigned)d.role,(unsigned)d.our_ota_addr.type,
+        d.peer_ota_addr.val[5],d.peer_ota_addr.val[4],d.peer_ota_addr.val[3],
+        d.peer_ota_addr.val[2],d.peer_ota_addr.val[1],d.peer_ota_addr.val[0]);
+    else Serial.printf("GAP: CONNECT failed status=%d\n",event->connect.status);
+  }
+  // A GAP central can also be a GATT server. The Garmin may reuse the
+  // HR-initiated PUBLIC ACL; subscription, rather than GAP role, proves it.
+  if(event->type==BLE_GAP_EVENT_SUBSCRIBE && hrPublicSessionTest &&
+     hrPublicCentralHandle!=HR_INVALID_HANDLE &&
+     event->subscribe.conn_handle==hrPublicCentralHandle &&
+     (hrFtmsHandle==HR_INVALID_HANDLE || hrFtmsHandle==hrPublicCentralHandle) &&
+     event->subscribe.attr_handle==ftmsValueHandle) {
+    ftmsOnHrAcl=event->subscribe.cur_notify;
+    ftmsSubscribed=ftmsOnHrAcl;
+    deviceConnected=ftmsOnHrAcl;
+    hrFtmsHandle=ftmsOnHrAcl?hrPublicCentralHandle:HR_INVALID_HANDLE;
+    ftmsConnectedAtMs=millis();
+    Serial.printf("FTMS: subscription on HR-initiated PUBLIC ACL=%u enabled=%d\n",
+      (unsigned)event->subscribe.conn_handle,ftmsOnHrAcl?1:0);
+  }
   if(event->type==BLE_GAP_EVENT_SUBSCRIBE &&
      event->subscribe.conn_handle==hrFtmsHandle &&
      event->subscribe.attr_handle==ftmsValueHandle) {
@@ -228,18 +255,16 @@ static int onHrMeasurementRead(uint16_t h,const ble_gatt_error *e,ble_gatt_attr 
     Serial.printf("HR: 2A37 read status=%u; no polling fallback\n",(unsigned)e->status);
     return 0;
   }
-  hrReadAllowed=true;
+  // This Garmin returns a cached value on READ while FTMS is connected.
+  // Only NOTIFY_RX may refresh live HR or count as a new measurement.
+  hrReadAllowed=false;
   uint8_t p[3]={};
   const size_t n=OS_MBUF_PKTLEN(attr->om);
   if(n<2 || os_mbuf_copydata(attr->om,0,(int)(n<3?n:3),p))return 0;
   const bool wide=p[0]&1;
   if(wide && n<3)return 0;
   const uint16_t bpm=wide?(uint16_t)(p[1]|(uint16_t(p[2])<<8)):p[1];
-  Serial.printf("HR: shared ACL 2A37 read BPM=%u\n",(unsigned)bpm);
-  if(bpm>=35 && bpm<=240) {
-    receivedHr=bpm;receivedHrAt=millis();++hrNotifyPackets;
-    hrConnected=true;hrState=HrState::Receiving;
-  }
+  Serial.printf("HR: diagnostic 2A37 READ cached BPM=%u; NOT a live sample\n",(unsigned)bpm);
   return 0;
 }
 
@@ -319,9 +344,11 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
     hrConnectStatus=event->connect.status;
     if(event->connect.status==0) {
       hrClientHandle=event->connect.conn_handle;
+      hrPublicCentralHandle=hrPublicSessionTest?hrClientHandle:HR_INVALID_HANDLE;
       hrConnectedAtMs=millis();
       ++hrLinkEpoch;
-      Serial.printf("HR: RANDOM central CONNECTED ACL=%u; PUBLIC FTMS ACL=%u\n",
+      Serial.printf("HR: %s central CONNECTED ACL=%u; PUBLIC FTMS ACL=%u\n",
+                    hrPublicSessionTest?"PUBLIC":"RANDOM",
                     (unsigned)hrClientHandle,(unsigned)hrFtmsHandle);
     } else {
       Serial.printf("HR: RANDOM central rejected status=%d; FTMS unaffected\n",
@@ -329,6 +356,13 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
     }
     hrConnectDone=true;
   } else if(event->type==BLE_GAP_EVENT_DISCONNECT) {
+    if(event->disconnect.conn.conn_handle==hrPublicCentralHandle)
+      hrPublicCentralHandle=HR_INVALID_HANDLE;
+    if(ftmsOnHrAcl && event->disconnect.conn.conn_handle==hrFtmsHandle) {
+      ftmsOnHrAcl=false;deviceConnected=false;ftmsSubscribed=false;
+      hrFtmsHandle=HR_INVALID_HANDLE;ftmsDisconnectedAtMs=millis();
+      Serial.println("FTMS: shared PUBLIC ACL disconnected");
+    }
     if(event->disconnect.conn.conn_handle==hrClientHandle) {
       Serial.printf("HR: RANDOM central disconnected reason=%d; FTMS=%d\n",
                     event->disconnect.reason,deviceConnected?1:0);
@@ -365,7 +399,8 @@ static bool scanAndConnectHr() {
   params.itvl=160;params.window=28;params.passive=0;
   params.filter_duplicates=0;
   setHrState(HrState::Scan,"PRIVATE HR scan 180D, FTMS running");
-  int rc=ble_gap_disc(BLE_OWN_ADDR_RANDOM,2600,&params,onHrScanEvent,nullptr);
+  const uint8_t ownType=hrPublicSessionTest?BLE_OWN_ADDR_PUBLIC:BLE_OWN_ADDR_RANDOM;
+  int rc=ble_gap_disc(ownType,2600,&params,onHrScanEvent,nullptr);
   if(rc) {
     Serial.printf("HR: private scan rc=%d; preserving FTMS\n",rc);
     return false;
@@ -402,7 +437,10 @@ static bool scanAndConnectHr() {
   hrLastSecondAclAttemptMs=millis();
   hrSecondAclAttemptWasWithFtms=deviceConnected;
   setHrState(HrState::Connecting,"RANDOM central + whitelist connect; no FTMS changes");
-  rc=ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,7000,&cp,
+  if(hrPublicSessionTest) {
+    Serial.println("HR: PUBLIC central identity; Garmin may reuse this ACL for FTMS");
+    rc=ble_gap_connect(BLE_OWN_ADDR_PUBLIC,&peer,7000,&cp,onHrCentralGapEvent,nullptr);
+  } else rc=ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,7000,&cp,
                      onHrCentralGapEvent,nullptr);
   Serial.printf("HR: second-identity connect attempt=%lu rc=%d FTMS=%d\n",
                 (unsigned long)hrSecondAclAttempts,rc,deviceConnected?1:0);
@@ -421,7 +459,7 @@ static bool scanAndConnectHr() {
 }
 
 static void hrWorker(void *) {
-  Serial.println("HR: coexist v0.09.17 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
+  Serial.println("HR: coexist v0.09.19 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
   uint32_t lastReport=0,lastAttempt=millis(),connectedAt=hrConnectedAtMs;
   uint8_t failures=0;

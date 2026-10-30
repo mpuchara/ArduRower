@@ -95,7 +95,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.17-ble-coexist-")
+          assert version["version"].startswith("0.09.19-ble-coexist-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]

@@ -45,6 +45,18 @@ Firmware build, flash verification and physical touch/Garmin results are recorde
 3. If reads are stale, use the explicit 180 s diagnostic HR-first test and attempt FTMS while HR remains connected. Do not infer impossibility from the 30 s fallback.
 4. Exercise Ghost selection, equal-elapsed distance lead, bright live / dim best curves, persistence and restart on the physical screen after touch input works.
 
+## Follow-up 0.09.18-0.09.19
+
+- User confirmed that explicit READ BPM never changes while the watch pulse changes. It is cached, not a live measurement. From 0.09.18 an ATT read is diagnostic only: it cannot update receivedHr, receivedHrAt, hrNotifyPackets or the HR graph. Only real HR notifications refresh the measurement.
+- Touch returned to Z=0 / IRQ=1 after physical adjustment. User completed all three calibration targets and selected 500 m by touch; the log confirms calibration saved, menu entry, SELECT 500, race armed and started. Calibration loaded successfully on subsequent application-only updates. Sensor pin GPIO22 was confirmed. No further Ghost workout/graph acceptance is claimed: user explicitly deferred those tests and requested Bluetooth work only.
+- Extended RANDOM HR-first test received 189 notifications with genuinely changing BPM (including 98, 95, 113, 88). FTMS advertised throughout, but the user reported the active field remained disconnected. After the explicit 180 s HR-only yield, FTMS connected at uptime 199539 ms. Default and diagnostic join windows must be distinguished.
+- Both controller CONFIG_BTDM_CTRL_BLE_MAX_CONN and host CONFIG_BT_NIMBLE_MAX_CONNECTIONS are 3. A one-connection configuration is not the cause.
+- Laptop control attempt was inconclusive: WR S4BL3 at 04:B2:47:9C:BB:26 was found, but Windows GATT discovery timed out while the watch rejoined FTMS. This is not evidence of working or impossible multi-peer operation.
+- 0.09.19 adds the explicit USB `hrpublic` test. It starts HR using the SAME PUBLIC address advertised for FTMS, allowing a possible single physical ACL reuse. If Rowing Data CCCD is subscribed on the actually HR-initiated public ACL, the application marks logical FTMS ready and sends unchanged FTMS bytes with ble_gatts_notify_custom. The origin handle is recorded only by a successful central connection callback, never inferred from a shared-GATT alias. An incoming ordinary FTMS session cannot falsely prove this experiment.
+- The public-address variant is not accepted yet. Initial attempts with the previously active watch field received connection status 13. A clean HR-only watch state followed by re-enabling the field remains needed to test reuse conclusively.
+
+Current scope: Bluetooth only. Preserve the accepted tap/calibration changes and ordinary TEMPO /500m startup; resume Ghost physical validation only when requested.
+
 ## Reference code
 
 - UBox touch calibration/pins: `mpuchara/HA_UBOX_bridge` at `7f1f165`.
