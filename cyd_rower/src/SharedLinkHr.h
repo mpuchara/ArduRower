@@ -365,9 +365,13 @@ static void hrWorker(void *) {
                       (unsigned long)ftmsNotifications,
                       (unsigned)hrFtmsHandle,(unsigned)hrClientHandle);
       }
-      if(hrDualReady && hrNotifyPackets==0 &&
-         (uint32_t)(now-connectedAt)>45000UL) {
-        Serial.println("HR: dual ACL subscribed but no BPM after 45s; recycle ONLY HR central");
+      const bool noBpm=hrNotifyPackets==0 &&
+          (uint32_t)(now-connectedAt)>45000UL;
+      const bool staleBpm=receivedHrAt!=0 &&
+          (uint32_t)(now-receivedHrAt)>25000UL;
+      if(hrDualReady && (noBpm || staleBpm)) {
+        Serial.printf("HR: %s; recycle ONLY HR central, FTMS preserved\n",
+                      noBpm?"45s without BPM":"25s stale BPM");
         ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
       }
       vTaskDelay(pdMS_TO_TICKS(500));continue;
