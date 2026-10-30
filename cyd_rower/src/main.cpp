@@ -524,6 +524,11 @@ bool mappedTouch(int16_t rawX,int16_t rawY,int16_t &x,int16_t &y) {
 }
 void readTouchCalibration() {
   Preferences p;
+  if(p.begin("rower-touch",true)) {
+    const bool forced=p.getBool("tc_force",false);
+    p.end();
+    if(forced) {touchCalibrated=false;Serial.println("TOUCH: calibration requested from Ghost menu");return;}
+  }
   // Prefer the calibration from the previously working UBox CYD firmware.
   for (const char *area : {"rower-touch","ubox-cyd"}) {
     if (!p.begin(area,true)) continue;
@@ -585,7 +590,8 @@ bool calibrateRaceTouch() {
   touchRotation=DEFAULT_ROTATION;touchCalibrated=true;
   Preferences p;
   if(p.begin("rower-touch",false)){
-    p.putBool("tc_ok",true);p.putUChar("tc_rot",DEFAULT_ROTATION);
+    p.putBool("tc_ok",true);p.putBool("tc_force",false);
+    p.putUChar("tc_rot",DEFAULT_ROTATION);
     p.putFloat("tc_a",touchA);p.putFloat("tc_b",touchB);
     p.putFloat("tc_c",touchC);p.putFloat("tc_d",touchD);
     p.putFloat("tc_e",touchE);p.putFloat("tc_f",touchF);
@@ -649,6 +655,19 @@ void touchTap(int16_t rx,int16_t ry) {
     return;
   }
   if(ghost.phase!=ghostrace::Phase::Idle)return;
+  // Touch-only recalibration control in the Ghost menu. Restart safely so
+  // the three-point wizard runs before starting BLE/FTMS, as in UBox.
+  if(y>=25 && y<53 && (!calibrated || x>=208)) {
+    Preferences p;
+    if(p.begin("rower-touch",false)) {
+      p.putBool("tc_force",true);
+      p.end();
+    }
+    Serial.println("TOUCH: Ghost menu requested three-point calibration; reboot");
+    delay(100);
+    ESP.restart();
+    return;
+  }
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u calibrated=%d raw=%d,%d\n",
                 (int)x,(int)y,(unsigned)selectedDistance,calibrated?1:0,(int)rx,(int)ry);
   // Three entire rows are large touch targets with no small hitbox.
@@ -1068,6 +1087,7 @@ void paintRaceLayout(uint8_t screen) {
   if(screen==0) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("WYBIERZ DYSTANS",11,31,2);
+    tft.drawRightString("KALIBRUJ",309,33,2);
     for(uint8_t i=0;i<3;i++) {
       const int yy=53+i*59;
       tft.fillRoundRect(10,yy,300,52,8,panelColor);
