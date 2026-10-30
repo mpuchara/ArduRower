@@ -50,8 +50,9 @@ static void onFtmsHandleReady(uint16_t handle) {
                 (unsigned)handle);
 }
 static void onFtmsHandleClosed() {
-  if(hrLastSecondAclAttemptMs &&
-     (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000) {
+  if(hrClientHandle!=HR_INVALID_HANDLE ||
+     (hrLastSecondAclAttemptMs &&
+      (uint32_t)(millis()-hrLastSecondAclAttemptMs)<25000)) {
     hrDisabledAfterFtmsDrop=true;
     Serial.println("HR: circuit breaker: FTMS dropped during dual-identity experiment; HR disabled until reboot");
   }
