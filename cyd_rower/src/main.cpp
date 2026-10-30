@@ -657,97 +657,66 @@ void touchTap(int16_t rx,int16_t ry) {
   else if(y>=168 && y<229) {Serial.println("GHOST: SELECT 2000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
-  if(!touchReady || now-touchLastPollMs<12)return;
+  if(!touchReady || (uint32_t)(now-touchLastPollMs)<20)return;
   touchLastPollMs=now;
-  // Read real Z pressure on every poll. The XPT2046 IRQ latch is not
-  // dependable across CYD revisions; it can suppress subsequent gestures.
-  const TS_Point pt=touch.getPoint();
-  const cydtouch::Event ev=touchTracker.sample(now,pt.z>=400,pt.x,pt.y);
-  if(ev==cydtouch::Event::None)return;
-  if(ev==cydtouch::Event::Recovery) {
-    Serial.printf("TOUCH: RECOVERY stuck contact z=%d irq=%d elapsed=%lu\n",
-                  (int)pt.z,digitalRead(36),(unsigned long)(now-touchPressedAt));
-    touchedLast=false;swipeTriggered=false;
+  // Restore the same physical IRQ-based read sequence as HA_UBOX_bridge.
+  // Earlier versions read getPoint() with IRQ unregistered, then inferred
+  // physical release from stale high Z. That allowed the very same finger
+  // motion to switch Dashboard -> Ghost -> Dashboard in succession.
+  const bool pressed=touch.touched();
+  if(!pressed) {
+    if(!touchedLast)return;
+    // The first missing poll may be SPI jitter; require a stable release.
+    if(++touchReleasedSamples<2)return;
+    touchReleasedSamples=0;
+    touchedLast=false;
+    const uint32_t duration=now-touchPressedAt;
+    const int dx=(int)rawEndX-(int)rawStartX;
+    const int dy=(int)rawEndY-(int)rawStartY;
+    const float mappedDx=touchA*dx+touchB*dy;
+    const float mappedDy=touchD*dx+touchE*dy;
+    const bool swipe=cydtouch::pageSwipe(dx,dy,touchCalibrated,mappedDx,mappedDy);
+    Serial.printf("TOUCH: UP raw=%d,%d delta=%d,%d duration=%lu swipe=%d cal=%d mode=%d\n",
+          (int)rawEndX,(int)rawEndY,dx,dy,
+          (unsigned long)duration,swipe?1:0,touchCalibrated?1:0,(int)activeMode);
+    if(duration<55 || duration>TOUCH_PRESS_LIMIT_MS ||
+       (uint32_t)(now-touchLastCompletedMs)<TOUCH_REARM_MS)return;
+    // Exactly one command per complete physical contact and a release
+    // rearm barrier. The next contact cannot be born from the swipe tail.
+    touchLastCompletedMs=now;
+    if(swipe && !calibrationScreen) {
+      ++touchSwipeEvents;
+      Serial.printf("GHOST: RELEASE SWIPE #%lu raw=%d,%d mode=%d\n",
+                    (unsigned long)touchSwipeEvents,dx,dy,(int)activeMode);
+      toggleMode();
+    } else if(duration<=1100 && max(abs(dx),abs(dy))<490) {
+      touchTap(rawEndX,rawEndY);
+    } else if(duration>=1100 && max(abs(dx),abs(dy))<490 &&
+              activeMode==Mode::Dashboard) {
+      int16_t px,py;
+      if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
+        calibrationScreen=true;lastCalibrationPaint=255;
+      }
+    }
     return;
   }
-  if(ev==cydtouch::Event::Down) {
-    touchedLast=true;touchPressedAt=now;swipeTriggered=false;
-    ++touchEvents;
+  // touch.touched() is the same authoritative contact condition used by
+  // HA_UBOX_bridge, not Z>=400 sampled without a matching IRQ lifecycle.
+  const TS_Point pt=touch.getPoint();
+  if(!touchedLast) {
+    if(touchLastCompletedMs &&
+       (uint32_t)(now-touchLastCompletedMs)<TOUCH_REARM_MS)return;
+    touchedLast=true;touchReleasedSamples=0;
+    touchPressedAt=now;swipeTriggered=false;
     rawStartX=rawEndX=pt.x;rawStartY=rawEndY=pt.y;
+    ++touchEvents;
     Serial.printf("TOUCH: DOWN #%lu raw=%d,%d z=%d irq=%d\n",
                   (unsigned long)touchEvents,pt.x,pt.y,pt.z,digitalRead(36));
     return;
   }
-  if(ev==cydtouch::Event::Tap) {
-    rawEndX=pt.x;rawEndY=pt.y;
-    Serial.printf("TOUCH: TAP without UP raw=%d,%d mode=%d z=%d\n",
-                  pt.x,pt.y,(int)activeMode,pt.z);
-    // Ghost menu and active-race MENU are deliberately operable without
-    // XPT2046 UP, which is absent in the physical v0.09.10 logs.
-    if(activeMode==Mode::Race && !calibrationScreen) {
-      touchTap(pt.x,pt.y);
-      swipeTriggered=true; // a committed tap must not toggle the page
-      touchTracker.consume(now,pt.x,pt.y);
-    }
-    return;
-  }
-  if(ev==cydtouch::Event::Move) {
-    rawEndX=pt.x;rawEndY=pt.y;
-    const float dX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
-    const float dY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-    if(!swipeTriggered && !calibrationScreen && now-touchPressedAt>=55 &&
-       cydtouch::pageSwipe(rawEndX-rawStartX,rawEndY-rawStartY,
-                           touchCalibrated,dX,dY)) {
-      swipeTriggered=true;++touchSwipeEvents;
-      Serial.printf("GHOST: LIVE SWIPE #%lu raw=(%d,%d), mode=%d\n",
-                    (unsigned long)touchSwipeEvents,
-                    rawEndX-rawStartX,rawEndY-rawStartY,(int)activeMode);
-      toggleMode(); // one navigation per physical gesture
-      touchTracker.consume(now,pt.x,pt.y); // immediately re-arm after a NEW contact
-    }
-    return;
-  }
-  if(ev!=cydtouch::Event::Up)return;
-  touchedLast=false;
-  const uint32_t held=now-touchPressedAt;
-  Serial.printf("TOUCH: UP raw=%d,%d duration=%lu z=%d irq=%d mode=%d\n",
-                (int)rawEndX,(int)rawEndY,(unsigned long)held,
-                (int)pt.z,digitalRead(36),(int)activeMode);
-  if(swipeTriggered) {
-    Serial.printf("TOUCH: UP after live swipe; held=%lu\n",(unsigned long)held);
-    return;
-  }
-  const int dx=abs(rawEndX-rawStartX),dy=abs(rawEndY-rawStartY);
-  const float deltaX=touchA*(rawEndX-rawStartX)+touchB*(rawEndY-rawStartY);
-  const float deltaY=touchD*(rawEndX-rawStartX)+touchE*(rawEndY-rawStartY);
-  const bool horizontalSwipe=cydtouch::pageSwipe(rawEndX-rawStartX,
-      rawEndY-rawStartY,touchCalibrated,deltaX,deltaY);
-  if(max(dx,dy)>=160)
-    Serial.printf("TOUCH: deltaRaw=(%d,%d) mapped=(%.1f,%.1f) calibrated=%s swipe=%s\n",
-                  rawEndX-rawStartX,rawEndY-rawStartY,deltaX,deltaY,
-                  touchCalibrated?"yes":"no",horizontalSwipe?"yes":"no");
-  if(held>1100 && max(dx,dy)<420 && !horizontalSwipe &&
-     activeMode==Mode::Dashboard && !calibrationScreen) {
-    int16_t px,py;
-    if(mappedTouch(rawEndX,rawEndY,px,py) && py<38) {
-      calibrationScreen=true;lastCalibrationPaint=255;
-    }
-  } else if(held>=45 && held<2000 && horizontalSwipe && !calibrationScreen) {
-    Serial.printf("GHOST: horizontal swipe detected; mode=%s -> %s\n",
-                  activeMode==Mode::Dashboard?"dashboard":"race",
-                  activeMode==Mode::Dashboard?"race":"dashboard");
-    toggleMode();
-  } else if(held>=60 && held<750 && max(dx,dy)<500) {
-    touchTap(rawEndX,rawEndY);
-  } else if(held>=1200 && max(dx,dy)<500 &&
-            activeMode==Mode::Race &&
-            (ghost.phase==ghostrace::Phase::Running ||
-             ghost.phase==ghostrace::Phase::Armed)) {
-    int16_t x,y;
-    if(mappedTouch(rawEndX,rawEndY,x,y) && y>=218)openRaceMenu();
-  }
+  touchReleasedSamples=0;
+  rawEndX=pt.x;rawEndY=pt.y;
 }
-
 String formatTime(uint32_t seconds) {
   char buffer[16];
   if (seconds >= 3600) {
