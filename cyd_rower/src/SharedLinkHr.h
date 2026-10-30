@@ -21,6 +21,9 @@ static volatile int hrConnectStatus=0xffff;
 static ble_addr_t hrScanCandidate={};
 static volatile bool hrCandidateValid=false;
 static volatile int hrCandidateScore=-200;
+static String hrPreviouslyWorkingAddress;
+static String hrCandidateAddressText;
+static bool hrSavedWorkingPeer=false;
 static volatile uint32_t hrScanSeen=0,hrScanMatched=0,hrSecondAclAttempts=0;
 static volatile uint32_t hrLastSecondAclAttemptMs=0;
 static volatile bool hrDisabledAfterFtmsDrop=false;
@@ -213,7 +216,14 @@ static int onHrScanEvent(ble_gap_event *event,void *) {
       if(fields.uuids16[i].value==0x180d)hasHr=true;
     if(!hasHr)return 0;
     ++hrScanMatched;
-    int score=adv.rssi;
+    char readable[18];
+    snprintf(readable,sizeof(readable),"%02x:%02x:%02x:%02x:%02x:%02x",
+        adv.addr.val[5],adv.addr.val[4],adv.addr.val[3],
+        adv.addr.val[2],adv.addr.val[1],adv.addr.val[0]);
+    const String mac(readable);
+    const bool previouslyWorked=hrPreviouslyWorkingAddress.length() &&
+        mac.equalsIgnoreCase(hrPreviouslyWorkingAddress);
+    int score=adv.rssi+(previouslyWorked?700:0);
     ble_gap_conn_desc ftms={};
     if(hrFtmsHandle!=HR_INVALID_HANDLE &&
        ble_gap_conn_find(hrFtmsHandle,&ftms)==0 &&
@@ -221,6 +231,7 @@ static int onHrScanEvent(ble_gap_event *event,void *) {
         ble_addr_cmp(&adv.addr,&ftms.peer_id_addr)==0))score+=1000;
     if(!hrCandidateValid || score>hrCandidateScore) {
       hrScanCandidate=adv.addr;
+      hrCandidateAddressText=mac;
       hrCandidateScore=score;
       hrCandidateValid=true;
     }
@@ -260,6 +271,16 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
 static bool scanAndConnectHr() {
   if(!deviceConnected || hrFtmsHandle==HR_INVALID_HANDLE)return false;
   if(!configureHrRandomIdentity())return false;
+  if(hrPreviouslyWorkingAddress.isEmpty()) {
+    Preferences prefs;
+    if(prefs.begin("rower-hr",true)) {
+      hrPreviouslyWorkingAddress=prefs.getString("addr","");
+      prefs.end();
+    }
+    if(hrPreviouslyWorkingAddress.length())
+      Serial.printf("HR: preferring previous working Garmin address %s\n",
+                    hrPreviouslyWorkingAddress.c_str());
+  }
   hrScanDone=false;hrCandidateValid=false;hrCandidateScore=-200;
   hrScanSeen=hrScanMatched=0;
   ble_gap_disc_params params={};
@@ -276,9 +297,10 @@ static bool scanAndConnectHr() {
     vTaskDelay(pdMS_TO_TICKS(30));
   if(!hrScanDone)ble_gap_disc_cancel();
   if(!deviceConnected)return false;
-  Serial.printf("HR: private scan seen=%lu HR=%lu candidate=%d score=%d\n",
+  Serial.printf("HR: private scan seen=%lu HR=%lu candidate=%d score=%d mac=%s\n",
                 (unsigned long)hrScanSeen,(unsigned long)hrScanMatched,
-                hrCandidateValid?1:0,(int)hrCandidateScore);
+                hrCandidateValid?1:0,(int)hrCandidateScore,
+                hrCandidateValid?hrCandidateAddressText.c_str():"--");
   if(!hrCandidateValid) {
     setHrState(HrState::NotFound,"No BLE 180D advertiser with FTMS connected");
     return false;
@@ -356,6 +378,15 @@ static void hrWorker(void *) {
     }
     const uint32_t epoch=hrLinkEpoch;
     if(processedEpoch==epoch) {
+      if(hrNotifyPackets>0 && !hrSavedWorkingPeer && hrCandidateAddressText.length()) {
+        Preferences prefs;
+        if(prefs.begin("rower-hr",false)) {
+          hrSavedWorkingPeer=prefs.putString("addr",hrCandidateAddressText)>0;
+          prefs.end();
+        }
+        if(hrSavedWorkingPeer)Serial.printf("HR: saved proven BPM source %s\n",
+                      hrCandidateAddressText.c_str());
+      }
       if((uint32_t)(now-lastReport)>8000) {
         lastReport=now;
         Serial.printf("HR: dual-ACL ready=%d bpm=%u packets=%lu rawNotify=%lu FTMS tx=%lu FTMS=%u HR=%u\n",
