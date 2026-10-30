@@ -52,6 +52,10 @@ jobs:
           /tmp/cyd_touch_swipe_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_state_test.cpp -o /tmp/cyd_touch_state_test
           /tmp/cyd_touch_state_test
+          g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs tests/cyd_touch_adc_test.cpp -o /tmp/cyd_touch_adc_test
+          /tmp/cyd_touch_adc_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_heart_test.cpp -o /tmp/ghost_heart_test
+          /tmp/ghost_heart_test
       - name: Test unchanged rowing calculations
         run: |
           g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test

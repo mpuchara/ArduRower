@@ -5,7 +5,7 @@ root = Path(__file__).resolve().parents[1]
 src = (root/"cyd_rower/src/main.cpp").read_text(encoding="utf-8")
 
 checks = (
-    'XPT2046_Touchscreen touch(33,36);',
+    'CydTouch touch(33,36);',
     'const bool pressed=touch.touched();',
     'if(++touchReleasedSamples<2)return;',
     'touchLastCompletedMs=now;',
@@ -41,5 +41,13 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.15"' in src
-print("PASS: HA-style IRQ contact/release, calibrated menu, single Ghost toggle per finger")
+assert 'FIRMWARE_VERSION = "0.09.17"' in src
+adc=(root/'cyd_rower/src/CydTouch.h').read_text()
+assert 'spi_->transfer16(' not in adc
+assert 'z1=adc(0xB1),z2=adc(0xC1)' in adc
+assert 'GHOST: entered menu using single BOOT click' in src
+assert 'dashboardBootClicks' not in src
+assert 'GHOST: entered menu using screen tap' in src
+assert 'ghostWorkout?"ROZNICA / DUCH":"TEMPO /500m"' in src
+assert 'Mode activeMode = Mode::Dashboard' in src
+print("PASS: byte-oriented pressure/release, calibrated menu, one BOOT entry and one Ghost toggle per finger")

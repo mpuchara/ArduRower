@@ -7,6 +7,8 @@ int main() {
   assert(!CoexistPolicy::shouldYieldHrForFtms(40000,1000,true,true));
   assert(CoexistPolicy::shouldYieldHrForFtms(31000,1000,true,false));
   assert(!CoexistPolicy::shouldYieldHrForFtms(31000,1000,false,false));
+  assert(!CoexistPolicy::shouldYieldHrForFtms(121000,1000,true,false,180000));
+  assert(CoexistPolicy::shouldYieldHrForFtms(181000,1000,true,false,180000));
   assert(CoexistPolicy::noCurrentSessionBpm(50001,1000,12,12));
   assert(!CoexistPolicy::noCurrentSessionBpm(50001,1000,13,12));
   assert(CoexistPolicy::inRetryCooldown(30000,130000));

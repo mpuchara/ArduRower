@@ -18,6 +18,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include <TFT_eSPI.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
+#include "CydTouch.h"
 #include <math.h>
 #include <Preferences.h>
 #include "CydMotion.h"
@@ -25,9 +26,10 @@ extern "C" bool bleInUse(void) { return true; }
 #include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
+#include "GhostHeart.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.15";
+static constexpr const char *FIRMWARE_VERSION = "0.09.17";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -57,7 +59,7 @@ TFT_eSPI tft;
 TFT_eSprite scratch(&tft); // reusable 160x55 off-screen buffer (~17 KiB)
 bool scratchReady = false;
 SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen touch(33,36); // identical IRQ wiring to working HA_UBOX_bridge
+CydTouch touch(33,36); // same CYD pins, explicit byte-oriented ADC transactions
 bool touchReady = false;
 bool touchedLast = false;
 uint8_t touchReleasedSamples=0;
@@ -68,6 +70,7 @@ uint32_t touchEvents=0;
 uint32_t touchSwipeEvents=0;
 uint32_t touchLastLogMs=0;
 uint32_t touchLastPollMs=0;
+uint32_t touchTraceUntil=0,touchTraceAt=0;
 uint32_t touchPressedAt = 0;
 int16_t rawStartX = 0, rawStartY = 0, rawEndX = 0, rawEndY = 0;
 float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
@@ -78,6 +81,9 @@ RowerMetrics metrics;
 cydmotion::Engine motion;
 cydble::DutySchedule bleDuty;
 volatile uint32_t ftmsNotifications=0;
+volatile uint32_t ftmsTxComplete=0;
+volatile uint16_t ftmsValueHandle=0;
+volatile bool ftmsSubscribed=false;
 volatile uint32_t ftmsConnectedAtMs=0;
 volatile uint32_t ftmsDisconnectedAtMs=0;
 volatile uint16_t receivedHr=0;
@@ -167,10 +173,7 @@ uint32_t lastDisplayMs = 0, lastBleMs = 0, lastHistoryMs = 0;
 bool detailPage = false, buttonDown = false, longPressDone = false;
 bool rawButtonDown = false;
 uint32_t buttonChangedMs = 0, buttonPressedMs = 0;
-// Two quick BOOT clicks open Ghost Race even without touch calibration.
-// A single click still toggles the dashboard details after a short delay.
-uint8_t dashboardBootClicks=0;
-uint32_t dashboardBootClickAt=0;
+// One short BOOT click opens Ghost Race, independently of touch calibration.
 
 struct HistorySample { float power; float speedKmh; };
 HistorySample history[HISTORY_LENGTH] = {};
@@ -197,6 +200,8 @@ enum class Mode : uint8_t { Dashboard, Race };
 Mode activeMode = Mode::Dashboard;
 ghostrace::Race ghost;
 ghostrace::Record storedGhost;
+ghostrace::HeartRecord bestHeart={},attemptHeart={};
+bool hasBestHeart=false;
 uint32_t personalBestMs[3] = {};
 uint8_t selectedDistance=0;
 bool raceLayoutReady=false;
@@ -238,6 +243,9 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
 void initBLE() {
   Serial.print(F("Init BLE:"));
   NimBLEDevice::init(BLE_SERVICE_NAME);
+  // HCI Set Random Address is forbidden once advertising/scanning starts.
+  // Configure the independent central identity before PUBLIC FTMS advertising.
+  configureHrRandomIdentity();
   NimBLEDevice::setCustomGapHandler(onHrGapEvent);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -308,6 +316,24 @@ void initBLE() {
   NimBLEAdvertisementData scanResponse;
   scanResponse.setName(BLE_SERVICE_NAME);
   pAdvertising->setScanResponseData(scanResponse);
+  // NimBLE assigns characteristic handles only when the GATT server starts.
+  pServer->start();
+  ftmsValueHandle=pDtCharacteristic->getHandle();
+  // Bounded startup window: the watch may stop advertising HR as soon as
+  // it joins FTMS. Discover HR once BEFORE offering FTMS; never stop an
+  // established FTMS session to force a connection order.
+  Serial.println("HR: startup discovery before FTMS advertisement (max 11s)");
+  bool extendedHrTest=false;
+  Preferences testPrefs;
+  if(testPrefs.begin("rower-test",false)) {
+    extendedHrTest=testPrefs.getBool("hrfirst",false);
+    testPrefs.putBool("hrfirst",false);testPrefs.end();
+  }
+  const uint32_t hrBootBegan=millis();
+  if(extendedHrTest)hrFtmsJoinGraceMs=180000UL;
+  do {
+    if(scanAndConnectHr())break;
+  } while(extendedHrTest && millis()-hrBootBegan<30000UL);
   const bool advertisingStarted=pAdvertising->start();
   Serial.printf("\nFTMS: primary advertising started=%s active=%s name=%s service=0x1826 adBytes=%u\n",
                 advertisingStarted?"yes":"no",
@@ -398,6 +424,7 @@ void resetRenderCache();
 void renderRaceUI();
 const uint16_t raceDistances[3] = {500, 1000, 2000};
 const char *raceKeys[3] = {"g500", "g1000", "g2000"};
+const char *heartKeys[3] = {"h500", "h1000", "h2000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
@@ -423,6 +450,16 @@ void startRace(uint8_t index) {
   if (index >= 3) return;
   selectedDistance = index;
   const bool found = loadBest(index, storedGhost);
+  bestHeart={};attemptHeart={};hasBestHeart=false;
+  if(found) {
+    Preferences p;
+    if(p.begin("rower-races",true)) {
+      hasBestHeart=p.getBytesLength(heartKeys[index])==sizeof(bestHeart) &&
+        p.getBytes(heartKeys[index],&bestHeart,sizeof(bestHeart))==sizeof(bestHeart) &&
+        ghostrace::validHeart(bestHeart,storedGhost);
+      p.end();
+    }
+  }
   ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,
             motion.calibrationMilli());
   // Start a fresh interval, so race distance is not polluted by earlier
@@ -473,23 +510,14 @@ void updateButton(uint32_t now) {
     if (down) { buttonPressedMs=now; longPressDone=false; }
     else if (!longPressDone) {
       if (activeMode == Mode::Dashboard) {
-        if(dashboardBootClicks==1 && now-dashboardBootClickAt<=480) {
-          dashboardBootClicks=0;
-          toggleMode(); // explicit physical fallback for Ghost Race
-          Serial.println("GHOST: entered menu using double BOOT click");
-        } else {
-          dashboardBootClicks=1;
-          dashboardBootClickAt=now;
-        }
+        toggleMode();
+        Serial.println("GHOST: entered menu using single BOOT click");
       } else if (ghost.phase == ghostrace::Phase::Idle)
         selectedDistance=(selectedDistance+1)%3;
       else if (ghost.phase == ghostrace::Phase::Finished ||
                ghost.phase == ghostrace::Phase::Cancelled) openRaceMenu();
+      else openRaceMenu();
     }
-  }
-  if(dashboardBootClicks && now-dashboardBootClickAt>480) {
-    dashboardBootClicks=0;
-    if(activeMode==Mode::Dashboard) detailPage=!detailPage;
   }
   if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
     longPressDone=true;
@@ -555,6 +583,15 @@ bool readCalPoint(int x,int y,int &rx,int &ry,int index) {
   tft.drawFastHLine(x-13,y,27,powerColor);
   tft.drawFastVLine(x,y-13,27,powerColor);
   const uint32_t began=millis();
+  // A held finger must never become the next calibration target.
+  uint32_t releasedAt=0;
+  while(millis()-began<5000UL) {
+    if(touch.touched())releasedAt=0;
+    else if(!releasedAt)releasedAt=millis();
+    else if(millis()-releasedAt>=120)break;
+    delay(10);
+  }
+  if(!releasedAt || millis()-releasedAt<120)return false;
   while (millis()-began<15000UL) {
     if (touch.touched()) {
       long xx=0,yy=0;int n=0;
@@ -565,7 +602,9 @@ bool readCalPoint(int x,int y,int &rx,int &ry,int index) {
         delay(25);
       }
       while (touch.touched()&&millis()-hold<1500UL)delay(25);
-      if(n>=2){rx=xx/n;ry=yy/n;return true;}
+      if(n>=2){rx=xx/n;ry=yy/n;
+        Serial.printf("TOUCH: calibration target=%d raw=%d,%d samples=%d\n",index,rx,ry,n);
+        return true;}
     }
     delay(25);
   }
@@ -579,6 +618,7 @@ bool calibrateRaceTouch() {
   const float ux=rx[1]-rx[0],uy=ry[1]-ry[0];
   const float vx=rx[2]-rx[0],vy=ry[2]-ry[0];
   const float det=ux*vy-uy*vx;
+  Serial.printf("TOUCH: calibration determinant=%.0f\n",det);
   if(fabsf(det)<80000.0f)return false;
   touchA=270.0f*vy/det;touchB=-270.0f*vx/det;
   touchD=-145.0f*uy/det;touchE=145.0f*ux/det;
@@ -621,13 +661,9 @@ void touchTap(int16_t rx,int16_t ry) {
     return;
   }
   if(activeMode==Mode::Dashboard) {
-    int16_t x,y;
-    // Short tap on upper-left header is a one-step Ghost Race entry.
-    // Long header hold still opens virtual-distance calibration.
-    if(mappedTouch(rx,ry,x,y) && x<104 && y<27) {
-      toggleMode();
-      Serial.println("GHOST: entered menu using dashboard title tap");
-    } else detailPage=!detailPage;
+    // The full dashboard is the entry target; no calibrated hitbox required.
+    toggleMode();
+    Serial.println("GHOST: entered menu using screen tap");
     return;
   }
   if(ghost.phase==ghostrace::Phase::Finished ||
@@ -645,13 +681,14 @@ void touchTap(int16_t rx,int16_t ry) {
   }
   if(ghost.phase==ghostrace::Phase::Running ||
      ghost.phase==ghostrace::Phase::Armed) {
-    if(y>=216) {
+    if(y<40 || y>=216) {
       Serial.println("GHOST: touch MENU cancels active race");
       openRaceMenu();
     }
     return;
   }
   if(ghost.phase!=ghostrace::Phase::Idle)return;
+  if(calibrated && y<25 && x>=200) {toggleMode();return;}
   // Touch-only recalibration control in the Ghost menu. Restart safely so
   // the three-point wizard runs before starting BLE/FTMS, as in UBox.
   if(y>=25 && y<53 && (!calibrated || x>=208)) {
@@ -675,10 +712,8 @@ void touchTap(int16_t rx,int16_t ry) {
 void updateTouch(uint32_t now) {
   if(!touchReady || (uint32_t)(now-touchLastPollMs)<20)return;
   touchLastPollMs=now;
-  // Restore the same physical IRQ-based read sequence as HA_UBOX_bridge.
-  // Earlier versions read getPoint() with IRQ unregistered, then inferred
-  // physical release from stale high Z. That allowed the very same finger
-  // motion to switch Dashboard -> Ghost -> Dashboard in succession.
+  // Read fresh ADC pressure; the IRQ is diagnostic, not a contact latch.
+  // Commit one navigation action only after a debounced physical release.
   const bool pressed=touch.touched();
   if(!pressed) {
     if(!touchedLast)return;
@@ -716,8 +751,7 @@ void updateTouch(uint32_t now) {
     }
     return;
   }
-  // touch.touched() is the same authoritative contact condition used by
-  // HA_UBOX_bridge, not Z>=400 sampled without a matching IRQ lifecycle.
+  // getPoint() shares the cached sample with touched() within this poll.
   const TS_Point pt=touch.getPoint();
   if(!touchedLast) {
     if(touchLastCompletedMs &&
@@ -883,9 +917,9 @@ void plot(int x, int y, int w, int h, bool power) {
 void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false) {
   const int16_t speedMaxTenth=220; // 22.0 km/h right scale
   const int hrMin=60,hrMax=190; // 60..190 BPM left scale
-  const uint16_t speedInk=ghostTraining?(speedColor>>1)&0x7BEF:speedColor;
-  const uint16_t hrInk=ghostTraining?(heartColor>>1)&0x7BEF:heartColor;
-  const uint16_t ghostInk=(powerColor>>1)&0x7BEF;
+  const uint16_t speedInk=speedColor;
+  const uint16_t hrInk=heartColor;
+  const uint16_t ghostInk=(speedColor>>1)&0x7BEF;
   const bool ghostCurve=ghostTraining && ghost.hasBest && ghost.phase==ghostrace::Phase::Running;
   const uint32_t ghostElapsed=ghostCurve?ghost.elapsed(millis()):0;
   for(int left=0;left<width;left+=BUFFER_W) {
@@ -901,7 +935,8 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
     }
     int previousX=0,previousHrY=0,previousSpeedY=0;
     bool prevHrValid=false,prevSpeedValid=false,prevGhostValid=false;
-    int previousGhostY=0;
+    int previousGhostY=0,previousGhostHrY=0;
+    bool prevGhostHrValid=false;
     for(uint16_t i=0;i<trendCount;++i) {
       const TrendPoint &sample=trendAt(i);
       const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
@@ -909,10 +944,12 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
                                   (height-1)/(hrMax-hrMin));
       const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
                                 (int)speedMaxTenth))*(height-1)/speedMaxTenth);
-      bool hrValid=sample.heartBpm>=hrMin;
+      bool hrValid=sample.heartBpm>=35;
       const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
       const bool ghostValid=ghostCurve && ghostElapsed>=age;
       int ghostY=height-1;
+      int ghostHrY=height-1;
+      bool ghostHrValid=false;
       if(ghostValid) {
         const uint32_t t=ghostElapsed-age,start=t>2000?t-2000:0;
         const float dt=(t-start)*0.001f;
@@ -920,23 +957,32 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
                            ghostrace::interpolate(ghost.best,start);
         const float kmh=dt>0?constrain(meters*3.6f/dt,0.0f,22.0f):0;
         ghostY=height-1-(int)(kmh*10.0f*(height-1)/speedMaxTenth);
+        const uint8_t bpm=hasBestHeart?ghostrace::replayHeart(bestHeart,t):0;
+        ghostHrValid=bpm>=35;
+        ghostHrY=height-1-(constrain((int)bpm,hrMin,hrMax)-hrMin)*(height-1)/(hrMax-hrMin);
+      }
+      // Paint historical traces first, so bright live curves stay on top.
+      if(i>0 && ghostValid && prevGhostValid && xx>=left-2 && previousX<left+part) {
+        if(scratchReady)scratch.drawLine(previousX-left,previousGhostY,xx-left,ghostY,ghostInk);
+        else tft.drawLine(x+previousX,y+previousGhostY,x+xx,y+ghostY,ghostInk);
+        if(ghostHrValid && prevGhostHrValid) {
+          const uint16_t ink=(heartColor>>1)&0x7BEF;
+          if(scratchReady)scratch.drawLine(previousX-left,previousGhostHrY,xx-left,ghostHrY,ink);
+          else tft.drawLine(x+previousX,y+previousGhostHrY,x+xx,y+ghostHrY,ink);
+        }
       }
       if(i>0 && xx>=left-2 && previousX<left+part) {
         if(prevSpeedValid) {
           if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedInk);
-          else tft.drawLine(x+previousX,y+previousSpeedY,x+xx,y+spY,speedColor);
+          else tft.drawLine(x+previousX,y+previousSpeedY,x+xx,y+spY,speedInk);
         }
         if(hrValid && prevHrValid) {
           if(scratchReady)scratch.drawLine(previousX-left,previousHrY,xx-left,hrY,hrInk);
-          else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,heartColor);
+          else tft.drawLine(x+previousX,y+previousHrY,x+xx,y+hrY,hrInk);
         }
       }
-      if(i>0 && ghostValid && prevGhostValid && (i%2)==0 &&
-         xx>=left-2 && previousX<left+part) {
-        if(scratchReady)scratch.drawLine(previousX-left,previousGhostY,xx-left,ghostY,ghostInk);
-        else tft.drawLine(x+previousX,y+previousGhostY,x+xx,y+ghostY,ghostInk);
-      }
       previousX=xx;previousHrY=hrY;previousSpeedY=spY;previousGhostY=ghostY;
+      previousGhostHrY=ghostHrY;prevGhostHrValid=ghostHrValid;
       prevHrValid=hrValid;prevSpeedValid=true;prevGhostValid=ghostValid;
     }
     if(scratchReady) scratch.pushSprite(x+left,y,0,0,part,height);
@@ -974,7 +1020,7 @@ void pageLayout() {
   // Header title: tap to enter Ghost Race; horizontal swipes are primary.
   if(!detailPage && !ghostWorkout) {
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("<  GHOST  >",77,29,1);
+    tft.drawString("DOTKNIJ: DUCH",77,29,1);
   }
   if(ghostWorkout){tft.setTextColor(labelColor,backgroundColor);tft.drawString(ghost.phase==ghostrace::Phase::Armed?"CZEKAM NA RUCH":(ghost.hasBest?"PB OK":"BRAK PB"),73,29,1);}
   tft.drawString(FIRMWARE_VERSION,108,8,1);
@@ -1080,7 +1126,7 @@ void paintRaceLayout(uint8_t screen) {
   tft.drawString("GHOST RACE",9,4,2);
   tft.drawString(FIRMWARE_VERSION,109,8,1);
   tft.setTextColor(labelColor,panelColor);
-  tft.drawRightString("SWIPE: WROC",313,6,1);
+  tft.drawRightString("< WROC",313,6,2);
   if(screen==0) {
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("WYBIERZ DYSTANS",11,31,2);
@@ -1264,7 +1310,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.15 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.17 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1272,6 +1318,7 @@ void setup() {
   // Follow the same separate touch SPI and pins as the working UBox CYD code.
   touchSPI.begin(25, 39, 32, 33);
   touchReady = touch.begin(touchSPI);
+  touch.useSoftwareSpi(); // isolate touch from hardware SPI/controller state
   touch.setRotation(0);
   if(touchReady)readTouchCalibration();
   // Like HA_UBOX_bridge: calibrate BEFORE BLE starts, never while sending FTMS.
@@ -1317,6 +1364,35 @@ void setup() {
   updateUI();
 }
 void loop() {
+  // USB maintenance commands; no blocking reads in the rowing/BLE loop.
+  static char usbCommand[24]={};
+  static uint8_t usbLength=0;
+  while(Serial.available()) {
+    const char c=Serial.read();
+    if(c=='\n') {
+      usbCommand[usbLength]=0;
+      if(strcmp(usbCommand,"calibrate")==0) {
+        Preferences p;
+        if(p.begin("rower-touch",false)) {
+          p.putBool("tc_force",true);p.end();
+          Serial.println("TOUCH: USB requested calibration; restart");
+          Serial.flush();ESP.restart();
+        }
+      } else if(strcmp(usbCommand,"reboot")==0) {
+        Serial.println("USB: requested restart");Serial.flush();ESP.restart();
+      } else if(strcmp(usbCommand,"trace")==0) {
+        touchTraceUntil=millis()+30000UL;
+      } else if(strcmp(usbCommand,"hrfirst")==0) {
+        Preferences p;
+        if(p.begin("rower-test",false)) {
+          p.putBool("hrfirst",true);p.end();
+          Serial.println("HR: requested one-shot 30s HR-first startup test");
+          Serial.flush();ESP.restart();
+        }
+      }
+      usbLength=0;
+    } else if(c!='\r' && usbLength<sizeof(usbCommand)-1)usbCommand[usbLength++]=c;
+  }
   uint32_t pulseTime;
   // Keep the original ISR queue semantics and calculation order.
   while (true) {
@@ -1338,6 +1414,23 @@ void loop() {
     }
   }
   const uint32_t now=millis();
+  if((int32_t)(touchTraceUntil-now)>0 && now-touchTraceAt>=200) {
+    touchTraceAt=now;const TS_Point p=touch.getPoint();
+    Serial.printf("TOUCH ADC: x=%d y=%d z=%d z1=%d z2=%d irq=%d\n",
+      p.x,p.y,p.z,touch.z1(),touch.z2(),digitalRead(36));
+  }
+  static uint32_t lastStatus=0,lastStatusHr=0,lastStatusTx=0;
+  if(now-lastStatus>=10000) {
+    const TS_Point pt=touch.getPoint();
+    const bool simultaneous=liveHr(now)>0 && ftmsSubscribed &&
+      hrNotifyPackets!=lastStatusHr && ftmsTxComplete!=lastStatusTx;
+    Serial.printf("STATUS: FTMS=%d subscribed=%d queued=%lu sent=%lu HR=%u packets=%lu simultaneous=%d touch=%d,%d,z%d irq=%d cal=%d heap=%u\n",
+      deviceConnected?1:0,ftmsSubscribed?1:0,(unsigned long)ftmsNotifications,
+      (unsigned long)ftmsTxComplete,(unsigned)liveHr(now),
+      (unsigned long)hrNotifyPackets,simultaneous?1:0,
+      pt.x,pt.y,pt.z,digitalRead(36),touchCalibrated?1:0,(unsigned)ESP.getFreeHeap());
+    lastStatus=now;lastStatusHr=hrNotifyPackets;lastStatusTx=ftmsTxComplete;
+  }
   bleDuty.onFtms(deviceConnected,now);
   checkHrStall(now);
   motion.tick(micros());
@@ -1359,14 +1452,31 @@ void loop() {
   }
   if (ghost.phase==ghostrace::Phase::Armed && metrics.started) {
     ghost.start(now);
+    attemptHeart.bpm[0]=(uint8_t)liveHr(now);
     Serial.printf("GHOST: started %u m at %lu, pulses=%lu\n",
                   (unsigned)ghost.targetMeters,(unsigned long)now,
                   (unsigned long)metrics.pulses);
   }
   if (ghost.phase==ghostrace::Phase::Running) {
-    if (ghost.advance(now,metrics.distance())) {
+    const uint16_t previousCount=ghost.attempt.count;
+    const bool improved=ghost.advance(now,metrics.distance());
+    // Do not invent HR history if the loop missed several sample intervals.
+    if(ghost.attempt.count>previousCount)
+      attemptHeart.bpm[ghost.attempt.count-1]=(uint8_t)liveHr(now);
+    if (improved) {
       if (!saveBest(selectedDistance,ghost.attempt))recordSaveFailed=true;
-      else personalBestMs[selectedDistance]=ghost.endMs;
+      else {
+        personalBestMs[selectedDistance]=ghost.endMs;
+        attemptHeart.count=ghost.attempt.count;
+        attemptHeart.raceChecksum=ghost.attempt.checksum;
+        attemptHeart.checksum=ghostrace::hashHeart(attemptHeart);
+        Preferences p;
+        if(p.begin("rower-races",false)) {
+          const bool ok=p.putBytes(heartKeys[selectedDistance],&attemptHeart,sizeof(attemptHeart))==sizeof(attemptHeart);
+          Serial.printf("GHOST: optional best HR trace saved=%d\n",ok?1:0);
+          p.end();
+        }
+      }
       Serial.printf("GHOST: finished %u m, time=%lu, saved=%s\n",
                     (unsigned)ghost.targetMeters,
                     (unsigned long)ghost.endMs,

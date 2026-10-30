@@ -31,6 +31,7 @@ static volatile bool hrSecondAclAttemptWasWithFtms=false;
 
 static volatile uint32_t hrSuspendAttemptsUntilMs=0;
 static volatile uint32_t hrConnectedAtMs=0;
+static uint32_t hrFtmsJoinGraceMs=cydble::CoexistPolicy::kFtmsJoinGraceMs;
 static volatile uint32_t hrPacketsAtSubscription=0;
 static volatile bool hrDisabledAfterFtmsDrop=false;
 static uint8_t hrStaticAddr[6]={};
@@ -39,6 +40,9 @@ static volatile uint16_t hrServiceStart=0,hrServiceEnd=0;
 static volatile uint16_t hrRemoteValueHandle=0,hrRemoteCccdHandle=0;
 static volatile uint16_t hrProcedureStatus=0xffff;
 static volatile bool hrProcedureDone=false,hrDualReady=false;
+static bool hrSharedTransport=false,hrSharedTried=false;
+static bool hrReadAllowed=false,hrReadPending=false,hrReadTried=false;
+static uint32_t hrLastReadMs=0;
 static volatile uint32_t hrDualPackets=0;
 static volatile uint32_t hrGapNotifies=0,hrGapOtherAttributes=0,hrLinkEpoch=0;
 static const ble_uuid16_t hrServiceUUID=BLE_UUID16_INIT(0x180D);
@@ -54,11 +58,17 @@ static HrState displayedHrState(uint32_t now) { (void)now;return hrState; }
 static void checkHrStall(uint32_t now) { (void)now; }
 
 static void onFtmsHandleReady(uint16_t handle) {
+  hrSharedTried=false;
   hrFtmsHandle=handle;
   Serial.printf("HR: FTMS stays on PUBLIC ACL=%u; HR central will use RANDOM identity\n",
                 (unsigned)handle);
 }
 static void onFtmsHandleClosed() {
+  ftmsSubscribed=false;
+  if(hrSharedTransport) {
+    hrClientHandle=HR_INVALID_HANDLE;hrSharedTransport=false;hrDualReady=false;
+    hrConnected=false;receivedHr=0;receivedHrAt=0;++hrLinkEpoch;
+  }
   if(cydble::CoexistPolicy::ftmsCollisionPossible(
        millis(),hrLastSecondAclAttemptMs,hrSecondAclAttemptWasWithFtms)) {
     hrDisabledAfterFtmsDrop=true;
@@ -70,6 +80,17 @@ static void onFtmsHandleClosed() {
 }
 
 static int onHrGapEvent(struct ble_gap_event *event,void *) {
+  if(event->type==BLE_GAP_EVENT_SUBSCRIBE &&
+     event->subscribe.conn_handle==hrFtmsHandle &&
+     event->subscribe.attr_handle==ftmsValueHandle) {
+    ftmsSubscribed=event->subscribe.cur_notify;
+    Serial.printf("FTMS: rowing notify subscription=%d acl=%u\n",
+                  ftmsSubscribed?1:0,(unsigned)hrFtmsHandle);
+  }
+  if(event->type==BLE_GAP_EVENT_NOTIFY_TX &&
+     event->notify_tx.conn_handle==hrFtmsHandle &&
+     event->notify_tx.attr_handle==ftmsValueHandle &&
+     event->notify_tx.status==0)++ftmsTxComplete;
   if(event->type!=BLE_GAP_EVENT_NOTIFY_RX)return 0;
   ++hrGapNotifies;
   if(hrGapNotifies<=8)Serial.printf(
@@ -93,7 +114,8 @@ static int onHrGapEvent(struct ble_gap_event *event,void *) {
     receivedHr=bpm;receivedHrAt=millis();
     ++hrNotifyPackets;++hrDualPackets;
     hrConnected=true;hrState=HrState::Receiving;
-    if(hrDualPackets<=5)Serial.printf("HR: dual-identity Garmin BPM packet #%lu bpm=%u\n",
+    if(hrDualPackets<=5)Serial.printf("HR: %s Garmin BPM packet #%lu bpm=%u\n",
+                   hrSharedTransport?"shared ACL":"dual-identity",
                    (unsigned long)hrDualPackets,(unsigned)bpm);
   }
   return 0;
@@ -117,6 +139,7 @@ static int onHrCharacteristic(uint16_t handle,const ble_gatt_error *e,
   if(e->status==0 && chr) {
     Serial.printf("HR: 2A37 value=%u props=%u notify=%d\n",(unsigned)chr->val_handle,(unsigned)chr->properties,(chr->properties & BLE_GATT_CHR_F_NOTIFY)?1:0);
     if(chr->properties & BLE_GATT_CHR_F_NOTIFY)hrRemoteValueHandle=chr->val_handle;
+    hrReadAllowed=(chr->properties & BLE_GATT_CHR_F_READ)!=0;
   } else {
     hrProcedureStatus=e->status==BLE_HS_EDONE?0:e->status;
     hrProcedureDone=true;
@@ -172,6 +195,52 @@ static bool awaitHrProcedure(uint16_t handle,const char *phase) {
 }
 static void prepareHrProcedure() {
   hrProcedureDone=false;hrProcedureStatus=0xffff;
+}
+
+static void endHrSession(uint16_t h) {
+  if(h==HR_INVALID_HANDLE)return;
+  if(h==hrFtmsHandle) {
+    // GATT roles are independent of GAP roles. A silent shared GATT probe
+    // must NEVER terminate the underlying FTMS physical connection.
+    Serial.println("HR: shared GATT probe ended; FTMS ACL preserved");
+    hrClientHandle=HR_INVALID_HANDLE;hrSharedTransport=false;
+    hrDualReady=false;hrConnected=false;receivedHr=0;receivedHrAt=0;
+    hrSuspendAttemptsUntilMs=millis()+120000UL;
+    return;
+  }
+  ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
+}
+
+static bool beginSharedHrProbe() {
+  if(!deviceConnected || hrFtmsHandle==HR_INVALID_HANDLE || hrSharedTried)return false;
+  hrSharedTried=true;hrSharedTransport=true;
+  hrClientHandle=hrFtmsHandle;hrConnectedAtMs=millis();
+  ++hrLinkEpoch;
+  Serial.printf("HR: fallback GATT client on EXISTING FTMS ACL=%u; no second connection\n",(unsigned)hrClientHandle);
+  return true;
+}
+
+static int onHrMeasurementRead(uint16_t h,const ble_gatt_error *e,ble_gatt_attr *attr,void *) {
+  hrReadPending=false;
+  if(h!=hrClientHandle)return 0;
+  if(e->status || !attr) {
+    hrReadAllowed=false;
+    Serial.printf("HR: 2A37 read status=%u; no polling fallback\n",(unsigned)e->status);
+    return 0;
+  }
+  hrReadAllowed=true;
+  uint8_t p[3]={};
+  const size_t n=OS_MBUF_PKTLEN(attr->om);
+  if(n<2 || os_mbuf_copydata(attr->om,0,(int)(n<3?n:3),p))return 0;
+  const bool wide=p[0]&1;
+  if(wide && n<3)return 0;
+  const uint16_t bpm=wide?(uint16_t)(p[1]|(uint16_t(p[2])<<8)):p[1];
+  Serial.printf("HR: shared ACL 2A37 read BPM=%u\n",(unsigned)bpm);
+  if(bpm>=35 && bpm<=240) {
+    receivedHr=bpm;receivedHrAt=millis();++hrNotifyPackets;
+    hrConnected=true;hrState=HrState::Receiving;
+  }
+  return 0;
 }
 
 // HR client runs on its own central ACL with a STATIC-RANDOM local identity.
@@ -250,6 +319,7 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
     hrConnectStatus=event->connect.status;
     if(event->connect.status==0) {
       hrClientHandle=event->connect.conn_handle;
+      hrConnectedAtMs=millis();
       ++hrLinkEpoch;
       Serial.printf("HR: RANDOM central CONNECTED ACL=%u; PUBLIC FTMS ACL=%u\n",
                     (unsigned)hrClientHandle,(unsigned)hrFtmsHandle);
@@ -310,7 +380,7 @@ static bool scanAndConnectHr() {
                 hrCandidateValid?hrCandidateAddressText.c_str():"--");
   if(!hrCandidateValid) {
     setHrState(HrState::NotFound,"No BLE 180D advertisements in scan window");
-    return false;
+    return beginSharedHrProbe();
   }
   // NimBLE 1.4.3 ble_gap_connect(peer_addr) rejects an address already used
   // by the FTMS peripheral even with a DIFFERENT local address. Whitelist
@@ -338,6 +408,7 @@ static bool scanAndConnectHr() {
                 (unsigned long)hrSecondAclAttempts,rc,deviceConnected?1:0);
   if(rc) {
     hrConnecting=false;
+    if(rc==BLE_HS_HCI_ERR(BLE_ERR_ACL_CONN_EXISTS))return beginSharedHrProbe();
     return false;
   }
   const uint32_t connStarted=millis();
@@ -350,9 +421,9 @@ static bool scanAndConnectHr() {
 }
 
 static void hrWorker(void *) {
-  Serial.println("HR: coexist v0.09.15 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
+  Serial.println("HR: coexist v0.09.17 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
-  uint32_t lastReport=0,lastAttempt=0,connectedAt=0;
+  uint32_t lastReport=0,lastAttempt=millis(),connectedAt=hrConnectedAtMs;
   uint8_t failures=0;
   while(true) {
     const uint32_t now=millis();
@@ -361,7 +432,7 @@ static void hrWorker(void *) {
     // because Garmin has not connected as an FTMS central yet.
     if(hrDisabledAfterFtmsDrop) {
       if(h!=HR_INVALID_HANDLE)
-        ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM); // HR ONLY
+        endHrSession(h);
       if(hrState!=HrState::Paused)
         setHrState(HrState::Paused,"HR circuit breaker: preserve Garmin FTMS");
       vTaskDelay(pdMS_TO_TICKS(1500));continue;
@@ -369,14 +440,24 @@ static void hrWorker(void *) {
     // If the watch cannot join FTMS while HR is connected, yield HR
     // automatically after 30 seconds. Keep FTMS advertisement intact.
     if(cydble::CoexistPolicy::shouldYieldHrForFtms(
-         now,hrConnectedAtMs,h!=HR_INVALID_HANDLE,deviceConnected)) {
-      Serial.println("HR: HR-first without FTMS for 30s; release HR ONLY to restore FTMS");
+         now,hrConnectedAtMs,h!=HR_INVALID_HANDLE,deviceConnected,hrFtmsJoinGraceMs)) {
+      if(hrFtmsJoinGraceMs==30000)
+        Serial.println("HR: HR-first without FTMS for 30s; release HR ONLY to restore FTMS");
+      else Serial.println("HR: diagnostic HR-first 180s finished; release HR ONLY");
       hrSuspendAttemptsUntilMs=now+cydble::CoexistPolicy::kRetryCooldownMs;
       hrConnectedAtMs=0;
-      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
+      endHrSession(h);
       vTaskDelay(pdMS_TO_TICKS(500));continue;
     }
     if(h==HR_INVALID_HANDLE) {
+      // GATT discovery on an established ACL needs no scan or new radio
+      // connection. Try it once even if the athlete is already rowing.
+      if(deviceConnected && !hrSharedTried &&
+         (uint32_t)(now-ftmsConnectedAtMs)>=1500 && beginSharedHrProbe()) {
+        connectedAt=hrConnectedAtMs;processedEpoch=UINT32_MAX;
+        receivedHr=0;receivedHrAt=0;
+        continue;
+      }
       if(cydble::CoexistPolicy::inRetryCooldown(
            now,hrSuspendAttemptsUntilMs)) {
         if(hrState!=HrState::Paused)
@@ -407,6 +488,12 @@ static void hrWorker(void *) {
     }
     const uint32_t epoch=hrLinkEpoch;
     if(processedEpoch==epoch) {
+      if(hrSharedTransport && hrDualReady && (!hrReadTried || hrReadAllowed) && !hrReadPending &&
+         now-hrLastReadMs>=2000 && (!hrReadTried || now-receivedHrAt>=3000)) {
+        hrLastReadMs=now;hrReadPending=true;hrReadTried=true;
+        const int rc=ble_gattc_read(h,hrRemoteValueHandle,onHrMeasurementRead,nullptr);
+        if(rc){hrReadPending=false;hrReadAllowed=false;Serial.printf("HR: 2A37 read call rc=%d\n",rc);}
+      }
       if(hrDualReady && hrNotifyPackets>hrPacketsAtSubscription &&
          !hrSavedWorkingPeer && hrCandidateAddressText.length()) {
         Preferences prefs;
@@ -433,7 +520,7 @@ static void hrWorker(void *) {
       if(hrDualReady && (noBpm || staleBpm)) {
         Serial.printf("HR: %s; recycle ONLY HR central, FTMS preserved\n",
                       noBpm?"45s without BPM":"25s stale BPM");
-        ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
+        endHrSession(h);
       }
       vTaskDelay(pdMS_TO_TICKS(500));continue;
     }
@@ -441,12 +528,14 @@ static void hrWorker(void *) {
     hrServiceStart=hrServiceEnd=0;
     hrRemoteValueHandle=hrRemoteCccdHandle=0;
     hrDualReady=false;
-    setHrState(HrState::Service,"discover Garmin HR 180D on RANDOM central ACL");
+    hrReadAllowed=false;hrReadPending=false;hrReadTried=false;
+    setHrState(HrState::Service,hrSharedTransport?
+      "discover Garmin HR 180D on EXISTING FTMS ACL":"discover Garmin HR 180D on RANDOM central ACL");
     prepareHrProcedure();
     int rc=ble_gattc_disc_svc_by_uuid(h,&hrServiceUUID.u,onHrService,nullptr);
     if(rc || !awaitHrProcedure(h,"service 180D") || !hrServiceStart) {
       setHrState(HrState::NotFound,"180D unavailable on HR central ACL");
-      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
+      endHrSession(h);continue;
     }
     setHrState(HrState::Characteristic,"discover 2A37 on HR central ACL");
     prepareHrProcedure();
@@ -454,7 +543,7 @@ static void hrWorker(void *) {
                                    &hrMeasureUUID.u,onHrCharacteristic,nullptr);
     if(rc || !awaitHrProcedure(h,"characteristic 2A37") || !hrRemoteValueHandle) {
       setHrState(HrState::NotFound,"2A37 unavailable");
-      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
+      endHrSession(h);continue;
     }
     setHrState(HrState::Descriptor,"discover 2A37 CCCD");
     prepareHrProcedure();
@@ -462,21 +551,23 @@ static void hrWorker(void *) {
                                onHrDescriptor,nullptr);
     if(rc || !awaitHrProcedure(h,"descriptor 2902") || !hrRemoteCccdHandle) {
       setHrState(HrState::InitFailed,"2A37 CCCD unavailable");
-      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
+      endHrSession(h);continue;
     }
-    setHrState(HrState::Subscribing,"subscribe to Garmin BPM via independent HR ACL");
+    setHrState(HrState::Subscribing,hrSharedTransport?
+      "subscribe to Garmin BPM on EXISTING FTMS ACL":"subscribe to Garmin BPM via independent HR ACL");
     prepareHrProcedure();
+    hrPacketsAtSubscription=hrNotifyPackets;
     const uint8_t notify[2]={0x01,0x00};
     rc=ble_gattc_write_flat(h,hrRemoteCccdHandle,notify,sizeof(notify),
                             onHrWrite,nullptr);
     if(rc || !awaitHrProcedure(h,"subscribe CCCD")) {
       setHrState(HrState::InitFailed,"remote HR CCCD write failed");
-      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);continue;
+      endHrSession(h);continue;
     }
     hrDualReady=true;
-    hrPacketsAtSubscription=hrNotifyPackets;
     const int readRc=ble_gattc_read(h,hrRemoteCccdHandle,onHrReadCccd,nullptr);
     if(readRc)Serial.printf("HR: CCCD readback call error=%d\n",readRc);
-    setHrState(HrState::NoData,"dual-identity HR subscribed; waiting for BPM");
+    setHrState(HrState::NoData,hrSharedTransport?
+      "shared ACL HR subscribed; waiting for BPM":"dual-identity HR subscribed; waiting for BPM");
   }
 }

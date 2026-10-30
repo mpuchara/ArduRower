@@ -7,9 +7,10 @@ struct CoexistPolicy {
   static constexpr uint32_t kRetryCooldownMs=120000UL;
   static constexpr uint32_t kFtmsCollisionWindowMs=25000UL;
   static bool shouldYieldHrForFtms(uint32_t now,uint32_t connectedAt,
-                                   bool hrConnected,bool ftmsConnected) {
+                                   bool hrConnected,bool ftmsConnected,
+                                   uint32_t graceMs=kFtmsJoinGraceMs) {
     return hrConnected && !ftmsConnected && connectedAt &&
-           (uint32_t)(now-connectedAt)>=kFtmsJoinGraceMs;
+           (uint32_t)(now-connectedAt)>=graceMs;
   }
   static bool inRetryCooldown(uint32_t now,uint32_t deadline) {
     return deadline && (int32_t)(now-deadline)<0;
