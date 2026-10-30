@@ -23,7 +23,6 @@ extern "C" bool bleInUse(void) { return true; }
 #include "CydMotion.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
-#include "TouchPress.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
@@ -65,8 +64,6 @@ uint8_t touchReleasedSamples=0;
 uint32_t touchLastCompletedMs=0;
 static constexpr uint32_t TOUCH_REARM_MS=550;
 static constexpr uint32_t TOUCH_PRESS_LIMIT_MS=2500;
-cydtouch::PressTracker touchTracker;
-bool swipeTriggered=false;
 uint32_t touchEvents=0;
 uint32_t touchSwipeEvents=0;
 uint32_t touchLastLogMs=0;
@@ -726,7 +723,7 @@ void updateTouch(uint32_t now) {
     if(touchLastCompletedMs &&
        (uint32_t)(now-touchLastCompletedMs)<TOUCH_REARM_MS)return;
     touchedLast=true;touchReleasedSamples=0;
-    touchPressedAt=now;swipeTriggered=false;
+    touchPressedAt=now;
     rawStartX=rawEndX=pt.x;rawStartY=rawEndY=pt.y;
     ++touchEvents;
     Serial.printf("TOUCH: DOWN #%lu raw=%d,%d z=%d irq=%d\n",
