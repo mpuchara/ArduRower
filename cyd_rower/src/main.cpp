@@ -28,7 +28,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.12";
+static constexpr const char *FIRMWARE_VERSION = "0.09.13";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -1274,7 +1274,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.12 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.13 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1295,8 +1295,8 @@ void setup() {
                 controllerAlreadyStarted?1:0,controllerStatus);
   initBLE();
   loadMotionCalibration();
-  // No BLE central pairing/discovery in this firmware: Garmin joins FTMS,
-  // and we use exactly the same ACL for remote HR GATT discovery.
+  // FTMS advertising remains on PUBLIC address. The HR worker uses a
+  // distinct static-random local address for separate GATT discovery.
   // Allocate after BLE so the BLE stack keeps its working heap.
   scratch.setColorDepth(16);
   scratchReady = scratch.createSprite(BUFFER_W, BUFFER_H) != nullptr;
@@ -1309,8 +1309,7 @@ void setup() {
   resetWorkout();
   loadBestTimes();
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
-  // Optional second BLE role. If the full BLE stack used most heap,
-  // preserve the working FTMS stream instead of risking a crash.
+  // Experimental second BLE identity. Keep PUBLIC FTMS unaffected on low heap.
   const uint32_t beforeHr=ESP.getFreeHeap();
   if(beforeHr>40000)
     hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",4096,
