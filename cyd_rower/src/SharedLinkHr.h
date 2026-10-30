@@ -301,7 +301,7 @@ static bool scanAndConnectHr() {
     return false;
   }
   const uint32_t began=millis();
-  while(!hrScanDone && (uint32_t)(millis()-began)<3400 && deviceConnected)
+  while(!hrScanDone && (uint32_t)(millis()-began)<3400)
     vTaskDelay(pdMS_TO_TICKS(30));
   if(!hrScanDone)ble_gap_disc_cancel();
   Serial.printf("HR: private scan seen=%lu HR=%lu candidate=%d score=%d mac=%s\n",
@@ -309,7 +309,7 @@ static bool scanAndConnectHr() {
                 hrCandidateValid?1:0,(int)hrCandidateScore,
                 hrCandidateValid?hrCandidateAddressText.c_str():"--");
   if(!hrCandidateValid) {
-    setHrState(HrState::NotFound,"No BLE 180D advertiser with FTMS connected");
+    setHrState(HrState::NotFound,"No BLE 180D advertisements in scan window");
     return false;
   }
   // NimBLE 1.4.3 ble_gap_connect(peer_addr) rejects an address already used
@@ -341,7 +341,7 @@ static bool scanAndConnectHr() {
     return false;
   }
   const uint32_t connStarted=millis();
-  while(!hrConnectDone && (uint32_t)(millis()-connStarted)<8000 && deviceConnected)
+  while(!hrConnectDone && (uint32_t)(millis()-connStarted)<8000)
     vTaskDelay(pdMS_TO_TICKS(30));
   if(!hrConnectDone && hrConnecting)ble_gap_conn_cancel();
   return hrConnectDone && hrConnectStatus==0 &&
