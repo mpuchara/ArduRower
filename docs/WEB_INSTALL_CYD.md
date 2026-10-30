@@ -144,3 +144,32 @@ Dotychczasowa implementacja `SharedLinkHr.h` odczytywała GATT `180D/2A37` z ist
 **Techniczne zastrzeżenie:** NimBLE-Arduino 1.4.3 odrzuca drugi `ble_gap_connect` do znanego adresu odbiorcy w trybie direct. Dlatego używamy wyłącznie znalezionego podczas skanowania reklamodawcy `180D` na liście dozwolonych i inicjujemy `ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,...)`. Omija to sprawdzanie duplikatu po stronie hosta, jednak kontroler ESP32 lub Garmin nadal mogą odmówić drugiej sesji. Brak gwarancji działania bez testów na prawdziwym sprzęcie.
 
 Monitor USB 115200: `HR: PRIVATE central identity`, `HR: private scan seen=... HR=...`, `HR: second-identity connect attempt=... rc=...`, `HR: RANDOM central CONNECTED`, `HR: dual-identity Garmin BPM packet`. Po nieudanej próbie kod zachowuje FTMS i wykonuje rzadkie ponowienia. Jeśli FTMS zniknie, zrywana jest tylko dodatkowa sesja HR.
+
+
+## CYD 0.09.14 — powrót do sprawdzonego XPT2046 z HA_UBOX_bridge
+
+Przywrócono ten sam sposób działania, co w `mpuchara/HA_UBOX_bridge`:
+`XPT2046_Touchscreen touch(33,36)`, `touchSPI.begin(25,39,32,33)`,
+`touch.setRotation(0)`, `touch.touched()`, trzy znaczniki do kalibracji oraz
+zapis współczynników `tc_a..tc_f` w NVS.
+
+**Naprawa przełączania Ghost:** rozpoznanie swipe następuje tylko po stabilnym
+zwolnieniu dotyku (dwie próby), jeden kontakt fizyczny daje maksymalnie jeden
+przełącznik. Następny gest dopiero po 550 ms od poprzedniego. Jeśli istnieje
+kalibracja, nigdy nie rozpoznajemy przesunięcia pionowego jako poziomego
+tylko dlatego, że surowa oś XPT2046 przekroczyła próg. Dotyk menu dystansów
+następuje dopiero na UP, z użyciem przeliczenia kalibracji.
+
+**Kalibracja:** jeśli jej nie ma, urządzenie pyta o trzy punkty podczas bootu
+*przed* uruchomieniem FTMS (jak w sprawdzonym bridge). Na ekranie Ghost jest
+również opcja `KALIBRUJ` w prawym górnym obszarze pod paskiem tytułu.
+Restartuje ona urządzenie z flagą `tc_force` w NVS; kreator uruchamia się
+jeszcze przed BLE, bez zamrażania już trwającej transmisji do Garmina.
+Dotychczasowe rekordy Ghost Race nie są kasowane.
+
+**Tętno:** oprócz zachowania osobnego central BLE z wersji 0.09.13
+przywrócono preferowanie adresu `rower-hr/addr`, który w wersjach starszych
+realnie wysyłał BPM. Adres aktualnego kandydata jest teraz widoczny w logu
+`HR: private scan seen=... mac=...`. Drugi link do tego samego zegarka
+nadal pozostaje eksperymentem — bez logów z rzeczywistego treningu nie można
+potwierdzić odbierania pulsu.
