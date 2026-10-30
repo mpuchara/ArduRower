@@ -407,7 +407,8 @@ static void hrWorker(void *) {
     }
     const uint32_t epoch=hrLinkEpoch;
     if(processedEpoch==epoch) {
-      if(hrNotifyPackets>0 && !hrSavedWorkingPeer && hrCandidateAddressText.length()) {
+      if(hrDualReady && hrNotifyPackets>hrPacketsAtSubscription &&
+         !hrSavedWorkingPeer && hrCandidateAddressText.length()) {
         Preferences prefs;
         if(prefs.begin("rower-hr",false)) {
           hrSavedWorkingPeer=prefs.putString("addr",hrCandidateAddressText)>0;
