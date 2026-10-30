@@ -29,7 +29,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostHeart.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.19";
+static constexpr const char *FIRMWARE_VERSION = "0.09.22";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -248,6 +248,16 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
 
 void initBLE() {
   Serial.print(F("Init BLE:"));
+  bool extendedHrTest=false;
+  Preferences testPrefs;
+  if(testPrefs.begin("rower-test",false)) {
+    extendedHrTest=testPrefs.getBool("hrfirst",false);
+    hrSharedRandomTest=testPrefs.getBool("same",false);
+    hrPublicSessionTest=testPrefs.getBool("public",false) || hrSharedRandomTest;
+    hrFreshPrivateTest=testPrefs.getBool("fresh",false);
+    testPrefs.putBool("hrfirst",false);testPrefs.putBool("public",false);
+    testPrefs.putBool("same",false);testPrefs.putBool("fresh",false);testPrefs.end();
+  }
   NimBLEDevice::init(BLE_SERVICE_NAME);
   // HCI Set Random Address is forbidden once advertising/scanning starts.
   // Configure the independent central identity before PUBLIC FTMS advertising.
@@ -329,19 +339,28 @@ void initBLE() {
   // Bounded startup window: the watch may stop advertising HR as soon as
   // it joins FTMS. Discover HR once BEFORE offering FTMS; never stop an
   // established FTMS session to force a connection order.
-  Serial.println("HR: startup discovery before FTMS advertisement (max 11s)");
-  bool extendedHrTest=false;
-  Preferences testPrefs;
-  if(testPrefs.begin("rower-test",false)) {
-    extendedHrTest=testPrefs.getBool("hrfirst",false);
-    hrPublicSessionTest=testPrefs.getBool("public",false);
-    testPrefs.putBool("hrfirst",false);testPrefs.putBool("public",false);testPrefs.end();
+  if(hrSharedRandomTest) {
+    // Diagnostic only, before any scan or advertisement; next boot restores
+    // the normal public FTMS identity unless the test is explicitly requested.
+    NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
+    // setOwnAddrType also enables host privacy. Keep one stable identity
+    // for BOTH roles throughout this experiment instead of rotating RPA.
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    ble_hs_pvcy_rpa_config(NIMBLE_HOST_DISABLE_PRIVACY);
+#endif
+    const int staticRc=ble_hs_id_set_rnd(hrStaticAddr);
+    hrOwnRandomReady=staticRc==0;
+    Serial.printf("HR: shared static random identity rc=%d\n",staticRc);
+    Serial.println("FTMS: diagnostic SHARED RANDOM identity (WR S4BL3 unchanged)");
   }
   const uint32_t hrBootBegan=millis();
-  if(extendedHrTest)hrFtmsJoinGraceMs=180000UL;
-  do {
-    if(scanAndConnectHr())break;
-  } while(extendedHrTest && millis()-hrBootBegan<30000UL);
+  if(extendedHrTest) {
+    Serial.println("HR: diagnostic HR-first startup window 30s");
+    hrFtmsJoinGraceMs=180000UL;
+    do {
+      if(scanAndConnectHr())break;
+    } while(millis()-hrBootBegan<30000UL);
+  }
   const bool advertisingStarted=pAdvertising->start();
   Serial.printf("\nFTMS: primary advertising started=%s active=%s name=%s service=0x1826 adBytes=%u\n",
                 advertisingStarted?"yes":"no",
@@ -1324,7 +1343,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.19 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.22 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1399,17 +1418,47 @@ void loop() {
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
-          p.putBool("hrfirst",true);p.putBool("public",false);p.end();
+          p.putBool("hrfirst",true);p.putBool("public",false);p.putBool("same",false);p.end();
           Serial.println("HR: requested one-shot 30s HR-first startup test");
           Serial.flush();ESP.restart();
         }
       } else if(strcmp(usbCommand,"hrpublic")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
-          p.putBool("hrfirst",true);p.putBool("public",true);p.end();
+          p.putBool("hrfirst",true);p.putBool("public",true);p.putBool("same",false);p.end();
           Serial.println("HR: requested PUBLIC HR-first + bidirectional GATT test");
           Serial.flush();ESP.restart();
         }
+      } else if(strcmp(usbCommand,"hrsame")==0) {
+        Preferences p;
+        if(p.begin("rower-test",false)) {
+          p.putBool("hrfirst",true);p.putBool("public",false);p.putBool("same",true);p.end();
+          Serial.println("HR: requested shared RANDOM identity for HR + FTMS");
+          Serial.flush();ESP.restart();
+        }
+      } else if(strcmp(usbCommand,"hrfresh")==0) {
+        Preferences p;
+        if(p.begin("rower-test",false)) {
+          p.putBool("hrfirst",true);p.putBool("public",false);
+          p.putBool("same",false);p.putBool("fresh",true);p.end();
+          Serial.println("HR: requested independent private identity; PUBLIC FTMS unchanged");
+          Serial.flush();ESP.restart();
+        }
+      } else if(strcmp(usbCommand,"gattdump")==0) {
+        garminProbeRequest=1;
+      } else if(strcmp(usbCommand,"garmininit")==0) {
+        garminProbeRequest=2;
+      } else if(strcmp(usbCommand,"garminoff")==0) {
+        garminProbeRequest=3;
+      } else if(strcmp(usbCommand,"garminml")==0) {
+        garminProbeRequest=4;
+      } else if(strcmp(usbCommand,"garminmloff")==0) {
+        garminProbeRequest=5;
+      } else if(strcmp(usbCommand,"garminsecure")==0 && deviceConnected && hrFtmsHandle!=HR_INVALID_HANDLE) {
+        NimBLEDevice::setSecurityAuth(true,false,true);
+        NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+        Serial.printf("GARMIN SECURITY: request encryption/bonding on existing FTMS ACL rc=%d\n",
+                      ble_gap_security_initiate(hrFtmsHandle));
       }
       usbLength=0;
     } else if(c!='\r' && usbLength<sizeof(usbCommand)-1)usbCommand[usbLength++]=c;

@@ -10,6 +10,7 @@
 #include "nimble/nimble/host/include/host/ble_uuid.h"
 #include "nimble/nimble/host/include/host/ble_hs_id.h"
 #include "nimble/nimble/host/include/host/ble_hs_adv.h"
+#include "nimble/nimble/host/include/host/ble_hs_pvcy.h"
 #include "nimble/porting/nimble/include/os/os_mbuf.h"
 #include <stdint.h>
 #include "BleCoexistPolicy.h"
@@ -43,6 +44,8 @@ static volatile bool hrProcedureDone=false,hrDualReady=false;
 static bool hrSharedTransport=false,hrSharedTried=false;
 static bool hrReadAllowed=false,hrReadPending=false,hrReadTried=false;
 static bool hrPublicSessionTest=false;
+static bool hrSharedRandomTest=false;
+static bool hrFreshPrivateTest=false;
 static bool ftmsOnHrAcl=false;
 static volatile uint16_t hrPublicCentralHandle=HR_INVALID_HANDLE;
 static uint32_t hrLastReadMs=0;
@@ -82,12 +85,15 @@ static void onFtmsHandleClosed() {
   // Never call ble_gap_terminate() on the Garmin FTMS handle.
 }
 
+static void logGarminVendorNotify(struct ble_gap_event *event);
 static int onHrGapEvent(struct ble_gap_event *event,void *) {
   if(event->type==BLE_GAP_EVENT_CONNECT) {
     ble_gap_conn_desc d={};
     if(event->connect.status==0 && ble_gap_conn_find(event->connect.conn_handle,&d)==0)
-      Serial.printf("GAP: CONNECT acl=%u role=%u localType=%u peer=%02x:%02x:%02x:%02x:%02x:%02x\n",
+      Serial.printf("GAP: CONNECT acl=%u role=%u localType=%u local=%02x:%02x:%02x:%02x:%02x:%02x peer=%02x:%02x:%02x:%02x:%02x:%02x\n",
         (unsigned)d.conn_handle,(unsigned)d.role,(unsigned)d.our_ota_addr.type,
+        d.our_ota_addr.val[5],d.our_ota_addr.val[4],d.our_ota_addr.val[3],
+        d.our_ota_addr.val[2],d.our_ota_addr.val[1],d.our_ota_addr.val[0],
         d.peer_ota_addr.val[5],d.peer_ota_addr.val[4],d.peer_ota_addr.val[3],
         d.peer_ota_addr.val[2],d.peer_ota_addr.val[1],d.peer_ota_addr.val[0]);
     else Serial.printf("GAP: CONNECT failed status=%d\n",event->connect.status);
@@ -104,8 +110,8 @@ static int onHrGapEvent(struct ble_gap_event *event,void *) {
     deviceConnected=ftmsOnHrAcl;
     hrFtmsHandle=ftmsOnHrAcl?hrPublicCentralHandle:HR_INVALID_HANDLE;
     ftmsConnectedAtMs=millis();
-    Serial.printf("FTMS: subscription on HR-initiated PUBLIC ACL=%u enabled=%d\n",
-      (unsigned)event->subscribe.conn_handle,ftmsOnHrAcl?1:0);
+    Serial.printf("FTMS: subscription on HR-initiated ACL=%u identity=%s enabled=%d\n",
+      (unsigned)event->subscribe.conn_handle,hrSharedRandomTest?"RANDOM":"PUBLIC",ftmsOnHrAcl?1:0);
   }
   if(event->type==BLE_GAP_EVENT_SUBSCRIBE &&
      event->subscribe.conn_handle==hrFtmsHandle &&
@@ -118,7 +124,14 @@ static int onHrGapEvent(struct ble_gap_event *event,void *) {
      event->notify_tx.conn_handle==hrFtmsHandle &&
      event->notify_tx.attr_handle==ftmsValueHandle &&
      event->notify_tx.status==0)++ftmsTxComplete;
+  if(event->type==BLE_GAP_EVENT_ENC_CHANGE) {
+    ble_gap_conn_desc d={};
+    const int rc=ble_gap_conn_find(event->enc_change.conn_handle,&d);
+    Serial.printf("GARMIN SECURITY: change status=%d lookup=%d encrypted=%u authenticated=%u bonded=%u\n",
+      event->enc_change.status,rc,d.sec_state.encrypted,d.sec_state.authenticated,d.sec_state.bonded);
+  }
   if(event->type!=BLE_GAP_EVENT_NOTIFY_RX)return 0;
+  logGarminVendorNotify(event);
   ++hrGapNotifies;
   if(hrGapNotifies<=8)Serial.printf(
     "HR: raw NOTIFY #%lu acl=%u attr=%u expected=%u len=%u\n",
@@ -275,9 +288,10 @@ static bool configureHrRandomIdentity() {
   if(hrOwnRandomReady)return true;
   Preferences prefs;
   bool loaded=false;
+  const char *identityKey=hrFreshPrivateTest?"alt":"rnd";
   if(prefs.begin("rower-hr-id",true)) {
-    if(prefs.getBytesLength("rnd")==6 &&
-       prefs.getBytes("rnd",hrStaticAddr,6)==6 &&
+    if(prefs.getBytesLength(identityKey)==6 &&
+       prefs.getBytes(identityKey,hrStaticAddr,6)==6 &&
        (hrStaticAddr[5]&0xc0)==0xc0)loaded=true;
     prefs.end();
   }
@@ -290,7 +304,7 @@ static bool configureHrRandomIdentity() {
     }
     memcpy(hrStaticAddr,generated.val,6);
     if(prefs.begin("rower-hr-id",false)) {
-      prefs.putBytes("rnd",hrStaticAddr,6);
+      prefs.putBytes(identityKey,hrStaticAddr,6);
       prefs.end();
     }
   }
@@ -348,7 +362,7 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
       hrConnectedAtMs=millis();
       ++hrLinkEpoch;
       Serial.printf("HR: %s central CONNECTED ACL=%u; PUBLIC FTMS ACL=%u\n",
-                    hrPublicSessionTest?"PUBLIC":"RANDOM",
+                    hrSharedRandomTest?"SHARED-RANDOM":(hrPublicSessionTest?"PUBLIC":"RANDOM"),
                     (unsigned)hrClientHandle,(unsigned)hrFtmsHandle);
     } else {
       Serial.printf("HR: RANDOM central rejected status=%d; FTMS unaffected\n",
@@ -399,7 +413,7 @@ static bool scanAndConnectHr() {
   params.itvl=160;params.window=28;params.passive=0;
   params.filter_duplicates=0;
   setHrState(HrState::Scan,"PRIVATE HR scan 180D, FTMS running");
-  const uint8_t ownType=hrPublicSessionTest?BLE_OWN_ADDR_PUBLIC:BLE_OWN_ADDR_RANDOM;
+  const uint8_t ownType=(hrPublicSessionTest && !hrSharedRandomTest)?BLE_OWN_ADDR_PUBLIC:BLE_OWN_ADDR_RANDOM;
   int rc=ble_gap_disc(ownType,2600,&params,onHrScanEvent,nullptr);
   if(rc) {
     Serial.printf("HR: private scan rc=%d; preserving FTMS\n",rc);
@@ -438,8 +452,8 @@ static bool scanAndConnectHr() {
   hrSecondAclAttemptWasWithFtms=deviceConnected;
   setHrState(HrState::Connecting,"RANDOM central + whitelist connect; no FTMS changes");
   if(hrPublicSessionTest) {
-    Serial.println("HR: PUBLIC central identity; Garmin may reuse this ACL for FTMS");
-    rc=ble_gap_connect(BLE_OWN_ADDR_PUBLIC,&peer,7000,&cp,onHrCentralGapEvent,nullptr);
+    Serial.printf("HR: same %s identity for HR and FTMS; test one physical ACL\n",hrSharedRandomTest?"RANDOM":"PUBLIC");
+    rc=ble_gap_connect(ownType,&peer,7000,&cp,onHrCentralGapEvent,nullptr);
   } else rc=ble_gap_connect(BLE_OWN_ADDR_RANDOM,nullptr,7000,&cp,
                      onHrCentralGapEvent,nullptr);
   Serial.printf("HR: second-identity connect attempt=%lu rc=%d FTMS=%d\n",
@@ -458,14 +472,43 @@ static bool scanAndConnectHr() {
          hrClientHandle!=hrFtmsHandle;
 }
 
+#include "GarminGattProbe.h"
 static void hrWorker(void *) {
-  Serial.println("HR: coexist v0.09.19 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
+  Serial.println("HR: coexist v0.09.22 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
   uint32_t lastReport=0,lastAttempt=millis(),connectedAt=hrConnectedAtMs;
   uint8_t failures=0;
+  uint8_t garminPreparing=0;
   while(true) {
     const uint32_t now=millis();
     const uint16_t h=hrClientHandle;
+    // A diagnostic timeout must not start another GATT procedure while
+    // callbacks from the previous one are still arriving.
+    if(gpTimedOut && !gpDone && gpCurrent(gpHandle)) {
+      vTaskDelay(pdMS_TO_TICKS(100));continue;
+    }
+    gpTimedOut=false;
+    if(garminProbeRequest && deviceConnected) {
+      if((garminProbeRequest==2 || garminProbeRequest==4) && h==HR_INVALID_HANDLE) {
+        if(garminPreparing==garminProbeRequest) {
+          garminProbeRequest=0;garminPreparing=0;
+          Serial.println("GARMIN PROBE: HR session preparation failed; no automatic retry");
+          continue;
+        }
+        garminPreparing=garminProbeRequest;
+        hrSharedTried=false;
+        if(beginSharedHrProbe()) {
+          connectedAt=hrConnectedAtMs;processedEpoch=UINT32_MAX;continue;
+        }
+      }
+      if(h==HR_INVALID_HANDLE || (hrSharedTransport && hrDualReady && processedEpoch==hrLinkEpoch)) {
+        const uint8_t mode=garminProbeRequest;garminProbeRequest=0;
+        garminPreparing=0;
+        runGarminProbe(mode);
+        if(mode==2 || mode==4)connectedAt=millis();
+        continue;
+      }
+    }
     // Preserve HR during the FTMS join attempt; never disconnect it just
     // because Garmin has not connected as an FTMS central yet.
     if(hrDisabledAfterFtmsDrop) {

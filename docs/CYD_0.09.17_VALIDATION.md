@@ -57,6 +57,26 @@ Firmware build, flash verification and physical touch/Garmin results are recorde
 
 Current scope: Bluetooth only. Preserve the accepted tap/calibration changes and ordinary TEMPO /500m startup; resume Ghost physical validation only when requested.
 
+## Follow-up 0.09.20-0.09.22: controlled coexistence tests
+
+- Earlier HR-first cases that required changing activities are confounded: leaving the activity interrupts Broadcast During Activity. They do not independently prove a watch limitation.
+- The clean test kept the SAME activity, existing Connect IQ field and Broadcast During Activity enabled, with phone Bluetooth disabled. With an independent local private HR identity, approximately 190 changing HR notifications arrived; the user reported the field remained `scanning`. Passive laptop scanning observed 65 correctly named public FTMS advertisements in 20 seconds at RSSI -36..-46. After the explicit 180-second HR-only yield, the watch connected FTMS at uptime 188112 ms. Logs: `device-fresh-no-phone.log`, `ftms-ad-visible-no-phone.log`.
+- Two positive laptop controls establish actual ESP32 simultaneous operation with different peers: 25 real FTMS notifications received by Windows while genuine changing Garmin HR notifications continued. First both ESP roles used the same random identity (`laptop-ftms-same-random.log`); then FTMS used public 04:B2:47:9C:BB:26 and HR used private FC:99:47:F7:D3:2E (`laptop-ftms-mixed-identities.log`, `device-pc-mixed.log`). Cached READ values do not count. Thus a general claim that ESP32 cannot transmit FTMS while receiving HR would be false.
+- User requires preserving the EXISTING Garmin data field. A replacement Connect IQ field is out of scope.
+- Read-only GATT enumeration on the existing watch-initiated FTMS ACL found legacy Garmin service 6a4e8022..., notify value 18 / CCCD 19, MultiLink service 6a4e2800... with five channel pairs, and standard HRS value 50 / CCCD 51. Each handle is discovered by UUID, never assumed from another model.
+- Enabling the legacy Garmin notify CCCD followed immediately by standard HR CCCD succeeded, but produced zero HR notifications during a 45-second observation. FTMS continued. The original legacy CCCD 00 00 was restored successfully (status 0), without disconnecting FTMS. Log: `device-garmin-probe2.log`.
+- A preliminary diagnostic enumeration used a 12-second procedure limit, shorter than this watch's 24-second MultiLink characteristic enumeration. It returned before callbacks completed and interfered with the next HR diagnostic. The corrected probe permits 60 seconds per procedure. The failed preliminary attempt is not evidence about HR support.
+- An explicit USB-only MultiLink experiment registers only REAL_TIME_HR service 6 using an independent client ID and an existing FTMS ACL. It does not close other clients' handles, register GFDI, pair/unpair or perform authentication. Status/payload observation and rollback are required before promoting it to automatic firmware behavior. No working MultiLink HR result is claimed here yet.
+- MultiLink subscription and registration write succeeded without encryption, including an ATT write response with status 0. No registration reply or HR notification arrived. ML CCCD restoration succeeded for both write-without-response and write-with-response experiments (`device-garmin-ml.log`, `device-garmin-ml-response.log`).
+- A separate, explicit `garminsecure` diagnostic successfully encrypted/bonded the existing FTMS connection (encrypted=1, authenticated=0, bonded=1). Phone pairing was not removed. FTMS continued. On the encrypted ACL, reading the ML CCCD and resubscribing standard HR both returned NimBLE 389 / ATT 0x85. Do not assign an unverified meaning to that vendor-range error. No live HR was obtained (`device-garmin-security.log`).
+- Failure during forced HR preparation originally left the pending vendor command set, causing repeated preparation. The final diagnostic consumes that failure after one attempt and preserves the ordinary HR cooldown. This correction is separate from the watch's ATT rejection.
+
+Protocol references (wire facts, independently implemented diagnostics):
+
+- Gadgetbridge protocol description: https://gadgetbridge.org/internals/specifics/garmin-protocol/
+- Gadgetbridge CommunicatorV2 at edbea98cbe1377001c0b8154ac20cb930e1db7f6, service registration 6 and real-time HR payload description.
+- RRYZ09/garmin-ble-mcp `hr_reader.py`: legacy notify initialization before standard HR subscription; tested there on Vivoactive 5, not evidence for this Fenix.
+
 ## Reference code
 
 - UBox touch calibration/pins: `mpuchara/HA_UBOX_bridge` at `7f1f165`.
