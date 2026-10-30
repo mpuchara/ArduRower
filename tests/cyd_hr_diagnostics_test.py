@@ -57,6 +57,9 @@ for marker in (
 ):
     assert marker in hr,marker
 assert 'NimBLEDevice::setOwnAddrType(' not in hr, "Do not mutate global FTMS address type"
+assert 'while(!hrScanDone && (uint32_t)(millis()-began)<3400)' in hr
+assert 'while(!hrConnectDone && (uint32_t)(millis()-connStarted)<8000)' in hr
+assert '&& deviceConnected)' not in hr[hr.index('static bool scanAndConnectHr()'):hr.index('static void hrWorker(void *)')]
 assert 'ble_gap_terminate(hrFtmsHandle,' not in hr, "Never terminate Garmin FTMS ACL"
 assert 'ble_gap_connect(BLE_OWN_ADDR_RANDOM,&peer' not in hr
 assert 'NimBLEDevice::createClient(' not in hr
