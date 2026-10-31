@@ -1,5 +1,7 @@
 # Bluetooth: stan testów COM6, 30.10.2026
 
+**Zmiana zakresu po tych testach:** użytkownik potwierdził odbiór danych na starym polu, a następnie zlecił własne pole z instalacją USB. Nowa ścieżka 0.09.23 jest opisana w `connect_iq/README.md`: tętno wraca ze wspólnego połączenia przez prywatny zapis GATT. Poniższe wyniki dotyczą wcześniejszego wymagania zachowania starego pola.
+
 Firmware diagnostyczny 0.09.22, ESP32-D0WD-V3, Garmin fēnix 6X Pro Solar.
 Zachowujemy dotychczasowe pole Connect IQ, nazwę WR S4BL3 i format FTMS.
 Jednoczesne, świeże HR z TEGO zegarka i odbiór FTMS przez TO pole nie są jeszcze uruchomione.

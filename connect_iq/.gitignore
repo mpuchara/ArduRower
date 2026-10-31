@@ -1,0 +1,6 @@
+bin/
+*.prg
+*.debug.xml
+*.der
+*.pem
+*.settings.json

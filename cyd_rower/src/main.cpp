@@ -27,9 +27,10 @@ extern "C" bool bleInUse(void) { return true; }
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "GhostHeart.h"
+#include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.22";
+static constexpr const char *FIRMWARE_VERSION = "0.09.23";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -88,6 +89,9 @@ volatile uint32_t ftmsConnectedAtMs=0;
 volatile uint32_t ftmsDisconnectedAtMs=0;
 volatile uint16_t receivedHr=0;
 volatile uint32_t receivedHrAt=0;
+watchhr::Receiver watchHrReceiver;
+volatile uint32_t watchHrPackets=0;
+bool legacyHrDiagnostics=false;
 volatile bool hrConnected=false;
 volatile bool deviceConnected=false;
 bool hrTaskCreated=false;
@@ -213,6 +217,7 @@ uint8_t lastRaceSelection=255;
 class MyServerCallbacks : public NimBLEServerCallbacks {
  public:
   void onConnect(NimBLEServer *) override {
+    watchHrReceiver.reset();
     deviceConnected=true;
     ftmsConnectedAtMs=millis();
     Serial.printf("FTMS: CONNECTED at %lu, HR=%s, packets=%lu\n",
@@ -223,6 +228,8 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
     if(desc)onFtmsHandleReady(desc->conn_handle);
   }
   void onDisconnect(NimBLEServer *) override {
+    watchHrReceiver.reset();
+    if(!legacyHrDiagnostics){receivedHr=0;receivedHrAt=0;hrConnected=false;hrState=HrState::NoData;}
     deviceConnected=false;
     ftmsDisconnectedAtMs=millis();
     Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
@@ -246,12 +253,32 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
   }
 };
 
+class WatchHrCallbacks : public NimBLECharacteristicCallbacks {
+ public:
+  void onWrite(NimBLECharacteristic *c,ble_gap_conn_desc *d) override {
+    if(!d || !deviceConnected || d->conn_handle!=hrFtmsHandle)return;
+    const auto value=c->getValue();uint16_t bpm=0;
+    if(!watchHrReceiver.accept(reinterpret_cast<const uint8_t*>(value.data()),value.size(),bpm)) {
+      Serial.printf("WATCH HR: rejected frame length=%u acl=%u\n",(unsigned)value.size(),d->conn_handle);
+      return;
+    }
+    ++watchHrPackets;
+    receivedHr=bpm;receivedHrAt=bpm?millis():0;hrConnected=bpm!=0;
+    hrState=bpm?HrState::Receiving:HrState::NoData;
+    if(bpm)++hrNotifyPackets;
+    if(watchHrPackets<=5 || watchHrPackets%10==0)
+      Serial.printf("WATCH HR: packet=%lu seq=%u bpm=%u acl=%u FTMSsent=%lu\n",
+        (unsigned long)watchHrPackets,watchHrReceiver.sequence,bpm,d->conn_handle,(unsigned long)ftmsTxComplete);
+  }
+};
+
 void initBLE() {
   Serial.print(F("Init BLE:"));
   bool extendedHrTest=false;
   Preferences testPrefs;
   if(testPrefs.begin("rower-test",false)) {
     extendedHrTest=testPrefs.getBool("hrfirst",false);
+    legacyHrDiagnostics=extendedHrTest;
     hrSharedRandomTest=testPrefs.getBool("same",false);
     hrPublicSessionTest=testPrefs.getBool("public",false) || hrSharedRandomTest;
     hrFreshPrivateTest=testPrefs.getBool("fresh",false);
@@ -261,7 +288,7 @@ void initBLE() {
   NimBLEDevice::init(BLE_SERVICE_NAME);
   // HCI Set Random Address is forbidden once advertising/scanning starts.
   // Configure the independent central identity before PUBLIC FTMS advertising.
-  configureHrRandomIdentity();
+  if(legacyHrDiagnostics)configureHrRandomIdentity();
   NimBLEDevice::setCustomGapHandler(onHrGapEvent);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -287,6 +314,9 @@ void initBLE() {
   pStCharacteristic = pService->createCharacteristic(
       NimBLEUUID((uint16_t)FitnessMachineStatus),
       NIMBLE_PROPERTY::NOTIFY);
+  NimBLECharacteristic *watchHrValue=pService->createCharacteristic(
+    NimBLEUUID(watchhr::kMeasurement),NIMBLE_PROPERTY::WRITE);
+  watchHrValue->setCallbacks(new WatchHrCallbacks());
   pService->start();
   pBatteryService->start();
   NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
@@ -1343,7 +1373,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.22 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.23 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1386,11 +1416,12 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
   // Experimental second BLE identity. Keep PUBLIC FTMS unaffected on low heap.
   const uint32_t beforeHr=ESP.getFreeHeap();
-  if(beforeHr>40000)
+  if(legacyHrDiagnostics && beforeHr>40000)
     hrTaskCreated=xTaskCreatePinnedToCore(hrWorker,"hr-recv",4096,
                                          nullptr,1,nullptr,0)==pdPASS;
   if(!hrTaskCreated)
-    hrState=(beforeHr<=40000)?HrState::LowMemory:HrState::InitFailed;
+    hrState=legacyHrDiagnostics?((beforeHr<=40000)?HrState::LowMemory:HrState::InitFailed):HrState::NoData;
+  if(!legacyHrDiagnostics)Serial.println("WATCH HR: Connect IQ return channel ready; no HR central/scanning worker");
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));

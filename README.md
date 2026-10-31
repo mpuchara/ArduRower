@@ -1,10 +1,14 @@
 # ArduRower
 
+## Garmin: FTMS i tętno na jednym połączeniu
+
+Firmware CYD **0.09.23** i własne pole **ArduRower HR 015** odbierają dane wioślarskie na zegarku i odsyłają aktualne tętno do ESP32 przez tę samą sesję BLE. Jednoczesne aktualizowanie obu kierunków zostało potwierdzone fizycznie z fēnixem 6X Pro Solar. Pole 0.1.5 dodaje dopasowanie do motywu aktywności i małą czcionkę w układzie zależnym od wymiarów pola. [Źródła, budowanie i instalacja USB](connect_iq/README.md), [wyniki weryfikacji](docs/GARMIN_HR_ACCEPTANCE.md).
+
 ## Instalator przez przeglądarkę — CYD ESP32-2432S028
 
 **[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).
 
-Jedyny aktywny profil: **ST7789 / GPIO21**, potwierdzony na docelowej płytce. Poprawka renderera eliminuje cykliczne `fillScreen()`, aktualizując tylko zmienione obszary za pomocą off-screen sprite. Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). **Dotychczasowa współpraca BLE z polem Garmin Connect IQ nie jest zmieniana.** Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
+Jedyny aktywny profil: **ST7789 / GPIO21**, potwierdzony na docelowej płytce. Poprawka renderera eliminuje cykliczne `fillScreen()`, aktualizując tylko zmienione obszary za pomocą off-screen sprite. Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). Format nadawanych danych FTMS jest zachowany; kanał zwrotny HR obsługuje własne pole opisane wyżej. Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
 
 ## Zmiana skali w v0.07
 

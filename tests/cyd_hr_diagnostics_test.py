@@ -15,8 +15,8 @@ hr=(p/"cyd_rower/src/SharedLinkHr.h").read_text()
 page=(p/"index.html").read_text()
 ini=(p/"cyd_rower/platformio.ini").read_text()
 for marker in (
-    'FIRMWARE_VERSION = "0.09.22"',
-    'ArduRower CYD v0.09.22',
+    'FIRMWARE_VERSION = "0.09.23"',
+    'ArduRower CYD v0.09.23',
     '#include "SharedLinkHr.h"',
     'NimBLEDevice::init(BLE_SERVICE_NAME)',
     'NimBLEDevice::createServer()',
@@ -64,7 +64,7 @@ assert 'ble_gap_terminate(hrFtmsHandle,' not in hr, "Never terminate Garmin FTMS
 assert 'ble_gap_connect(BLE_OWN_ADDR_RANDOM,&peer' not in hr
 assert 'NimBLEDevice::createClient(' not in hr
 assert 'h2zero/NimBLE-Arduino@1.4.3' in ini
-assert "const EXPECTED_PREFIX = '0.09.22-ble-coexist-'" in page
+assert "const EXPECTED_PREFIX = '0.09.23-ble-coexist-'" in page
 assert 'extern "C" bool btInUse(void) { return true; }' in src
 assert 'extern "C" bool bleInUse(void) { return true; }' in src
 for required in (
@@ -84,7 +84,7 @@ assert 'if(!deviceConnected || hrClientHandle!=handle)return false;' not in hr
 assert 'ble_gap_terminate(hrFtmsHandle,' not in hr
 print("PASS: safe dual BLE identity, HR-first bootstrap, FTMS priority, per-session BPM timeout")
 
-assert src.index('  configureHrRandomIdentity();') < src.index('const bool advertisingStarted=pAdvertising->start();')
+assert src.index('if(legacyHrDiagnostics)configureHrRandomIdentity();') < src.index('const bool advertisingStarted=pAdvertising->start();')
 assert src.index('if(scanAndConnectHr())') < src.index('const bool advertisingStarted=pAdvertising->start();')
 assert hr.index('hrPacketsAtSubscription=hrNotifyPackets',hr.index('setHrState(HrState::Subscribing')) < hr.index('rc=ble_gattc_write_flat')
 assert 'BLE_GAP_EVENT_NOTIFY_TX' in hr and 'ftmsTxComplete' in src

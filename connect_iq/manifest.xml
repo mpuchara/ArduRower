@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+  <iq:application id="a681ec0b07524e0dadd096027ee291b1" type="datafield" name="@Strings.AppName" entry="ArduRowerApp" launcherIcon="@Drawables.LauncherIcon" minSdkVersion="3.1.0" version="0.1.5">
+    <iq:products><iq:product id="fenix6xpro"/></iq:products>
+    <iq:permissions><iq:uses-permission id="BluetoothLowEnergy"/><iq:uses-permission id="FitContributor"/></iq:permissions>
+    <iq:languages><iq:language>eng</iq:language><iq:language>pol</iq:language></iq:languages>
+    <iq:barrels/>
+  </iq:application>
+</iq:manifest>
