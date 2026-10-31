@@ -30,11 +30,12 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.24";
+static constexpr const char *FIRMWARE_VERSION = "0.09.25";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
-static constexpr uint8_t DEFAULT_ROTATION = 3; // working HA_UBOX_bridge landscape
+static constexpr uint8_t DEFAULT_ROTATION = 1; // 180 degrees from the previously accepted landscape (3)
+static constexpr uint8_t LEGACY_TOUCH_ROTATION = 3;
 static constexpr uint32_t DISPLAY_INTERVAL_MS = 500;
 static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
@@ -643,7 +644,7 @@ void readTouchCalibration() {
       touchA=p.getFloat("tc_a",0);touchB=p.getFloat("tc_b",0);
       touchC=p.getFloat("tc_c",0);touchD=p.getFloat("tc_d",0);
       touchE=p.getFloat("tc_e",0);touchF=p.getFloat("tc_f",0);
-      touchRotation=p.getUChar("tc_rot",DEFAULT_ROTATION);
+      touchRotation=p.getUChar("tc_rot",LEGACY_TOUCH_ROTATION);
       touchCalibrated=isfinite(touchA)&&isfinite(touchB)&&
         isfinite(touchC)&&isfinite(touchD)&&isfinite(touchE)&&isfinite(touchF) &&
         (fabsf(touchA)+fabsf(touchB)>.01f) &&
@@ -756,6 +757,7 @@ void touchTap(int16_t rx,int16_t ry) {
     // THAT row, not cycle all distances. Do not start a calibration wizard.
     x=160;
     y=constrain((int)((4095L-(long)rx)*240L/4095L),0,239);
+    if(DEFAULT_ROTATION!=LEGACY_TOUCH_ROTATION){x=319-x;y=239-y;}
     Serial.printf("GHOST: uncalibrated tap raw=%d,%d screenY~%d\n",
                   (int)rx,(int)ry,(int)y);
   }
@@ -1413,7 +1415,7 @@ void initDisplay() {
   pinMode(BACKLIGHT_PIN, OUTPUT);
   digitalWrite(BACKLIGHT_PIN, HIGH);
   tft.init();
-  tft.setRotation(DEFAULT_ROTATION); // 320x240; no software x/y remap
+  tft.setRotation(DEFAULT_ROTATION); // 320x240, with saved touch orientation remapped separately
   digitalWrite(BACKLIGHT_PIN, HIGH);
   // Full brightness is deliberate here. Avoid core-2.x vs core-3.x LEDC API
   // differences until manual brightness adjustment is explicitly added.
@@ -1444,7 +1446,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.24 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.25 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);

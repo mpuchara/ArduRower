@@ -6,6 +6,8 @@ Firmware CYD **0.09.23** i własne pole **ArduRower HR 015** odbierają dane wio
 
 Firmware CYD **0.09.24** dodaje złoty puchar i medale za pokonanie ducha, dotykowe opcje wyjścia oraz wspólną automatyczną pauzę treningu i ducha. [Obsługa, zasady rekordów i weryfikacja](docs/GHOST_0.09.24.md).
 
+Firmware CYD **0.09.25** obraca ekran o 180° względem poprzedniej orientacji (TFT rotation 3 → 1). Zachowuje zapisane współczynniki kalibracji i przelicza współrzędne dotyku; nowa kalibracja jest zapisywana już dla orientacji 1. Rekordy i medale pozostają zgodne z 0.09.24.
+
 ## Instalator przez przeglądarkę — CYD ESP32-2432S028
 
 **[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).
