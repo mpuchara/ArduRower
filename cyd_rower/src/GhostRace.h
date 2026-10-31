@@ -1,6 +1,6 @@
 #pragma once
 // Deterministic race/ghost logic: no Arduino headers, BLE or display dependencies.
-// Replay is time-based, including all pauses; rowing distance remains an estimate.
+// Replay uses the caller's active training clock; auto-pauses stop both racers.
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -11,7 +11,7 @@ namespace ghostrace {
 static constexpr uint16_t kIntervalMs = 2000;
 static constexpr uint16_t kSamples = 1024; // 34m 8s; 0.1m encoded as uint16
 static constexpr uint32_t kMagic = 0x47525731UL; // GRW1
-static constexpr uint16_t kVersion = 2; // new movement model: incompatible with previous pulse distances
+static constexpr uint16_t kVersion = 3; // active-time races; wall-clock v2 records stay separate in NVS
 static const uint32_t kScaleMilli = 700; // default CYD motion calibration
 
 struct Record {
@@ -144,6 +144,9 @@ class Race {
     // Positive = athlete reached the same distance faster than the ghost.
     return elapsedAtDistance(best, meters) - elapsed(nowMs);
   }
+  bool beatGhost() const {
+    return phase==Phase::Finished && hasBest && personalBest && !overflow;
+  }
 
   // Call on every loop tick, *after* sensor pulses have been processed.
   // The caller supplies a nonnegative distance from the race start.
@@ -153,8 +156,8 @@ class Race {
     const uint32_t ms = nowMs - startMs;
     if (isfinite(distance) && distance > meters)
       meters = distance < targetMeters ? distance : (float)targetMeters;
-    // Keep ghost track sampled even while the user is stopped, without
-    // using metrics.seconds() (which pauses after five seconds).
+    // The supplied clock is frozen during auto-pause. Slow/no movement
+    // inside the five-second coast window remains represented in the record.
     while (attempt.count < kSamples &&
            static_cast<uint32_t>(attempt.count) * kIntervalMs <= ms) {
       const float dm = meters * 10;

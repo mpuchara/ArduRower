@@ -45,7 +45,13 @@ class Engine {
     if(!duration || duration>0x7fffffffUL)return;
     // Cap a single integration window; after long sleep the speed should
     // decay rather than produce an enormous phantom distance.
-    float dt=(duration>250000 ? 250000 : duration)/1000000.0f;
+    uint32_t integrate=duration>250000?250000:duration;
+    if(started) {
+      const uint32_t age=lastTickUs-lastPulseUs;
+      const uint32_t remaining=age<5000000UL?5000000UL-age:0;
+      if(integrate>remaining)integrate=remaining;
+    }
+    float dt=integrate/1000000.0f;
     if(started) {
       const uint32_t idle=nowUs-lastPulseUs;
       const float tau=(phase==Phase::Drive && idle<160000) ? 8.0f : 2.8f;

@@ -20,6 +20,7 @@ int main() {
     if(first.advance(1000+n*1000, n*4.0f)) improved=true;
   assert(improved && first.personalBest);
   assert(first.phase==Phase::Finished && first.endMs==125000);
+  assert(!first.beatGhost()); // a first record has no opponent to defeat
   assert(valid(first.attempt,500));
   Record best=first.attempt;
   assert(best.count>=60);
@@ -40,11 +41,17 @@ int main() {
   assert(near(second.timeLeadMs(60000),-10000.0f,1000.0f));
   assert(!second.advance(150000,500.0f));
   assert(!second.personalBest && second.phase==Phase::Finished);
+  assert(!second.beatGhost());
   Race winner;
   winner.arm(500,&best);
   winner.start(0);
   assert(winner.advance(99000,500));
   assert(winner.personalBest && valid(winner.attempt,500));
+  assert(winner.beatGhost());
+  Race tie;tie.arm(500,&best);tie.start(0);
+  assert(!tie.advance(best.finishMs,500) && !tie.beatGhost());
+  Record legacy=best;legacy.version=2;legacy.checksum=hashRecord(legacy);
+  assert(!valid(legacy,500)); // wall-clock PB must not be compared with active time
   // Idle intervals must be present in the ghost trajectory.
   Race pause;
   pause.arm(1000,nullptr);

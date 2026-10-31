@@ -4,6 +4,8 @@
 
 Firmware CYD **0.09.23** i własne pole **ArduRower HR 015** odbierają dane wioślarskie na zegarku i odsyłają aktualne tętno do ESP32 przez tę samą sesję BLE. Jednoczesne aktualizowanie obu kierunków zostało potwierdzone fizycznie z fēnixem 6X Pro Solar. Pole 0.1.5 dodaje dopasowanie do motywu aktywności i małą czcionkę w układzie zależnym od wymiarów pola. [Źródła, budowanie i instalacja USB](connect_iq/README.md), [wyniki weryfikacji](docs/GARMIN_HR_ACCEPTANCE.md).
 
+Firmware CYD **0.09.24** dodaje złoty puchar i medale za pokonanie ducha, dotykowe opcje wyjścia oraz wspólną automatyczną pauzę treningu i ducha. [Obsługa, zasady rekordów i weryfikacja](docs/GHOST_0.09.24.md).
+
 ## Instalator przez przeglądarkę — CYD ESP32-2432S028
 
 **[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).

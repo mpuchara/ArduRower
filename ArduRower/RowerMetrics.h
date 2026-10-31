@@ -28,9 +28,9 @@ public:
                             uint32_t strokeCount, float cadenceSpm) {
     externalTelemetry=true;
     externalDistance=distanceMeters;
-    speed=speedMs;
+    speed=paused?0:speedMs;
     strokes=strokeCount;
-    strokeRate=cadenceSpm;
+    strokeRate=paused?0:cadenceSpm;
   }
 
   void reset(uint32_t now) {
@@ -46,6 +46,9 @@ public:
 
   void tick(uint32_t now) {
     const uint32_t dt = now - lastTick;
+    // Delayed ISR samples can predate the most recent loop tick. Never
+    // reinterpret that backward step as almost 72 minutes of exercise.
+    if(dt>0x7fffffffUL)return;
     if (started && !paused) {
       const uint32_t age = lastTick - lastPulse;
       uint32_t moving = age < PAUSE_AFTER_US ? PAUSE_AFTER_US - age : 0;

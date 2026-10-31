@@ -52,20 +52,21 @@
 
   <section class="card alert">
     <strong>Ważne przed wgraniem</strong>
-    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Zmiany w wersji 0.09.23 są zweryfikowane automatycznie, ale wymagają sprawdzenia na fizycznym CYD i Garminie.</div>
+    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Zmiany w wersji 0.09.24 są zweryfikowane automatycznie, ale wymagają sprawdzenia na fizycznym CYD i Garminie.</div>
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09.23 — HR-first / FTMS-first: eksperyment BLE</h2>
+    <h2>ArduRower 0.09.24 — duch, medale i automatyczna pauza</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice">Po uruchomieniu działa zwykły trening z polem TEMPO /500m. Dotknij ekranu, aby otworzyć wybór 500 / 1000 / 2000 m. Dopiero wybór dystansu włącza tryb ducha i pole różnicy dystansu. Po zmianie firmware może być potrzebna kalibracja trzech punktów.</p>
   </section>
 
   <section class="card">
-    <h2>0.09.23: prosty wybór ducha i diagnostyka Bluetooth</h2>
-    <p><b>Wybór ducha:</b> jedno dotknięcie zwykłego pulpitu otwiera 500 / 1000 / 2000 m. Dotknij całego wiersza, aby wybrać dystans. Przycisk WROC zamyka menu. KALIBRUJ ponawia kalibrację trzech punktów. Obsługa odbywa się ekranem.</p>
+    <h2>0.09.24: trening z duchem i powrót do zwykłego treningu</h2>
+    <p><b>Wybór ducha:</b> dotknij zwykłego pulpitu i wybierz 500 / 1000 / 2000 m. Przycisk „Zwykły trening — wyjdź” zamyka tryb ducha. Podczas wyścigu dotknięcie pulpitu otwiera opcje: kontynuuj, zmień dystans albo wróć do zwykłego treningu. Samo otwarcie opcji nie anuluje wyścigu.</p>
     <p><b>Wyścig:</b> pole tempa pokazuje różnicę dystansu w tym samym czasie od startu. Jasne linie pokazują bieżący trening, przygaszone w tle pokazują najlepszy ukończony przejazd danego dystansu. Starsze rekordy pozwalają odtworzyć prędkość; przebieg pulsu jest dostępny po zapisaniu nowego rekordu z HR. Brak pomiaru pozostaje przerwą na wykresie.</p>
-    <p><b>Bluetooth:</b> adres drugiej roli ustawiamy przed uruchomieniem reklamy FTMS, aby uniknąć błędu HCI 524. Przed pierwszą reklamą odbywa się jedna ograniczona czasowo próba połączenia z HR. Potem FTMS reklamuje się normalnie; działającego FTMS nie rozłączamy w celu ponowienia HR. Jeżeli HR blokuje dołączenie FTMS przez 30 s, odłączamy tylko HR.</p>
+    <p><b>Pauza i medale:</b> po 5 sekundach bez impulsów czas aktywny, dystans i duch zatrzymują się. Pierwszy prawidłowy ruch wznawia trening. Za pobicie istniejącego ducha otrzymasz złoty puchar i zapisany licznik medali dla danego dystansu. Pierwszy przejazd ustanawia rekord. Nowe rekordy czasu aktywnego są przechowywane osobno od starszych rekordów z czasem przerw.</p>
+    <p><b>Bluetooth:</b> własne pole ArduRower HR 015 odbiera FTMS i odsyła bieżące tętno aktywności przez to samo połączenie. Nie wymaga osobnego nadawania HR przez Garmin 180D.</p>
     <p><b>Weryfikacja:</b> log STATUS podaje osobno subskrypcję i wysłane powiadomienia FTMS oraz odebrane pakiety BPM. simultaneous=1 oznacza postęp obu strumieni w ostatnim oknie 10 s na ESP32. Odbiór danych i poprawne wskazania na Garminie wymagają sprawdzenia na zegarku. Samo połączenie lub zapis CCCD nie potwierdza odbioru pulsu.</p>
   </section>
   <section class="card">
@@ -74,7 +75,7 @@
       <li>Podłącz <b>micro-USB</b> do komputera, na którym działa Chrome lub Edge. Wybierz działający port COM (np. COM4, ale numer może być inny).</li>
       <li>Kliknij <b>Połącz i zainstaluj</b>. Firmware jest przeznaczony wyłącznie dla ST7789/GPIO21.</li>
       <li>Potwierdź port szeregowy, wybierz instalację i postępuj zgodnie z komunikatami. <b>Podczas aktualizacji nie wybieraj pełnego kasowania pamięci</b>, jeśli chcesz zachować rekordy wyścigów. Kasowanie flash usuwa także rekordy NVS.</li>
-      <li>Po wgraniu płytka powinna uruchomić dashboard ArduRower. Następnie sprawdź odbiór przez dotychczasowe pole Connect IQ w Garminie.</li>
+      <li>Po wgraniu płytka powinna uruchomić zwykły pulpit ArduRower. Następnie sprawdź współpracę z własnym polem ArduRower HR w Garminie.</li>
     </ol>
     <div id="install-ready" hidden>
       <div class="action">
@@ -90,7 +91,7 @@
       </esp-web-install-button>
     </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.23.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.23</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.24.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.24</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -109,7 +110,7 @@
   // Fail closed: an old manifest or cached BIN must NEVER be accepted as
   // the requested update. In particular GitHub Pages can briefly serve files
   // from different deployments while its CDN caches are being refreshed.
-  const EXPECTED_PREFIX = '0.09.23-ble-coexist-';
+  const EXPECTED_PREFIX = '0.09.24-ble-coexist-';
   const MANIFEST_PATH = './manifests/st7789-gpio21.json';
   async function checkedJSON(url) {
     const response = await fetch(url, {cache: 'no-store'});

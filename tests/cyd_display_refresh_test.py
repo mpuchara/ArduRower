@@ -38,7 +38,7 @@ assert "scratch.pushSprite(" in source
 assert "trendDrawn!=trendRevision" in source
 assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
-assert "ghost.start(now)" in source
+assert "ghost.start(0)" in source
 assert "saveBest(selectedDistance,ghost.attempt)" in source
 assert "previousValid[slot] && previousField[slot] == text" in source
 
