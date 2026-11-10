@@ -205,3 +205,10 @@ Wykrywacz faz zachowuje dotychczasowy próg dla wyraźnych, wolnych zwrotów, al
 ### Wykres autoskalowany (PR #15, v0.09.16)
 
 Wspólny wykres z ostatnich 10 minut dobiera **dwie niezależne osie pionowe**. Lewa skala BPM dopasowuje dolną i górną wartość z 10 BPM zapasu na każdą stronę; prawa skala prędkości zaczyna się od 0, a górna granica wynosi najbliższy pełny km/h powyżej maksimum z widocznych próbek. Nieobecny puls (0 w historii) nie obniża minimum BPM. Przy podglądzie treningu Ghost Race obie krzywe prędkości korzystają z tej samej skali, która uwzględnia również szybszego ducha. Na głównym wykresie górne wartości skali są opisane jednostkami, kompaktowy 28-pikselowy wykres wyścigu zachowuje dotychczasowy układ bez nakładanych podpisów. Nie zmieniono próbkowania, dystansu, SPM, FTMS ani zapisu rekordów. Rysowanie nadal wykorzystuje sprites i nie czyści pełnego ekranu przy odświeżeniu.
+
+
+## ArduRower 0.09.17 — ekran obrócony o 180° w 0.09.16
+
+Na zgłoszonej płytce CYD ST7789/GPIO21 obraz po instalacji 0.09.16 był do góry nogami. Wersja 0.09.17 domyślnie ustawia poziomą rotację TFT na **1** (o 180° względem wcześniejszej rotacji 3). Ponieważ nie mamy zewnętrznego pomiaru orientacji sprzętu, w menu **GHOST RACE → wybór dystansu** można dotknąć **OBROT 180** w lewym górnym rogu. Zmiana zapisuje `rower-display/rotation` (NVS) i restartuje firmware. Opcja nie uruchamia flashowania ani nie usuwa rekordów i ustawień.
+
+Współrzędne dotyku ze wcześniejszej kalibracji `rower-touch/tc_rot` (np. 3) są automatycznie przekształcane przez `319-x, 239-y`, jeśli aktualna orientacja różni się o 180°. Nowe kalibracje zapamiętują aktualną rotację. W menu nadal działa przycisk **KALIBRUJ**. Gdyby dotyk po zmianie orientacji był niewłaściwy, uruchom kalibrację dotyku. Wersja 0.09.17 zachowuje wszystkie poprawki prędkości, SPM, trendów i FTMS z 0.09.16.
