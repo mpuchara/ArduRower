@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.33
+# ArduRower CYD 0.09.34
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 

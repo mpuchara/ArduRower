@@ -47,3 +47,9 @@ Użytkownik potwierdził, że auto pauza działa prawidłowo w próbie 0.09.32.
 Bazowy krok dystansu podniesiono z 0,16 do 0,21 m na przyjęty odstęp, czyli o 31,25%. Przy zapisanym mnożniku 0,70 krok wynosi 0,147 m. Dla tych samych impulsów wcześniejsze około 7 km/h w spokojnej serii i 9 km/h w szybszej odpowiadają teraz około 9,2 i 11,8 km/h. To dobrana skala symulatora, a nie pomiar osiągów łodzi na wodzie. Ten sam krok wyznacza prędkość, dystans i tempo /500 m. Bezwładność oraz wznowienie po czterech impulsach pozostają zgodne z 0.09.32.
 
 Nowe wyniki, przebiegi tętna i medale zapisują się pod kluczami `g6_*`, `h6_*` i `w6_*`. Poprzednie rekordy i zapisany mnożnik kalibracji pozostają w NVS.
+
+## Skala końcowa w 0.09.34
+
+Po doprecyzowaniu celu do około 10 km/h dla spokojnej serii bazowy krok wynosi 0,23 m na przyjęty odstęp, czyli 0,161 m przy mnożniku 0,70. To około 9,5% więcej niż w 0.09.33. Dla tych samych impulsów, które wcześniej dawały 7 i 9 km/h w 0.09.32, odpowiada to około 10,1 i 12,9 km/h. Wartości są przeliczeniem wcześniejszej próby, a bezwładność oraz progi auto pauzy zachowują ustawienia z 0.09.32.
+
+Wyniki Ghost Race w tej skali używają kluczy `g7_*`, `h7_*` i `w7_*`. Starsze rekordy, medale i ustawiony mnożnik pozostają w NVS.

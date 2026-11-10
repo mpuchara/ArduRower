@@ -31,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.33";
+static constexpr const char *FIRMWARE_VERSION = "0.09.34";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -508,9 +508,9 @@ const uint16_t raceDistances[3] = {500, 1000, 2000};
 // Preserve wall-clock v2 records under their original keys. Active-clock
 // races use a separate version/key so rests never unfairly beat old records.
 // Preserve records from previous distance models in their original keys.
-const char *raceKeys[3] = {"g6_500", "g6_1000", "g6_2000"};
-const char *heartKeys[3] = {"h6_500", "h6_1000", "h6_2000"};
-const char *winKeys[3] = {"w6_500", "w6_1000", "w6_2000"};
+const char *raceKeys[3] = {"g7_500", "g7_1000", "g7_2000"};
+const char *heartKeys[3] = {"h7_500", "h7_1000", "h7_2000"};
+const char *winKeys[3] = {"w7_500", "w7_1000", "w7_2000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
@@ -1469,7 +1469,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.33 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.34 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);

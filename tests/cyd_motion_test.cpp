@@ -59,7 +59,7 @@ int main(){
     quicker.onPulse(quickerUs);
   }
   const float expectedDistance=400*Engine::kMetersPerPulse*Engine::kDefaultCalibration;
-  REQUIRE(fabsf(expectedDistance-58.8f)<0.001f); // default virtual scale, 0.147 m/interval
+  REQUIRE(fabsf(expectedDistance-64.4f)<0.001f); // default virtual scale, 0.161 m/interval
   REQUIRE(fabsf(steady.meters-expectedDistance)<0.001f);
   REQUIRE(steady.meters==quicker.meters);
   REQUIRE(quicker.speed>steady.speed*1.25f);
