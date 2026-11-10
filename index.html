@@ -52,12 +52,12 @@
 
   <section class="card alert">
     <strong>Ważne przed wgraniem</strong>
-    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Wersję 0.09.26 sprawdzono na fizycznym CYD w serii 10 szybkich ruchów i podczas wymiany danych z Garminem.</div>
+    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Po aktualizacji rekordy Ghost Race są liczone w nowej skali dystansu. Starsze rekordy pozostają w pamięci urządzenia.</div>
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09.26 — płynniejsza prędkość, szybkie ruchy i skala wykresu</h2>
-    <p>Wskazanie prędkości, wykres i tempo korzystają z wygładzonych danych. Wykres dopasowuje wysokość do bieżących próbek prędkości i pulsu, a przebieg ducha korzysta z tych samych skal.</p>
+    <h2>ArduRower 0.09.27 — prędkość i dystans z impulsów taśmy</h2>
+    <p>Prędkość, tempo i dystans wynikają z tych samych impulsów taśmy. Prędkość jest wygładzana. Wykres dopasowuje wysokość do bieżących próbek prędkości i pulsu, a przebieg ducha korzysta z tych samych skal.</p>
     <p><b>Orientacja:</b> ekran jest obrócony o 180° względem 0.09.24. Dotyk korzysta z dotychczasowej kalibracji, przeliczonej do nowej orientacji.</p>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice">Po uruchomieniu działa zwykły trening z polem TEMPO /500m. Dotknij ekranu, aby otworzyć wybór 500 / 1000 / 2000 m. Dopiero wybór dystansu włącza tryb ducha i pole różnicy dystansu. Po zmianie firmware może być potrzebna kalibracja trzech punktów.</p>
@@ -93,7 +93,7 @@
       </esp-web-install-button>
     </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.26.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.26</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.27.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.27</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -112,7 +112,7 @@
   // Fail closed: an old manifest or cached BIN must NEVER be accepted as
   // the requested update. In particular GitHub Pages can briefly serve files
   // from different deployments while its CDN caches are being refreshed.
-  const EXPECTED_PREFIX = '0.09.26-ble-coexist-';
+  const EXPECTED_PREFIX = '0.09.27-ble-coexist-';
   const MANIFEST_PATH = './manifests/st7789-gpio21.json';
   async function checkedJSON(url) {
     const response = await fetch(url, {cache: 'no-store'});

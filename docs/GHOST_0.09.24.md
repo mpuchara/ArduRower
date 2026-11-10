@@ -1,5 +1,7 @@
 # Duch, nagroda i automatyczna pauza: 0.09.24
 
+> Od 0.09.27 trening korzysta z [nowego pomiaru dystansu](PULSE_DISTANCE_0.09.27.md). Rekordy, przebiegi tętna i medale sprzed tej wersji pozostają w NVS, a nowe wyniki tworzą oddzielny zestaw.
+
 ## Obsługa dotykiem
 
 - Normalny start nadal otwiera zwykły trening z polem TEMPO /500m.

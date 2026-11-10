@@ -10,18 +10,18 @@ namespace cydmotion {
 enum class Phase : uint8_t { Waiting, Drive, Return };
 class Engine {
  public:
-  static constexpr float kMetersPerDrivePulse = 0.14f; // provisional; NOT S4-calibrated
+  // Both directions contribute to the total pulse rate. The virtual
+  // distance per accepted interval is provisional, not S4-calibrated.
+  static constexpr float kMetersPerPulse = 0.14f;
   static constexpr float kDefaultCalibration = 0.70f;
-  // Low-pass the *reported* speed over approximately one rowing stroke.
-  // The flywheel model and integrated distance remain untouched.
-  static constexpr float kReportedSpeedTauSeconds = 2.5f;
+  static constexpr float kSpeedTauSeconds = 2.5f;
   static constexpr uint32_t kDeadTimeUs = 15000;
   static constexpr uint32_t kRearmGapUs = 1600000;
   static constexpr uint32_t kFastTurnMinGapUs = 36000;
   static constexpr uint32_t kFastPhaseMinUs = 160000;
   Phase phase=Phase::Waiting;
   uint32_t pulses=0, strokes=0, transitions=0;
-  float speed=0, reportedSpeed=0, meters=0, spm=0, calibration=kDefaultCalibration;
+  float speed=0, meters=0, spm=0, calibration=kDefaultCalibration;
   uint16_t phasePulses=0;
   uint32_t phaseStartUs=0, lastPulseUs=0, lastTickUs=0, lastStrokeUs=0;
   float averageGapUs=0;
@@ -35,7 +35,7 @@ class Engine {
   void reset(uint32_t nowUs) {
     phase=Phase::Waiting;
     pulses=strokes=transitions=0;
-    speed=reportedSpeed=meters=spm=0;
+    speed=meters=spm=0;
     phasePulses=0;
     phaseStartUs=lastPulseUs=lastTickUs=nowUs;
     lastStrokeUs=0;
@@ -56,33 +56,10 @@ class Engine {
     // Queued ISR timestamps can predate a recent loop tick if BLE/TFT work
     // delayed processing. Never mistake a stale sample for a 71-minute gap.
     if(!duration || duration>0x7fffffffUL)return;
-    // Cap a single integration window; after long sleep the speed should
-    // decay rather than produce an enormous phantom distance.
-    uint32_t integrate=duration>250000?250000:duration;
-    if(started) {
-      const uint32_t age=lastTickUs-lastPulseUs;
-      const uint32_t remaining=age<5000000UL?5000000UL-age:0;
-      if(integrate>remaining)integrate=remaining;
-    }
-    float dt=integrate/1000000.0f;
-    if(started) {
-      const uint32_t idle=nowUs-lastPulseUs;
-      const float tau=(phase==Phase::Drive && idle<160000) ? 8.0f : 2.8f;
-      const float decay=expf(-dt/tau);
-      const float newSpeed=speed*decay;
-      const float meanSpeed=(speed+newSpeed)*0.5f;
-      meters += meanSpeed*dt;
-      // Smooth the physical-model estimate for UI/FTMS without feeding the
-      // filtered value back into the flywheel or distance integrator.
-      // Time-aware alpha keeps output stable across TFT/BLE loop jitter.
-      const float alpha=1.0f-expf(-dt/kReportedSpeedTauSeconds);
-      reportedSpeed += alpha*(meanSpeed-reportedSpeed);
-      speed=newSpeed;
-      if(idle>=5000000) {
-        speed=0;
-        reportedSpeed=0;
-        spm=0;
-      }
+    if(started && nowUs-lastPulseUs>=5000000UL) {
+      speed=spm=0;
+    } else if(speed>0) {
+      speed*=expf(-(duration/1000000.0f)/kSpeedTauSeconds);
     }
     lastTickUs=nowUs;
   }
@@ -162,14 +139,11 @@ class Engine {
     previousGapsUs[gapIndex]=gap;
     gapIndex=(gapIndex+1)&3;
     if(gapCount<4)++gapCount;
-    if(phase==Phase::Drive && gap<240000) {
-      // Only driving pulses add energy. Reverse/return pulses never
-      // accelerate the virtual flywheel. Virtual speed continues through
-      // return with exponential water-drag decay.
-      const float target=fminf(7.5f,(kMetersPerDrivePulse*calibration)/
-                                      (gap/1000000.0f));
-      speed=fminf(7.5f,speed*0.83f+target*0.17f);
-    }
+    // Feed each measured distance interval into the time-based speed
+    // filter. Its average is distance/time even with uneven magnet gaps.
+    const float step=kMetersPerPulse*calibration;
+    meters+=step;
+    speed+=step/kSpeedTauSeconds;
   }
 };
 } // namespace cydmotion

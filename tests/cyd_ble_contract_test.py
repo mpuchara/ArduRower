@@ -2,7 +2,7 @@
 """Guard the previously working Garmin Connect IQ / FTMS wire contract.
 
 This is a source-level regression guard, NOT a substitute for testing with the
-actual fēnix 6X and field already installed on that watch.
+actual fÄ“nix 6X and field already installed on that watch.
 """
 from pathlib import Path
 import re
@@ -64,7 +64,7 @@ new_encoder = new_encoder.replace("const float pace=reportedPace();", "").replac
     pace_field, "put16(data, offset, metrics.pace() > 0 ? bounded16(metrics.pace()) : 0xffff);"
 )
 assert normalize(old_encoder) == normalize(new_encoder), "Rowing Data payload changed"
-assert "500.0f / motion.reportedSpeed" in method(CYD, "reportedPace")
+assert "500.0f / motion.speed" in method(CYD, "reportedPace")
 assert "formatPace(reportedPace())" in CYD
 
 # Preserve the BLE advertising bytes and the set of FTMS characteristics.

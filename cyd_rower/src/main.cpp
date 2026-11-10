@@ -31,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.26";
+static constexpr const char *FIRMWARE_VERSION = "0.09.27";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -416,8 +416,8 @@ void put16(uint8_t *data, uint8_t &offset, uint16_t value) {
   data[offset++] = value >> 8;
 }
 float reportedPace() {
-  return motion.reportedSpeed > 0.05f && !metrics.paused ?
-         500.0f / motion.reportedSpeed : 0;
+  return motion.speed > 0.05f && !metrics.paused ?
+         500.0f / motion.speed : 0;
 }
 void setCxRowerData() {
   // Byte format and flag semantics copied from the working ArduRower v0.07.
@@ -499,9 +499,10 @@ void renderRaceUI();
 const uint16_t raceDistances[3] = {500, 1000, 2000};
 // Preserve wall-clock v2 records under their original keys. Active-clock
 // races use a separate version/key so rests never unfairly beat old records.
-const char *raceKeys[3] = {"g3_500", "g3_1000", "g3_2000"};
-const char *heartKeys[3] = {"h3_500", "h3_1000", "h3_2000"};
-const char *winKeys[3] = {"w3_500", "w3_1000", "w3_2000"};
+// Keep flywheel-model records in their original NVS keys.
+const char *raceKeys[3] = {"g4_500", "g4_1000", "g4_2000"};
+const char *heartKeys[3] = {"h4_500", "h4_1000", "h4_2000"};
+const char *winKeys[3] = {"w4_500", "w4_1000", "w4_2000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
@@ -884,7 +885,7 @@ uint16_t speedTenths(float kmh) {
   return static_cast<uint16_t>(lroundf(constrain(kmh*10.0f,0.0f,600.0f)));
 }
 void recordTrend(uint32_t now) {
-  trends[trendHead]={speedTenths(motion.reportedSpeed*3.6f),
+  trends[trendHead]={speedTenths(motion.speed*3.6f),
                      static_cast<uint8_t>(liveHr(now)),0};
   trendHead=(trendHead+1)%TREND_SAMPLES;
   if(trendCount<TREND_SAMPLES)++trendCount;
@@ -894,7 +895,7 @@ const TrendPoint &trendAt(uint16_t i) {
   return trends[(trendHead+TREND_SAMPLES-trendCount+i)%TREND_SAMPLES];
 }
 void recordHistory() {
-  history[historyHead] = {(float)liveHr(millis()), motion.reportedSpeed * 3.6f};
+  history[historyHead] = {(float)liveHr(millis()), motion.speed * 3.6f};
   historyHead = (historyHead + 1) % HISTORY_LENGTH;
   if (historyCount < HISTORY_LENGTH) ++historyCount;
   ++historyRevision;
@@ -952,7 +953,7 @@ void cardValue(uint8_t slot, int x, bool power) {
     Serial.printf("UI cardValue: invalid slot %u\n", (unsigned)slot);
     return;
   }
-  const float val = power ? metrics.equivalentPower() : motion.reportedSpeed * 3.6f;
+  const float val = power ? metrics.equivalentPower() : motion.speed * 3.6f;
   const String txt = power ? "~" + String((int)roundf(val)) : String(val, 1);
   if (previousValid[slot] && previousField[slot] == txt) return;
   previousValid[slot] = true; previousField[slot] = txt;
@@ -1176,7 +1177,7 @@ void updateUI() {
     const uint16_t bpm=liveHr(millis());
     textPatch(2,8,49,145,34,bpm?String(bpm)+" BPM":"-- BPM",
               heartColor,backgroundColor,4);
-    textPatch(3,164,49,149,34,String(motion.reportedSpeed*3.6f,1)+" km/h",
+    textPatch(3,164,49,149,34,String(motion.speed*3.6f,1)+" km/h",
               speedColor,backgroundColor,4);
     textPatch(4,8,166,102,26,formatTime((uint32_t)metrics.seconds()),
               whiteColor,backgroundColor,4);
@@ -1409,7 +1410,7 @@ void renderRaceUI() {
             liveHr(millis())?String(liveHr(millis()))+" BPM":"-- BPM",
             heartColor,backgroundColor,4);
   textPatch(17,165,149,148,25,
-            String(motion.reportedSpeed*3.6f,1)+" km/h",
+            String(motion.speed*3.6f,1)+" km/h",
             speedColor,backgroundColor,4);
   textPatch(18,180,2,83,20,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
@@ -1460,7 +1461,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.26 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.27 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1619,13 +1620,13 @@ void loop() {
     const TS_Point pt=touch.getPoint();
     const bool simultaneous=liveHr(now)>0 && ftmsSubscribed &&
       hrNotifyPackets!=lastStatusHr && ftmsTxComplete!=lastStatusTx;
-    Serial.printf("STATUS: FTMS=%d subscribed=%d queued=%lu sent=%lu HR=%u packets=%lu simultaneous=%d touch=%d,%d,z%d irq=%d cal=%d heap=%u activeMs=%lu paused=%d meters=%.1f ghostMs=%lu\n",
+    Serial.printf("STATUS: FTMS=%d subscribed=%d queued=%lu sent=%lu HR=%u packets=%lu simultaneous=%d touch=%d,%d,z%d irq=%d cal=%d heap=%u activeMs=%lu paused=%d meters=%.1f ghostMs=%lu kmh=%.2f\n",
       deviceConnected?1:0,ftmsSubscribed?1:0,(unsigned long)ftmsNotifications,
       (unsigned long)ftmsTxComplete,(unsigned)liveHr(now),
       (unsigned long)hrNotifyPackets,simultaneous?1:0,
       pt.x,pt.y,pt.z,digitalRead(36),touchCalibrated?1:0,(unsigned)ESP.getFreeHeap(),
       (unsigned long)raceClockMs(),metrics.paused?1:0,metrics.distance(),
-      (unsigned long)ghost.elapsed(raceClockMs()));
+      (unsigned long)ghost.elapsed(raceClockMs()),motion.speed*3.6f);
     lastStatus=now;lastStatusHr=hrNotifyPackets;lastStatusTx=ftmsTxComplete;
   }
   bleDuty.onFtms(deviceConnected,now);

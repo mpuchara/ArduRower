@@ -18,16 +18,13 @@ int main(){
   REQUIRE(e.transitions>=56);
   REQUIRE(e.meters>40 && e.meters<270);
   REQUIRE(e.speed>=0 && e.speed<7.5);
-  REQUIRE(e.reportedSpeed>=0 && e.reportedSpeed<7.5);
   printf("30 cycles detected %u; phase transitions %u; distance %.1fm; speed %.2fm/s\n",
         e.strokes,e.transitions,e.meters,e.speed);
   const float slowMeanSpeed=e.meters*1000000.0f/(now-100000);
   const float before=e.meters;
   now+=6000000;e.tick(now);
   REQUIRE(e.speed==0);
-  REQUIRE(e.reportedSpeed==0);
-  REQUIRE(e.meters>=before);
-  REQUIRE(e.meters<before+3.0f);
+  REQUIRE(e.meters==before);
   REQUIRE(e.spm==0);
   // A lone pulse after a rest never counts an extra stroke.
   const uint32_t strokeCount=e.strokes;
@@ -45,29 +42,33 @@ int main(){
   // Synthetic pulses keep the algorithm working across 32-bit micros wrap.
   e.reset(0xfffffff0UL);
   e.onPulse(0x0000c350UL);
-  REQUIRE(e.pulses==1 && isfinite(e.speed) && isfinite(e.reportedSpeed));
-  // Alternating 11/3 km/h raw readings each second must yield a much less
-  // jagged reported reading; this must not change the stroke detector.
-  e.reset(0);
-  e.onPulse(100000);
-  uint32_t wobbleUs=100000;
-  float filteredMin=100.0f,filteredMax=0.0f;
+  REQUIRE(e.pulses==1 && isfinite(e.speed));
+  // Same reel travel with uneven magnet gaps. Compress the timeline
+  // without changing pulse count. Faster travel must give faster pace
+  // and exactly the same distance for the same physical movement.
+  Engine steady, quicker;
+  uint32_t steadyUs=100000, quickerUs=100000;
+  steady.onPulse(steadyUs);
+  quicker.onPulse(quickerUs);
+  const uint32_t unevenGaps[] = {36000, 138000, 38000, 112000};
   for(int i=0;i<400;++i) {
-    e.lastPulseUs=wobbleUs; // keep this test focused on the speed filter
-    e.speed=((i/10)%2==0?11.0f:3.0f)/3.6f;
-    wobbleUs+=100000;
-    e.tick(wobbleUs);
-    if(i>=200) {
-      if(e.reportedSpeed<filteredMin)filteredMin=e.reportedSpeed;
-      if(e.reportedSpeed>filteredMax)filteredMax=e.reportedSpeed;
-    }
+    const uint32_t gap=unevenGaps[i%4];
+    steadyUs+=gap;
+    quickerUs+=gap*3/4;
+    steady.onPulse(steadyUs);
+    quicker.onPulse(quickerUs);
   }
-  const float filteredSwingKmh=(filteredMax-filteredMin)*3.6f;
-  REQUIRE(filteredSwingKmh>1.0f && filteredSwingKmh<2.0f);
-  printf("Speed filter: 8.0 km/h raw swing -> %.2f km/h reported swing\n",filteredSwingKmh);
-  REQUIRE(e.strokes==0);
-  e.tick(wobbleUs+6000000);
-  REQUIRE(e.reportedSpeed==0);
+  const float expectedDistance=400*Engine::kMetersPerPulse*Engine::kDefaultCalibration;
+  REQUIRE(fabsf(steady.meters-expectedDistance)<0.001f);
+  REQUIRE(steady.meters==quicker.meters);
+  REQUIRE(quicker.speed>steady.speed*1.25f);
+  REQUIRE(500.0f/quicker.speed<500.0f/steady.speed);
+  quicker.onPulse(quickerUs+5000); // contact bounce
+  REQUIRE(quicker.meters==steady.meters);
+  quicker.tick(quickerUs+5000000);
+  REQUIRE(quicker.speed==0 && quicker.meters==steady.meters);
+  quicker.onPulse(quickerUs+6000000);
+  REQUIRE(quicker.meters==steady.meters); // interval across a rest
   // Short 50-70ms reversals during fast strokes were previously rejected
   // by the fixed 105ms / 320ms gates; this caused ~half the strokes to vanish.
   e.reset(0);
