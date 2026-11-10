@@ -52,13 +52,20 @@ assert "const bool SEND_EQUIVALENT_POWER = false" in OLD
 assert "SEND_EQUIVALENT_POWER = false" in CYD
 assert "../../ArduRower/RowerMetrics.h" in CYD
 
-# Every FTMS data payload field remains a byte-for-byte equivalent expression.
+# Preserve each wire field. Only the source of instantaneous pace changes.
 # Differences after setValue() are limited to the Battery Service (CYD has no
 # Heltec battery ADC; GPIO33 is touch CS).
 end_marker = "pDtCharacteristic->setValue(data, offset)"
 old_encoder = method(OLD, "setCxRowerData").split(end_marker)[0]
 new_encoder = method(CYD, "setCxRowerData").split(end_marker)[0]
+pace_field = "put16(data, offset, pace > 0 ? bounded16(pace) : 0xffff);"
+assert "const float pace=reportedPace();" in new_encoder and pace_field in new_encoder
+new_encoder = new_encoder.replace("const float pace=reportedPace();", "").replace(
+    pace_field, "put16(data, offset, metrics.pace() > 0 ? bounded16(metrics.pace()) : 0xffff);"
+)
 assert normalize(old_encoder) == normalize(new_encoder), "Rowing Data payload changed"
+assert "500.0f / motion.reportedSpeed" in method(CYD, "reportedPace")
+assert "formatPace(reportedPace())" in CYD
 
 # Preserve the BLE advertising bytes and the set of FTMS characteristics.
 for exact in (

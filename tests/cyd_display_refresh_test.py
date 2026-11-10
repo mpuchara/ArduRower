@@ -32,9 +32,17 @@ assert "tft.fillScreen(" in body("pageLayout")
 assert "tft.fillScreen(" in body("initDisplay")
 assert "tft.fillScreen(" in body("paintRaceLayout")
 assert "tft.fillScreen(backgroundColor);" in source
-for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "loop"):
+for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "renderSharedTrend", "loop"):
     assert "tft.fillScreen(" not in body(method), method
-assert "scratch.pushSprite(" in source
+assert "scratch.pushSprite(" in body("renderSharedTrend")
+trend = body("renderSharedTrend")
+assert "scale.speedY(sample.tenthKmh,height)" in trend
+assert "scale.speedY(replay.tenthKmh,height)" in trend
+assert "scale.includeSpeed(replay.tenthKmh)" in trend
+assert "scale.includeHeart(replay.heartBpm)" in trend
+assert "DEFAULT_ROTATION = 1;" in source and "LEGACY_TOUCH_ROTATION = 3;" in source
+assert "tft.setRotation(DEFAULT_ROTATION)" in source
+assert "if (touchRotation!=DEFAULT_ROTATION) {fx=319-fx;fy=239-fy;}" in source
 assert "trendDrawn!=trendRevision" in source
 assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
