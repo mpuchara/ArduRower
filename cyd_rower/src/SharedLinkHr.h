@@ -1,5 +1,5 @@
 #pragma once
-// Experimental HR link, strictly secondary to an established FTMS subscription.
+// Dual-identity BLE experiment for the same Garmin watch.
 // FTMS remains a public-address GAP peripheral. HR initiates as a separate
 // random-static-address GAP central via a BLE controller whitelist.
 // Using a whitelist bypasses NimBLE's peer-address-only duplicate ACL guard;
@@ -30,7 +30,6 @@ static volatile uint32_t hrLastSecondAclAttemptMs=0;
 static volatile bool hrSecondAclAttemptWasWithFtms=false;
 
 static volatile uint32_t hrSuspendAttemptsUntilMs=0;
-static volatile uint8_t hrAttemptsThisBoot=0; // bound experimental link attempts
 static volatile uint32_t hrConnectedAtMs=0;
 static volatile uint32_t hrPacketsAtSubscription=0;
 static volatile bool hrDisabledAfterFtmsDrop=false;
@@ -274,12 +273,9 @@ static int onHrCentralGapEvent(ble_gap_event *event,void *) {
   return 0;
 }
 static bool scanAndConnectHr() {
-  // Never compete with the field's FTMS discovery or 0x2AD1 subscription.
-  // A second ACL to the same Garmin is experimental and may be rejected.
-  if(hrDisabledAfterFtmsDrop ||
-     !cydble::FtmsHealth::canTryHr(millis(),deviceConnected,ftmsSubscribed,
-          ftmsSubscribedAtMs,ftmsNotifyAfterSubscribe,bleDuty.motionQuiet(millis())) ||
-     !configureHrRandomIdentity())return false;
+  // Bootstrap HR while the PUBLIC FTMS service is still advertising.
+  // On fēnix, the 180D advertisement may disappear after FTMS connects.
+  if(hrDisabledAfterFtmsDrop || !configureHrRandomIdentity())return false;
   Serial.printf("HR: attempt order=%s FTMS=%d ftmsACL=%u\n",
       deviceConnected?"FTMS_FIRST":"HR_FIRST",
       deviceConnected?1:0,(unsigned)hrFtmsHandle);
@@ -354,43 +350,33 @@ static bool scanAndConnectHr() {
 }
 
 static void hrWorker(void *) {
-  Serial.println("HR: 0.09.18 FTMS subscription FIRST, random HR only after confirmed streaming");
+  Serial.println("HR: coexist v0.09.15 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
   uint32_t lastReport=0,lastAttempt=0,connectedAt=0;
   uint8_t failures=0;
   while(true) {
     const uint32_t now=millis();
     const uint16_t h=hrClientHandle;
-    // FTMS discovery and data stream always take precedence over optional
-    // reverse HR. A connected ACL without 2AD1 CCCD is NOT a working link.
-    if(cydble::FtmsHealth::mustYieldHr(deviceConnected,ftmsSubscribed)) {
-      if(h!=HR_INVALID_HANDLE) {
-        Serial.println("HR: yielding HR ACL because FTMS subscription is absent");
-        ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM); // HR ONLY
-      }
-      if(hrState!=HrState::Paused)
-        setHrState(HrState::Paused,"Waiting for subscribed Garmin FTMS 0x2AD1");
-      vTaskDelay(pdMS_TO_TICKS(1000));continue;
-    }
+    // Preserve HR during the FTMS join attempt; never disconnect it just
+    // because Garmin has not connected as an FTMS central yet.
     if(hrDisabledAfterFtmsDrop) {
       if(h!=HR_INVALID_HANDLE)
         ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM); // HR ONLY
       if(hrState!=HrState::Paused)
-        setHrState(HrState::Paused,"HR circuit breaker; FTMS protected");
+        setHrState(HrState::Paused,"HR circuit breaker: preserve Garmin FTMS");
       vTaskDelay(pdMS_TO_TICKS(1500));continue;
     }
+    // If the watch cannot join FTMS while HR is connected, yield HR
+    // automatically after 30 seconds. Keep FTMS advertisement intact.
+    if(cydble::CoexistPolicy::shouldYieldHrForFtms(
+         now,hrConnectedAtMs,h!=HR_INVALID_HANDLE,deviceConnected)) {
+      Serial.println("HR: HR-first without FTMS for 30s; release HR ONLY to restore FTMS");
+      hrSuspendAttemptsUntilMs=now+cydble::CoexistPolicy::kRetryCooldownMs;
+      hrConnectedAtMs=0;
+      ble_gap_terminate(h,BLE_ERR_REM_USER_CONN_TERM);
+      vTaskDelay(pdMS_TO_TICKS(500));continue;
+    }
     if(h==HR_INVALID_HANDLE) {
-      if(!cydble::FtmsHealth::canTryHr(now,deviceConnected,ftmsSubscribed,
-             ftmsSubscribedAtMs,ftmsNotifyAfterSubscribe,bleDuty.motionQuiet(now))) {
-        if(hrState!=HrState::Paused)
-          setHrState(HrState::Paused,"FTMS first: waiting for stable 2AD1 notifications");
-        vTaskDelay(pdMS_TO_TICKS(750));continue;
-      }
-      if(hrAttemptsThisBoot>=2) {
-        if(hrState!=HrState::Paused)
-          setHrState(HrState::Paused,"HR attempts exhausted; FTMS remains working");
-        vTaskDelay(pdMS_TO_TICKS(1500));continue;
-      }
       if(cydble::CoexistPolicy::inRetryCooldown(
            now,hrSuspendAttemptsUntilMs)) {
         if(hrState!=HrState::Paused)
@@ -402,12 +388,11 @@ static void hrWorker(void *) {
           setHrState(HrState::Paused,"rowing: defer HR discovery to protect FTMS");
         vTaskDelay(pdMS_TO_TICKS(750));continue;
       }
-      const uint32_t backoff=120000UL; // isolate optional HR retries
+      const uint32_t backoff=failures>=3?120000UL:20000UL;
       if(lastAttempt && (uint32_t)(now-lastAttempt)<backoff) {
         vTaskDelay(pdMS_TO_TICKS(600));continue;
       }
       lastAttempt=now;
-      ++hrAttemptsThisBoot;
       if(scanAndConnectHr()) {
         failures=0;connectedAt=millis();processedEpoch=UINT32_MAX;
         hrConnectedAtMs=connectedAt;
@@ -422,8 +407,6 @@ static void hrWorker(void *) {
     }
     const uint32_t epoch=hrLinkEpoch;
     if(processedEpoch==epoch) {
-      // If Garmin disables notifications while HR is running, the top-level
-      // FTMS guard will tear down ONLY the HR ACL in the next loop.
       if(hrDualReady && hrNotifyPackets>hrPacketsAtSubscription &&
          !hrSavedWorkingPeer && hrCandidateAddressText.length()) {
         Preferences prefs;
