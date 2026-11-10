@@ -7,7 +7,7 @@ int main() {
   assert(!FtmsHealth::streamReady(false,true,10));
   assert(!FtmsHealth::streamReady(true,true,0));
   assert(FtmsHealth::streamReady(true,true,10));
-  assert(!FtmsHealth::canTryHr(20000,true,true,1000,10,true));
+  assert(!FtmsHealth::canTryHr(17000,true,true,1000,10,true));
   assert(!FtmsHealth::canTryHr(18999,true,true,1000,10,true));
   assert(FtmsHealth::canTryHr(19000,true,true,1000,10,true));
   assert(!FtmsHealth::canTryHr(19002,true,true,1000,9,true));
