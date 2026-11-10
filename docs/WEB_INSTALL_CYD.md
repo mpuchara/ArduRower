@@ -1,51 +1,24 @@
-# Wgrywanie ArduRower CYD przez GitHub Pages
+# Instalacja ArduRower CYD 0.09.26
 
-Instalator: **https://mpuchara.github.io/ArduRower/**
+[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/). Obsługiwany profil to **ESP32-2432S028 z ST7789 i podświetleniem GPIO21**.
 
-## Jednorazowa konfiguracja GitHub Pages
+1. Użyj Chrome lub Edge na komputerze. Podłącz CYD przez USB przewodem do transmisji danych i zamknij monitor portu szeregowego.
+2. Sprawdź oznaczenie kompilacji `0.09.26-ble-coexist-…`. Jeśli strona pokazuje starszą wersję, odśwież ją przez Ctrl+F5 i sprawdź, czy wdrożenie w Actions się zakończyło.
+3. Kliknij „Połącz i zainstaluj”, wybierz port płytki i zaczekaj na zakończenie zapisu. Przy aktualizacji zachowaj dane flash. Po restarcie na ekranie powinno być widoczne `0.09.26`.
+4. Sprawdź dotyk i kontaktron na GPIO22/GND. Na Garminie otwórz aktywność z polem [ArduRower HR 015](../connect_iq/README.md), aby odbierać dane treningowe i przesyłać tętno do CYD.
 
-Repozytorium → **Settings → Pages → Build and deployment → Source**: ustaw **GitHub Actions** (zamiast „Deploy from a branch”). Strona jest w katalogu głównym repo (index.html), ale kompletne binaria powstają dopiero podczas kompilacji jednego profilu ST7789/GPIO21 w GitHub Actions. Publikowanie samego main / (root) nie udostępni manifestów ani firmware.
+## Partycje i NVS
 
-Workflow: .github/workflows/cyd-web-installer.yml („ArduRower CYD - Pages installer”). Uruchamia się na zmianach kodu i przez „Run workflow”. Dla gałęzi main kompiluje firmware i publikuje stronę razem z jednym manifestem oraz pełnymi obrazami ESP32. Na gałęzi feature tylko buduje i testuje; nie nadpisuje publicznej strony.
+Manifest ESP Web Tools zapisuje cztery osobne segmenty: bootloader `0x1000`, tablicę partycji `0x8000`, boot_app0 `0xE000` i aplikację `0x10000`. Segmenty omijają NVS `0x9000–0xDFFF`, gdzie są rekordy i ustawienia. Scalony obraz z wypełnieniem, zapisywany od adresu 0, może nadpisać ten obszar. Przy aktualizacji istniejącej instalacji można też wgrać [samą aplikację przez esptool](../cyd_rower/README.md#budowanie-i-instalacja).
 
-Bez działania workflow instalator celowo pokazuje informację o braku binariów zamiast niesprawnego przycisku.
+## Publikacja
 
-## Co zostanie wgrane
+W repozytorium ustaw **Settings → Pages → Build and deployment → Source → GitHub Actions**. Workflow [ArduRower CYD – Pages installer](../.github/workflows/cyd-web-installer.yml) buduje profil ST7789/GPIO21, sprawdza manifest i zakresy zapisu, archiwizuje kompletny instalator i wdraża go z `main`. Strona uaktywnia przycisk po sprawdzeniu zgodności wersji strony, manifestu i plików BIN.
 
-GitHub Pages publikuje **cztery niezależne pliki BIN** i manifest ESP Web Tools:
+<details>
+<summary>Archiwalne notatki instalacyjne do 0.09.15</summary>
 
-- bootloader: `0x1000`
-- tablica partycji: `0x8000`
-- boot_app0: `0xE000`
-- aplikacja: `0x10000`
-
-**Dlaczego nie jeden scalony obraz firmware?** Scalenie plików z wypełnieniem 0xFF i wgranie go pod offset 0 mogłoby nadpisać obszar NVS `0x9000–0xDFFF`, kasując rekordy Ghost Race. Rozdzielone pliki omijają NVS. Przy kolejnych instalacjach NIE wybieraj pełnego erase flash. Spójność zakresów i obrazów jest sprawdzana w GitHub Actions.
-
-**Jedyny profil:** ST7789 z podświetleniem GPIO21, potwierdzony na docelowej płytce.
-
-## Procedura
-
-1. Otwórz instalator w aktualnym **Chrome lub Edge na komputerze** (HTTPS i Web Serial). Nie używaj przeglądarki w telefonie.
-2. Podłącz płytkę **kablem micro-USB umożliwiającym transmisję danych**. W przypadku tej rewizji USB-C bywa problematyczne.
-3. Kliknij „Połącz i zainstaluj”; zezwól na port COM rozpoznanej płytki.
-4. Jeśli instalator nie może połączyć się z ESP32, zamknij Serial Monitor/PlatformIO. W razie potrzeby zgodnie z komunikatem instalatora wejdź w bootloader za pomocą BOOT podczas resetu i ponów próbę.
-5. Po flashowaniu odłącz/podłącz płytkę lub ją zresetuj. Sprawdź dashboard, reakcję na dotyk i odczyt kontaktronu (GPIO22 + GND).
-6. Na Garmin fēnix 6X Pro Solar otwórz **to samo** pole Connect IQ co poprzednio. Współpraca BLE WR S4BL3 / FTMS została celowo zachowana; nie zmieniaj ustawień pola bez potrzeby.
-
-**Uwaga:** flashowanie zastąpi dotychczasowy UBox/HA firmware. Nowy port nie był jeszcze sprawdzony end-to-end na fizycznej płytce i zegarku. Przed wgraniem upewnij się, że możesz przywrócić stare firmware. W instalatorze wybór kasowania pamięci może usunąć konfigurację NVS. Nie odłączaj USB w trakcie zapisu.
-
-## Bezpieczny development
-
-- Heltec OLED pozostaje w ArduRower/ bez zmian.
-- Nowy port jest w cyd_rower/; wyświetlacz dziedziczy pinout i profil ST7789/GPIO21 z HA_UBOX_bridge.
-- Regresja BLE sprawdzana skryptem tests/cyd_ble_contract_test.py.
-- Workflow zachowuje także artefakt ardurower-cyd-web-installer z gotowym pakietem strony.
-- W razie awarii GitHub Pages stan publikacji można sprawdzić w **Actions**.
-
-## Odświeżanie LCD
-
-Poprawiony firmware nie czyści całego ekranu co pół sekundy. Zachowuje nieruchome ramki i podpisy, aktualizuje tylko zmienione liczby (2 Hz) i wykresy (1 Hz), w mniejszych buforowanych prostokątach. Test fizyczny potwierdzający brak migania pozostaje do wykonania po instalacji aktualizacji.
-
+Poniższe wpisy opisują starsze wersje.
 
 ## Ghost Race v0.08 — instalacja/aktualizacja
 
@@ -178,3 +151,5 @@ potwierdzić odbierania pulsu.
 ## ArduRower 0.09.15 — BLE audit and coexistence policy
 
 Historical version 0.09.8 really received BLE GATT 0x180D/0x2A37 notifications from Garmin. Version 0.09.14 required FTMS to be connected *before* scanning HR and terminated HR whenever FTMS was absent. These conditions made successful HR-first acquisition, before the watch stops advertising 0x180D, impossible. Version 0.09.15 permits HR first over a separate STATIC-RANDOM local BLE identity while WR S4BL3 stays a PUBLIC FTMS peripheral. FTMS can join after HR. If no FTMS connection appears 30 seconds after the HR ACL starts, release HR only and pause further HR attempts for 120 seconds. No real rowing session is interrupted for HR discovery. The subscribed-BPM watchdog tracks packets for each HR ACL, not cumulative packets. FTMS name, UUIDs, encoder, advertising, 1 Hz telemetry and touch/3-point calibration remain unchanged. **Two concurrent connections are still a hardware hypothesis**. To verify capture: `HR: attempt order=HR_FIRST`, `HR: RANDOM central CONNECTED`, `HR: dual-identity Garmin BPM packet`, `FTMS: CONNECTED` and increasing FTMS tx.\n
+
+</details>

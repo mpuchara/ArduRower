@@ -1,66 +1,41 @@
-# ArduRower na CYD ESP32-2432S028 (eksperymentalny port)
+# ArduRower CYD 0.09.26
 
-Ten katalog dodaje **nowy firmware dla dotykowego TFT 320x240**. Oryginalny szkic dla Heltec w ../ArduRower/ArduRower.ino pozostaje bez zmian. Obliczenia są bezpośrednio importowane z ../ArduRower/RowerMetrics.h (v0.07).
+Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
-## Najważniejsze założenia
+## Sprzęt
 
-- **Nie zmieniamy współpracy z istniejącym polem Garmin Connect IQ**. Firmware reklamuje tę samą nazwę \`WR S4BL3\`, usługę FTMS \`0x1826\`, Rowing Machine Data \`0x2AD1\`, te same flagi, kolejność pól, jednostki oraz notyfikacje co 1 sekundę.
-- Nie włączamy dodatkowej transmisji szacowanej mocy: \`SEND_EQUIVALENT_POWER = false\` (wartość z działającego ArduRower v0.07).
-- Lokalny ekran pokazuje **szacowaną moc**, prędkość, dystans, czas, tempo /500 m, SPM, ruchy oraz dwa wykresy obejmujące **ostatnie 120 sekund**. Wartości mocy są przeliczeniem Concept2 z estymowanej prędkości, **nie** rzeczywistym pomiarem watów ergometru wodnego.
-- Dotknięcie ekranu albo krótkie naciśnięcie BOOT przełącza widok; przytrzymanie BOOT przez 1,5 s resetuje trening. **BOOT podczas włączenia może wejść w tryb flashowania.**
-- Brak połączenia z zegarkiem nie blokuje treningu. \`BLE OK\` oznacza dowolnego klienta BLE, nie potwierdza tożsamości Garmina.
+- **Kontaktron** między GPIO22 (wejście z podciąganiem) a GND. Sprawdź oznaczenia złącza na swojej rewizji płytki. Kontaktron pasywny nie potrzebuje zasilania 5 V.
+- **ST7789** z podświetleniem GPIO21, magistrala TFT SCK14 / MOSI13 / MISO12 / CS15 / DC2.
+- **XPT2046** na SCK25 / MISO39 / MOSI32 / CS33 / IRQ36. Pozioma orientacja ekranu to rotation 1. Starsza kalibracja dla rotation 3 jest przeliczana automatycznie. Jeśli pojawi się kreator, dotknij kolejno trzech krzyżyków.
+- Wartość Battery Service to wskaźnik stałego zasilania USB. CYD nie mierzy stanu akumulatora.
 
-## Połączenie kontaktronu
+## Trening i Garmin
 
-**Uwaga: starego GPIO2 nie wolno tu używać — GPIO2 jest zajęte przez TFT (DC).**
+Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans lub wróć do zwykłego treningu z menu. Pauza włącza się po 5 sekundach bez impulsów, a ruch ją wznawia. [Szczegóły Ghost Race](../docs/GHOST_0.09.24.md).
 
-Podłącz **dwa przewody kontaktronu między GPIO22 a GND**. Zalecane złącze **P3 (JST 1.25mm 4-pin)**, gdzie standardowy pinout CYD to: GND, GPIO35, GPIO22, GPIO21. Należy sprawdzić opis ścieżek i kolejność pinów fizycznie na swojej rewizji płytki, **nie** według orientacji wtyczki ze zdjęcia. GPIO22 pracuje jako \`INPUT_PULLUP\`. Dla zwykłego pasywnego kontaktronu nie stosuj zewnętrznego 5 V.
+Detektor wnioskuje o fazach napędu i powrotu z odstępów między impulsami czterech magnesów na zwijaczu. Jeden kontaktron nie mierzy kierunku bezpośrednio. Dystans i moc są estymowane. Wersja 0.09.26 wygładza prędkość prezentowaną na ekranie i wykresie oraz chwilowe tempo wysyłane przez FTMS. Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
-Nie podłączaj czujnika do GPIO33 (CS panelu dotykowego), GPIO2 (DC LCD), GPIO21 (może sterować podświetleniem), GPIO27 (może sterować podświetleniem) ani GPIO34 (fotorezystor).
+Na Garminie dodaj pole **ArduRower HR 015**. Odbiera dystans, tempo i kadencję przez FTMS z `WR S4BL3`, a przez to samo połączenie odsyła tętno. [Instalacja pola](../connect_iq/README.md).
 
-Dystans, prędkość i SPM pozostają heurystykami z v0.07; domyślny \`DISTANCE_SCALE=0.65\` w ../ArduRower/RowerMetrics.h. Przed użyciem porównaj kilka serii 30 pełnych ruchów z ręcznym liczeniem.
+## Budowanie i instalacja
 
-## Wyświetlacz — parametry sprawdzone w HA_UBOX_bridge
+Najprościej użyć [instalatora w przeglądarce](../docs/WEB_INSTALL_CYD.md). Do samodzielnego zbudowania i aktualizacji istniejącej instalacji CYD użyj:
 
-\`cyd_rower/platformio.ini\` celowo odtwarza profile i magistralę z
-[HA_UBOX_bridge/firmware/cyd_monitor](https://github.com/mpuchara/HA_UBOX_bridge/tree/main/firmware/cyd_monitor).
-Parametry: TFT SCK14/MOSI13/MISO12/CS15/DC2, dotyk XPT2046 na 25/39/32/33/36, obrót landscape \`3\`, jasność **100% przy starcie** (przed inicjalizacją BLE i dotyku). Brak Wi-Fi ani konfiguratora Home Assistant w tym firmware.
-
-**Jedyny potwierdzony profil sprzętowy:** `esp32-2432s028-st7789-gpio21` (ST7789, podświetlenie GPIO21).
-Usunięto inne środowiska PlatformIO i ich obrazy. Na oryginalnym CYD użytkownik potwierdził działający obraz z tym sterownikiem.
-
-### Płynne odświeżanie — poprawka migania
-
-Poprzednia implementacja uruchamiała `fillScreen()` co 500 ms i rysowała ekran od góry na nowo, co powodowało widoczny czarny błysk. Nowy renderer utrzymuje statyczną makietę ekranu; aktualizuje tylko zmienione liczby oraz wykresy. Do renderowania używa jednego bufora `TFT_eSprite` 160×55 px, z 16-bitową paletą i awaryjną 8-bitową. Bufor jest przekazywany do LCD przez `pushSprite(..., crop)`. Widok jest czyszczony w całości wyłącznie przy zmianie strony lub po uruchomieniu. Wykresy mają kadencję 1 Hz, liczby 2 Hz i nie migają w trakcie aktualizacji. **Zmianę trzeba potwierdzić na fizycznej płytce**.
-
-## Build i flash (PlatformIO)
-
-Z głównego katalogu repozytorium:
-
-\`\`\`bash
+```powershell
 pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21
-pio run -d cyd_rower -e esp32-2432s028-st7789-gpio21 -t upload --upload-port COM4
-pio device monitor -b 115200 -p COM4
-\`\`\`
+python -m esptool --chip esp32 --port COM3 write-flash 0x10000 cyd_rower/.pio/build/esp32-2432s028-st7789-gpio21/firmware.bin
+```
 
-**COM4 jest jedynie przykładem** (numer COM trzeba sprawdzić w systemie). Do programowania użyj portu USB z działającym połączeniem UART; USB-C w niektórych rewizjach ma problemy. Przed instalacją miej możliwość przywrócenia poprzedniego firmware UBox.
-
-## Bezpieczna sekwencja testów
-
-1. Uruchom płytkę bez czujnika. Ekran powinien pokazać \`ArduRower CYD\`, wymiary 320x240, sterownik ST7789/ILI9341 oraz pin BL. Gdy ekran jest pusty, nie diagnozuj BLE, dopóki nie sprawdzisz profilu LCD.
-2. Sprawdź, czy wyświetlają się dwa główne wskaźniki oraz wykresy i działa przełączanie widoku dotykiem/BOOT.
-3. Podłącz kontaktron do GPIO22/GND. Przejedź magnesem kilkanaście razy; wartości powinny rosnąć. Test bez rezystora zewnętrznego.
-4. Otwórz właściwe pole Connect IQ na zegarku i sprawdź, czy połączenie z \`WR S4BL3\` następuje tak samo jak ze starym komputerkiem. **Nie zmieniaj pola Garmin.**
-5. Zweryfikuj licznik ruchów, dystans, SPM i prędkość na całym treningu. Kontroluj Serial Monitor i brak spadku impulsów (czerwony znak \`!\`).
-6. Po przerwie ponad 5 sekund potwierdź pauzę, zero prędkości, brak narastania dystansu i prawidłowe wznowienie. Sprawdź reset BOOT oraz ponowne łączenie BLE.
-
-### Ważna uwaga o baterii
-W oryginalnym Heltec GPIO33 służyło do odczytu baterii. W CYD GPIO33 steruje dotykiem. Usługa Battery Service pozostaje wystawiona dla zgodności z klientem, ale zgłasza **100% jako wskaźnik stałego zasilania USB**, a nie rzeczywisty poziom akumulatora.
+COM3 to przykład. Zapis samej aplikacji zakłada zgodną tablicę partycji i zachowuje NVS. Na płytce bez ArduRower użyj kompletnego instalatora.
 
 ## Weryfikacja
-Testy obliczeń z repo: \`g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o metrics_test && ./metrics_test\`.
-Na CI/platformie programisty dodatkowo należy wykonać kompilację wszystkich trzech środowisk oraz test długiego obciążenia BLE/TFT. Samo istnienie źródeł w repo **nie potwierdza** jeszcze fizycznej kompatybilności danego LCD lub Garmina.
 
+Po restarcie sprawdź numer wersji, reakcję ekranu na dotyk i działanie kontaktronu. Porównaj licznik z ręcznie odliczoną serią spokojnych i szybkich ruchów. Po zatrzymaniu sprawdź pauzę, a podczas treningu potwierdź dane na Garminie i tętno na CYD. Monitor szeregowy działa przy 115200 baud. Polecenie USB `pulsetrace` przez 120 s rejestruje czas przyjętych impulsów, licznik ruchów, fazę, zmiany fazy i przepełnienia kolejki.
+
+<details>
+<summary>Archiwalne notatki CYD do 0.09.15</summary>
+
+Poniższe wpisy opisują starsze wersje.
 
 ## Tryb GHOST RACE (v0.08)
 
@@ -194,3 +169,5 @@ The stable v0.08 menu selected rows using calibrated coordinates only on touchsc
 ## ArduRower 0.09.15 — BLE audit and coexistence policy
 
 Historical version 0.09.8 really received BLE GATT 0x180D/0x2A37 notifications from Garmin. Version 0.09.14 required FTMS to be connected *before* scanning HR and terminated HR whenever FTMS was absent. These conditions made successful HR-first acquisition, before the watch stops advertising 0x180D, impossible. Version 0.09.15 permits HR first over a separate STATIC-RANDOM local BLE identity while WR S4BL3 stays a PUBLIC FTMS peripheral. FTMS can join after HR. If no FTMS connection appears 30 seconds after the HR ACL starts, release HR only and pause further HR attempts for 120 seconds. No real rowing session is interrupted for HR discovery. The subscribed-BPM watchdog tracks packets for each HR ACL, not cumulative packets. FTMS name, UUIDs, encoder, advertising, 1 Hz telemetry and touch/3-point calibration remain unchanged. **Two concurrent connections are still a hardware hypothesis**. To verify capture: `HR: attempt order=HR_FIRST`, `HR: RANDOM central CONNECTED`, `HR: dual-identity Garmin BPM packet`, `FTMS: CONNECTED` and increasing FTMS tx.\n
+
+</details>

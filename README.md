@@ -1,18 +1,15 @@
 # ArduRower
 
-## Garmin: FTMS i tętno na jednym połączeniu
+## ArduRower CYD 0.09.26
 
-Firmware CYD **0.09.23** i własne pole **ArduRower HR 015** odbierają dane wioślarskie na zegarku i odsyłają aktualne tętno do ESP32 przez tę samą sesję BLE. Jednoczesne aktualizowanie obu kierunków zostało potwierdzone fizycznie z fēnixem 6X Pro Solar. Pole 0.1.5 dodaje dopasowanie do motywu aktywności i małą czcionkę w układzie zależnym od wymiarów pola. [Źródła, budowanie i instalacja USB](connect_iq/README.md), [wyniki weryfikacji](docs/GARMIN_HR_ACCEPTANCE.md).
+Aktualne wydanie jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Dodaje wygładzanie prędkości i tempa, dokładniejsze rozpoznawanie szybkich ruchów oraz osobne automatyczne skale prędkości i tętna na wspólnym wykresie. Na fizycznym CYD sprawdzono serię **10 szybkich ruchów z 10 naliczeniami**. [Zmiany i wyniki testów](docs/MOTION_TRENDS_0.09.26.md).
 
-Firmware CYD **0.09.24** dodaje złoty puchar i medale za pokonanie ducha, dotykowe opcje wyjścia oraz wspólną automatyczną pauzę treningu i ducha. [Obsługa, zasady rekordów i weryfikacja](docs/GHOST_0.09.24.md).
+- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.26`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
+- **Garmin** — pole **ArduRower HR 015** odbiera dane z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
+- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 5 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. [Zasady](docs/GHOST_0.09.24.md).
+- **Ekran i dotyk** — zachowano poziomą orientację z 0.09.25, obróconą o 180° względem 0.09.24, wraz z przeliczeniem starszej kalibracji. [Sprzęt, sterowanie i diagnostyka](cyd_rower/README.md).
 
-Firmware CYD **0.09.25** obraca ekran o 180° względem poprzedniej orientacji (TFT rotation 3 → 1). Zachowuje zapisane współczynniki kalibracji i przelicza współrzędne dotyku; nowa kalibracja jest zapisywana już dla orientacji 1. Rekordy i medale pozostają zgodne z 0.09.24.
-
-## Instalator przez przeglądarkę — CYD ESP32-2432S028
-
-**[Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/)** (Chrome/Edge na komputerze, micro-USB z transmisją danych).
-
-Jedyny aktywny profil: **ST7789 / GPIO21**, potwierdzony na docelowej płytce. Poprawka renderera eliminuje cykliczne `fillScreen()`, aktualizując tylko zmienione obszary za pomocą off-screen sprite. Nowy firmware z TFT 320×240, historią szacowanej mocy i prędkości 120 s oraz dotykiem znajduje się w [cyd_rower](cyd_rower). Format nadawanych danych FTMS jest zachowany; kanał zwrotny HR obsługuje własne pole opisane wyżej. Zobacz [instrukcję instalacji i publikacji](docs/WEB_INSTALL_CYD.md). Instalator potrzebuje wyboru *GitHub Actions* w Settings → Pages → Source, ponieważ Actions publikuje kompletne obrazy ESP32 wraz z manifestami.
+## Oryginalny wariant Heltec OLED
 
 ## Zmiana skali w v0.07
 
@@ -107,17 +104,3 @@ Testy obejmują dystans, prędkość, czas, pauzę i wznowienie, przepełnienie 
 ## Pochodzenie
 
 Projekt bazuje na ArduRower autorstwa zpukr, wskazującym także WaterRino oraz WaterRower S4BL3. Dołączone źródła OLED pochodzą z biblioteki ThingPulse, a RunningAverage z projektu Roba Tillaarta. Zachowano informacje autorów i warunki licencyjne obecne w plikach źródłowych.
-
-
-## Ghost Race — ściganie ze sobą na CYD
-
-Firmware CYD ST7789/GPIO21 ma nowy tryb **Ghost Race**. Swipe w lewo/prawo przełącza dashboard i tryb wyścigu; menu pozwala wybrać 500/1000/2000 m, a zapisany rekord odtwarzany jest jako drugi wioślarz. Wyświetlane są przewaga w metrach i sekundach, czas, moc, prędkość i wykresy. Dane rekordu trafiają lokalnie do ESP32 NVS, ale nie ingerują w działające pole Garmin Connect IQ. [Instrukcja](cyd_rower/README.md) · [Instalator](https://mpuchara.github.io/ArduRower/).
-
-
-## CYD v0.09 — dwie fazy ruchu, puls i wspólny wykres
-
-Od wersji `0.09-motion-hr` firmware CYD ST7789/GPIO21 używa **eksperymentalnego** modelu taśmy o napędzie jednokierunkowym. Cztery magnesy są na zwijaczu, a nie na wirniku; nie ma pomiaru kierunku, dlatego fazy napęd/powrót są wnioskowane z dwóch spowolnień na pełny cykl. To nie jest odwzorowanie oryginalnego WaterRower S4. Poziom kalibracji nie jest potwierdzony niezależnym pomiarem i wymaga prób na Twoim ergometrze.
-
-Dashboard pokazuje duży puls i prędkość, wspólny wykres z 10 minut (seria czerwona HR, turkusowa km/h), duże wartości: czas, dystans, SPM, tempo, szacowana moc i ruchy. Dłuższe dotknięcie górnego paska otwiera regulację skali dystansu w granicach 0.30–1.50, co zmienia dane bieżące i powoduje pominięcie rekordów Ghost Race zapisanych przy innej kalibracji. Bez transmisji HR wyświetlane jest `-- BPM`.
-
-ESP32 próbuje łączyć się w drugim kanale BLE z usługą Heart Rate `0x180D`. Transmisja HR podczas aktywności musi być włączona na zegarku. Jednoczesna współpraca z dotychczasowym polem Connect IQ jest **do zweryfikowania na fizycznym Garminie**; format FTMS nie został zmieniony. Przy niedoborze RAM odbiornik HR nie uruchamia się, a trening i Garmin nadal otrzymują dotychczasową usługę BLE. Nie wybieraj pełnego kasowania flash przy aktualizacji, jeśli zachowujesz rekordy NVS.
