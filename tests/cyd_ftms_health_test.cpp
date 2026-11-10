@@ -8,8 +8,8 @@ int main() {
   assert(!FtmsHealth::streamReady(true,true,0));
   assert(FtmsHealth::streamReady(true,true,10));
   assert(!FtmsHealth::canTryHr(20000,true,true,1000,10,true));
-  assert(!FtmsHealth::canTryHr(19001,true,true,1000,10,true));
-  assert(FtmsHealth::canTryHr(19002,true,true,1000,10,true));
+  assert(!FtmsHealth::canTryHr(18999,true,true,1000,10,true));
+  assert(FtmsHealth::canTryHr(19000,true,true,1000,10,true));
   assert(!FtmsHealth::canTryHr(19002,true,true,1000,9,true));
   assert(!FtmsHealth::canTryHr(19002,true,true,1000,10,false));
   assert(!FtmsHealth::canTryHr(19002,true,false,1000,10,true));
