@@ -22,7 +22,7 @@ int main(){
         e.strokes,e.transitions,e.meters,e.speed);
   const float slowMeanSpeed=e.meters*1000000.0f/(now-100000);
   const float before=e.meters;
-  now+=6000000;e.tick(now);
+  now+=8000000;e.tick(now);
   REQUIRE(e.speed==0);
   REQUIRE(e.meters==before);
   REQUIRE(e.spm==0);
@@ -71,17 +71,17 @@ int main(){
   REQUIRE(coast.speed>movingSpeed*0.74f && coast.speed<movingSpeed*0.76f);
   coast.tick(quickerUs+2000000);
   REQUIRE(coast.speed>movingSpeed*0.56f && coast.speed<movingSpeed*0.57f);
-  coast.tick(quickerUs+4000000);
-  REQUIRE(coast.speed<movingSpeed*0.08f);
-  sparseTicks.tick(quickerUs+4000000);
+  coast.tick(quickerUs+6000000);
+  REQUIRE(coast.speed>0 && coast.speed<movingSpeed*0.06f);
+  sparseTicks.tick(quickerUs+6000000);
   REQUIRE(fabsf(sparseTicks.speed-coast.speed)<0.0001f);
-  coast.tick(quickerUs+5000000);
+  coast.tick(quickerUs+8000000);
   REQUIRE(coast.speed==0 && coast.meters==movingDistance);
   quicker.onPulse(quickerUs+5000); // contact bounce
   REQUIRE(quicker.meters==steady.meters);
-  quicker.tick(quickerUs+5000000);
+  quicker.tick(quickerUs+8000000);
   REQUIRE(quicker.speed==0 && quicker.meters==steady.meters);
-  quicker.onPulse(quickerUs+6000000);
+  quicker.onPulse(quickerUs+9000000);
   REQUIRE(quicker.meters==steady.meters); // interval across a rest
   // Fast reel: an alternating 13/37 ms pair loses one edge with
   // 15 ms debounce. Include both for distance and keep stroke input intact.

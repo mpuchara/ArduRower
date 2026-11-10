@@ -16,6 +16,7 @@ static const uint32_t PAUSE_AFTER_US = 5000000;
 
 class RowerMetrics {
 public:
+  explicit RowerMetrics(uint32_t pauseUs=PAUSE_AFTER_US) : pauseAfterUs(pauseUs) {}
   uint32_t pulses = 0, strokes = 0;
   uint64_t activeUs = 0;
   float speed = 0, strokeRate = 0;
@@ -51,11 +52,11 @@ public:
     if(dt>0x7fffffffUL)return;
     if (started && !paused) {
       const uint32_t age = lastTick - lastPulse;
-      uint32_t moving = age < PAUSE_AFTER_US ? PAUSE_AFTER_US - age : 0;
+      uint32_t moving = age < pauseAfterUs ? pauseAfterUs - age : 0;
       if (moving > dt) moving = dt;
       activeUs += moving;
       equivalentEnergy += equivalentPower() * (moving / 1000000.0);
-      paused = (uint32_t)(now - lastPulse) >= PAUSE_AFTER_US;
+      paused = (uint32_t)(now - lastPulse) >= pauseAfterUs;
       if (paused) { speed = strokeRate = 0; }
     }
     lastTick = now;
@@ -68,13 +69,13 @@ public:
       if (paused) speed = 0;
       samplePulses = pulses; sampleTime = now;
     }
-    if (haveStroke && (uint32_t)(now - lastStroke) >= PAUSE_AFTER_US) strokeRate = 0;
+    if (haveStroke && (uint32_t)(now - lastStroke) >= pauseAfterUs) strokeRate = 0;
   }
 
   void pulse(uint32_t now) {
     tick(now);
     const uint32_t gap = now - lastPulse;
-    if (!started || gap >= PAUSE_AFTER_US) {
+    if (!started || gap >= pauseAfterUs) {
       // Do not include a rest in the next speed/cadence sample.
       sampleTime = now; samplePulses = pulses;
       oldPulseRate = 0; holdoffPulses = 0;
@@ -117,6 +118,7 @@ public:
   float averageEquivalentPower() const { return activeUs ? equivalentEnergy / seconds() : 0; }
 
 private:
+  uint32_t pauseAfterUs;
   uint32_t lastTick = 0, lastPulse = 0, sampleTime = 0, samplePulses = 0;
   float oldPulseRate = 0;
   uint16_t holdoffPulses = 0;

@@ -36,8 +36,9 @@ class Engine {
   static constexpr float kMetersPerPulse = 0.16f;
   static constexpr float kDefaultCalibration = 0.70f;
   static constexpr float kSpeedTauSeconds = 3.5f;
-  static constexpr uint32_t kCoastUs = 2000000;
-  static constexpr float kStopTauSeconds = 1.0f;
+  static constexpr uint32_t kCoastUs = 3000000;
+  static constexpr float kStopTauSeconds = 1.5f;
+  static constexpr uint32_t kPauseAfterUs = 8000000;
   static constexpr uint32_t kDeadTimeUs = 15000;
   static constexpr uint32_t kDistanceDeadTimeUs = 10000;
   static constexpr uint32_t kRearmGapUs = 1600000;
@@ -82,7 +83,7 @@ class Engine {
     // delayed processing. Never mistake a stale sample for a 71-minute gap.
     if(!duration || duration>0x7fffffffUL)return;
     const uint32_t idleUs=nowUs-lastDistancePulseUs;
-    if(distanceStarted && idleUs>=5000000UL) {
+    if(distanceStarted && idleUs>=kPauseAfterUs) {
       speed=0;
     } else if(speed>0) {
       // Keep inertia across the stroke. Once an extended break starts,
@@ -92,7 +93,7 @@ class Engine {
       const float decay=(duration-stopUs)/kSpeedTauSeconds+stopUs/kStopTauSeconds;
       speed*=expf(-decay/1000000.0f);
     }
-    if(started && nowUs-lastPulseUs>=5000000UL)spm=0;
+    if(started && nowUs-lastPulseUs>=kPauseAfterUs)spm=0;
     lastTickUs=nowUs;
   }
   void onPulse(uint32_t nowUs, bool strokePulse=true) {

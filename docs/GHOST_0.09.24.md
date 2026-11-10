@@ -1,5 +1,7 @@
 # Duch, nagroda i automatyczna pauza: 0.09.24
 
+> Od 0.09.31 auto pauza CYD włącza się po 8 sekundach bez impulsów. Zegar ducha biegnie w trakcie dobiegu.
+
 > Od 0.09.27 trening korzysta z [nowego pomiaru dystansu](PULSE_DISTANCE_0.09.27.md). Rekordy, przebiegi tętna i medale sprzed tej wersji pozostają w NVS, a nowe wyniki tworzą oddzielny zestaw. Wersja [0.09.28](FAST_REED_0.09.28.md) prowadzi osobny zestaw również względem 0.09.27.
 
 ## Obsługa dotykiem

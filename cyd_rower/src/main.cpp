@@ -31,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.30";
+static constexpr const char *FIRMWARE_VERSION = "0.09.31";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -79,7 +79,7 @@ float touchA=0, touchB=0, touchC=0, touchD=0, touchE=0, touchF=0;
 bool touchCalibrated=false, pendingCalibration=false;
 uint8_t touchRotation=DEFAULT_ROTATION;
 
-RowerMetrics metrics;
+RowerMetrics metrics(cydmotion::Engine::kPauseAfterUs);
 cydmotion::Engine motion;
 cydble::DutySchedule bleDuty;
 volatile uint32_t ftmsNotifications=0;
@@ -1469,7 +1469,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.30 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.31 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);

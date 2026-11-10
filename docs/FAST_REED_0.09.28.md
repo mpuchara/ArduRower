@@ -27,3 +27,7 @@ Użytkownik potwierdził na CYD, że pauza utrzymuje się w przerwie i znika po 
 Na podstawie dwóch zarejestrowanych serii wydłużono stałą wygładzania prędkości z 2,5 s do 3,5 s. Po sekundzie bez impulsów wskaźnik zachowuje około 75% prędkości zamiast 67%, a po dwóch sekundach 56% zamiast 45%. Po dwóch sekundach bez impulsów włącza się szybsze wygaszanie (stała 1 s). Po pięciu sekundach wskazanie spada do zera i włącza się auto pauza.
 
 Odtworzenie impulsów na nowym filtrze daje szczyty około 7,9 i 10,1 km/h dla spokojnej i szybkiej serii. Skala dystansu pozostaje przy 0,16 m razy zapisany mnożnik, a filtr nadal stosuje tę samą stałą do zasilania i wygładzania prędkości podczas ruchu, więc przy stałym tempie impulsów średnia prędkość nadal wynika z dystansu i czasu. Wygładzanie nie zwiększa dystansu po zatrzymaniu. Jest to dostrojenie wskazań do zapisu z ergometru, bez zewnętrznego pomiaru prędkości łodzi.
+
+## Dłuższy dobieg w 0.09.31
+
+CYD utrzymuje aktywny trening przez osiem sekund od ostatniego impulsu licznika ruchów. Przez pierwsze trzy sekundy po impulsie prędkość wygasa ze stałą 3,5 s, a następnie ze stałą 1,5 s. Czas treningu i zegar ducha biegną w trakcie dobiegu. Dystans nadal rośnie tylko od przyjętych impulsów, a po ośmiu sekundach prędkość jest zerowana. Wznowienie nadal wymaga dwóch impulsów w odstępie do 350 ms. Kontaktron znajduje się na zwijaczu taśmy, dlatego dobieg jest estymowany bez bezpośredniego pomiaru wirnika.
