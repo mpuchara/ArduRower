@@ -22,17 +22,21 @@ extern "C" bool bleInUse(void) { return true; }
 #include <Preferences.h>
 #include "CydMotion.h"
 #include "TrendAutoScale.h"
+#include "CydOrientation.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.16";
+static constexpr const char *FIRMWARE_VERSION = "0.09.17";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
-static constexpr uint8_t DEFAULT_ROTATION = 3; // working HA_UBOX_bridge landscape
+// 0.09.16 was reported upside down on the physical ST7789. Opposite
+// landscape orientation is the new default, with persistent on-device toggle.
+static constexpr uint8_t DEFAULT_ROTATION = cydview::kDefaultRotation;
+uint8_t displayRotation=DEFAULT_ROTATION;
 static constexpr uint32_t DISPLAY_INTERVAL_MS = 500;
 static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
@@ -509,11 +513,31 @@ void updateButton(uint32_t now) {
     else openRaceMenu();
   }
 }
+// Restart after changing display orientation: no need to reflash, and all
+// sprite/layout/touch state is reconstructed using the saved rotation.
+void toggleDisplayOrientation() {
+  const uint8_t chosen=cydview::toggleRotation(displayRotation);
+  Preferences p;
+  if(!p.begin("rower-display",false)) {
+    Serial.println("LCD: cannot save rotation; no restart");
+    return;
+  }
+  const bool saved=p.putUChar("rotation",chosen)==1;
+  p.end();
+  if(!saved) {
+    Serial.println("LCD: NVS write failed; no restart");
+    return;
+  }
+  Serial.printf("LCD: rotation %u -> %u, restarting\n",
+                (unsigned)displayRotation,(unsigned)chosen);
+  delay(120);
+  ESP.restart();
+}
 bool mappedTouch(int16_t rawX,int16_t rawY,int16_t &x,int16_t &y) {
   if (!touchCalibrated) return false;
   float fx=touchA*rawX+touchB*rawY+touchC;
   float fy=touchD*rawX+touchE*rawY+touchF;
-  if (touchRotation!=DEFAULT_ROTATION) {fx=319-fx;fy=239-fy;}
+  cydview::mapTouchToDisplay(fx,fy,touchRotation,displayRotation);
   if (!isfinite(fx)||!isfinite(fy)||fx < -18||fx >337||fy < -18||fy >257)
     return false;
   x=constrain((int)lroundf(fx),0,319);
@@ -534,7 +558,7 @@ void readTouchCalibration() {
       touchA=p.getFloat("tc_a",0);touchB=p.getFloat("tc_b",0);
       touchC=p.getFloat("tc_c",0);touchD=p.getFloat("tc_d",0);
       touchE=p.getFloat("tc_e",0);touchF=p.getFloat("tc_f",0);
-      touchRotation=p.getUChar("tc_rot",DEFAULT_ROTATION);
+      touchRotation=p.getUChar("tc_rot",3); // legacy 0.09.15/16 calibration
       touchCalibrated=isfinite(touchA)&&isfinite(touchB)&&
         isfinite(touchC)&&isfinite(touchD)&&isfinite(touchE)&&isfinite(touchF) &&
         (fabsf(touchA)+fabsf(touchB)>.01f) &&
@@ -585,11 +609,11 @@ bool calibrateRaceTouch() {
   touchD=-145.0f*uy/det;touchE=145.0f*ux/det;
   touchC=25.0f-touchA*rx[0]-touchB*ry[0];
   touchF=65.0f-touchD*rx[0]-touchE*ry[0];
-  touchRotation=DEFAULT_ROTATION;touchCalibrated=true;
+  touchRotation=displayRotation;touchCalibrated=true;
   Preferences p;
   if(p.begin("rower-touch",false)){
     p.putBool("tc_ok",true);p.putBool("tc_force",false);
-    p.putUChar("tc_rot",DEFAULT_ROTATION);
+    p.putUChar("tc_rot",displayRotation);
     p.putFloat("tc_a",touchA);p.putFloat("tc_b",touchB);
     p.putFloat("tc_c",touchC);p.putFloat("tc_d",touchD);
     p.putFloat("tc_e",touchE);p.putFloat("tc_f",touchF);
@@ -636,11 +660,11 @@ void touchTap(int16_t rx,int16_t ry) {
   int16_t x,y;
   const bool calibrated=mappedTouch(rx,ry,x,y);
   if(!calibrated) {
-    // CYD horizontal view: with XPT2046 rotation=0, physical screen Y is
-    // the reversed raw X axis. Unlike v0.09.8, tapping a row must choose
-    // THAT row, not cycle all distances. Do not start a calibration wizard.
+    // Approximate row hit testing without touch calibration. Opposite
+    // landscape TFT rotations require opposite vertical raw-X mapping.
     x=160;
-    y=constrain((int)((4095L-(long)rx)*240L/4095L),0,239);
+    const int rawY=(int)((4095L-(long)rx)*240L/4095L);
+    y=displayRotation==3?rawY:239-rawY;
     Serial.printf("GHOST: uncalibrated tap raw=%d,%d screenY~%d\n",
                   (int)rx,(int)ry,(int)y);
   }
@@ -653,6 +677,13 @@ void touchTap(int16_t rx,int16_t ry) {
     return;
   }
   if(ghost.phase!=ghostrace::Phase::Idle)return;
+  // Rotate image by 180 degrees from Ghost menu without reflashing.
+  // Keeping the previous calibration rotation lets mappedTouch invert its
+  // coordinates automatically when the LCD switches between 1 and 3.
+  if(y>=25 && y<53 && calibrated && x<85) {
+    toggleDisplayOrientation();
+    return;
+  }
   // Touch-only recalibration control in the Ghost menu. Restart safely so
   // the three-point wizard runs before starting BLE/FTMS, as in UBox.
   if(y>=25 && y<53 && (!calibrated || x>=208)) {
@@ -1137,7 +1168,8 @@ void paintRaceLayout(uint8_t screen) {
   tft.drawRightString("SWIPE: WROC",313,6,1);
   if(screen==0) {
     tft.setTextColor(labelColor,backgroundColor);
-    tft.drawString("WYBIERZ DYSTANS",11,31,2);
+    tft.drawString("OBROT 180",11,31,1);
+    tft.drawCentreString("DYSTANS",157,31,2);
     tft.drawRightString("KALIBRUJ",309,33,2);
     for(uint8_t i=0;i<3;i++) {
       const int yy=53+i*59;
@@ -1286,8 +1318,16 @@ void initDisplay() {
   // anything that can block, then re-enable AFTER TFT init (3.x LEDC API).
   pinMode(BACKLIGHT_PIN, OUTPUT);
   digitalWrite(BACKLIGHT_PIN, HIGH);
+  Preferences viewPrefs;
+  if(viewPrefs.begin("rower-display",true)) {
+    displayRotation=cydview::checkedRotation(
+        viewPrefs.getUChar("rotation",DEFAULT_ROTATION));
+    viewPrefs.end();
+  }
   tft.init();
-  tft.setRotation(DEFAULT_ROTATION); // 320x240; no software x/y remap
+  tft.setRotation(displayRotation); // 1 or 3; both keep 320x240 landscape
+  Serial.printf("LCD: display rotation=%u (default=%u)\n",
+                (unsigned)displayRotation,(unsigned)DEFAULT_ROTATION);
   digitalWrite(BACKLIGHT_PIN, HIGH);
   // Full brightness is deliberate here. Avoid core-2.x vs core-3.x LEDC API
   // differences until manual brightness adjustment is explicitly added.
@@ -1318,7 +1358,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.16 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.17 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
