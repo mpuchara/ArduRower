@@ -91,7 +91,7 @@ Nowy wirtualny model prędkości **nie zwiększa prędkości na impulsach fazy p
 
 **Puls:** Garmin fēnix 6X Pro Solar może nadawać HR w trakcie aktywności. Nowy opcjonalny BLE-client ESP32 próbuje subskrybować standardową charakterystykę Heart Rate Measurement (`0x2A37`). Gdy pomiary nie przychodzą przez 6,5 s, wskazanie zmienia się na `-- BPM` i wykres ma przerwę. Samo pole Connect IQ odbierające FTMS działa jak wcześniej (bez zmian w pakiecie). Równoczesne działanie odbioru HR i FTMS **wymaga sprawdzenia na zegarku**. Przy małej ilości RAM odbiornik HR pozostaje nieaktywny, aby priorytet zachować dla FTMS.
 
-**Wykres:** oba przebiegi są rysowane w jednym szerokim polu bez legendy, 300 próbek co 2 s (10 min), stałe zakresy 60–190 BPM (czerwony) i 0–22 km/h (turkus). Pola pulsu i prędkości powyżej wykresu mają ten sam kolor co linie. Dwa dolne rzędy wyświetlają: czas, dystans, SPM, tempo, moc szacowaną w W, ruchy.
+**Wykres:** oba przebiegi są rysowane w jednym szerokim polu bez legendy, 300 próbek co 2 s (10 min), automatyczne zakresy BPM (czerwony) i km/h (turkus) dobrane do widocznych próbek. Pola pulsu i prędkości powyżej wykresu mają ten sam kolor co linie. Dwa dolne rzędy wyświetlają: czas, dystans, SPM, tempo, moc szacowaną w W, ruchy.
 
 **Ghost Race:** rekordy poprzedniej wersji (wyliczane ze stałego impulsowego dystansu) mają inny identyfikator modelu i **nie mogą być porównywane z aktualnymi**; stare dane pozostają w NVS do nadpisania nowym ukończonym rekordem. Nie wybieraj opcji pełnego kasowania flash. 
 
@@ -201,3 +201,7 @@ W firmware CYD wartość `motion.speed` nadal steruje wirtualnym kołem i całko
 Wykrywacz faz zachowuje dotychczasowy próg dla wyraźnych, wolnych zwrotów, ale dodatkowo wykrywa krótkie zwroty z potwierdzeniem kolejnym szybszym impulsem. Porównuje odstęp z impulsem sprzed czterech magnesów, aby nie pomylić nierównych odległości między magnesami ze zmianą kierunku. SPM może aktualizować się do 90 ruchów/min. Testy syntetyczne obejmują 30 ruchów przy ~51 i ~77 SPM, ciągły obrót z nierównymi magnesami, pauzę i stary przypadek wolnych zwrotów.
 
 **Ograniczenie:** jeden kontaktron nie wykrywa kierunku bezpośrednio; gdy zmiana kierunku nie wywoła rozróżnialnego wzoru odstępów między magnesami, pełna poprawność nadal nie jest gwarantowana. Kalibracja 500 m i weryfikacja na fizycznym ergometrze są konieczne przed uznaniem wyniku za wiarygodny. Nie zmieniono rekordów NVS ani identyfikatorów FTMS.
+
+### Wykres autoskalowany (PR #15, v0.09.16)
+
+Wspólny wykres z ostatnich 10 minut dobiera **dwie niezależne osie pionowe**. Lewa skala BPM dopasowuje dolną i górną wartość z 10 BPM zapasu na każdą stronę; prawa skala prędkości zaczyna się od 0, a górna granica wynosi najbliższy pełny km/h powyżej maksimum z widocznych próbek. Nieobecny puls (0 w historii) nie obniża minimum BPM. Przy podglądzie treningu Ghost Race obie krzywe prędkości korzystają z tej samej skali, która uwzględnia również szybszego ducha. Na głównym wykresie górne wartości skali są opisane jednostkami, kompaktowy 28-pikselowy wykres wyścigu zachowuje dotychczasowy układ bez nakładanych podpisów. Nie zmieniono próbkowania, dystansu, SPM, FTMS ani zapisu rekordów. Rysowanie nadal wykorzystuje sprites i nie czyści pełnego ekranu przy odświeżeniu.
