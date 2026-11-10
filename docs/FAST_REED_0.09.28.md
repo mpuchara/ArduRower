@@ -37,3 +37,5 @@ W fizycznej próbie 0.09.31 użytkownik potwierdził naturalniejsze opadanie pr�
 ## Odporność wznowienia w 0.09.32
 
 Po wejściu w auto pauzę wznowienie wymaga czterech kolejnych impulsów ze strumienia licznika ruchów, z przerwami do 350 ms między sąsiednimi impulsami. Dłuższa przerwa zeruje próbę potwierdzenia. Czas aktywny i zegar ducha ruszają przy czwartym impulsie, a pierwsze odstępy zostają uwzględnione w dystansie. W trybie `pulsetrace` USB pokazuje też impulsy oczekujące na potwierdzenie. Ośmiosekundowy dobieg pozostaje bez zmian.
+
+W próbie na CYD po wejściu w pauzę zarejestrowano pojedynczy impuls oczekujący na potwierdzenie. Czas aktywny pozostał na 33,439 s, dystans na 15,34 m, a kolejne odczyty przez ponad 30 s nadal wskazywały pauzę.
