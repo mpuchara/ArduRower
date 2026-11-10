@@ -14,4 +14,4 @@ Profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Aktualizacja działającej 
 
 ## Test szybkiej serii na CYD
 
-W zapisie z COM3 po 10 fizycznych ruchach detektor naliczył 12. Kolejka ISR nie zgubiła impulsów. Kandydat na krótki nawrót musi teraz być co najmniej o 10% dłuższy od obu ostatnich odstępów, oprócz porównania z lokalną średnią i tym samym magnesem. Odtworzenie tych samych impulsów w teście daje 10 naliczeń. Potrzebna jest kolejna fizyczna seria po wgraniu poprawki. W logu tej próby zegarek jednocześnie subskrybował dane FTMS i odsyłał aktualny puls.
+W zapisie z COM3 po 10 fizycznych ruchach detektor naliczył 12. Kolejka ISR nie zgubiła impulsów. Kandydat na krótki nawrót musi teraz być co najmniej o 10% dłuższy od obu ostatnich odstępów, oprócz porównania z lokalną średnią i tym samym magnesem. Odtworzenie tych samych impulsów w teście daje 10 naliczeń. Po wgraniu kompilacji `d854384` użytkownik wykonał nową serię 10 szybkich ruchów i potwierdził 10 naliczeń na ekranie. Zapis COM3 potwierdza wynik przed dodatkowymi, przypadkowymi ruchami. Podczas obu prób zegarek jednocześnie odbierał FTMS i odsyłał bieżące tętno.
