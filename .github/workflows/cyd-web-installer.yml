@@ -44,6 +44,8 @@ jobs:
           /tmp/ghost_race_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
           /tmp/cyd_motion_test
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_trend_autoscale_test.cpp -o /tmp/cyd_trend_autoscale_test
+          /tmp/cyd_trend_autoscale_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
           /tmp/cyd_ble_duty_test
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_coexist_test.cpp -o /tmp/cyd_ble_coexist_test
