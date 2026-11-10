@@ -84,4 +84,11 @@ assert 'FTMS: advertising recovery' in CYD
 assert 'pAdvertising->start()' in CYD
 assert "now - lastBleMs >= 1000" in OLD
 assert "now - lastBleMs >= 1000" in CYD
+assert 'onSubscribe(NimBLECharacteristic *chr,ble_gap_conn_desc *desc,' in CYD
+assert 'ftmsSubscribed=enabled;' in CYD
+assert 'pDtCharacteristic->getSubscribedCount()>0' in CYD
+assert 'ftmsNotifyAfterSubscribe' in CYD
+assert 'cydble::FtmsHealth::streamReady(' in CYD
+assert 'retryUnsubscribed(' in CYD
+assert 'BLE LINK' in CYD
 print("PASS: preserved FTMS/Connect IQ payload, identifiers, advertising and cadence")

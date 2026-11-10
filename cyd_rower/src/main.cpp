@@ -24,12 +24,13 @@ extern "C" bool bleInUse(void) { return true; }
 #include "TrendAutoScale.h"
 #include "CydOrientation.h"
 #include "BleDutySchedule.h"
+#include "FtmsHealth.h"
 #include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.17";
+static constexpr const char *FIRMWARE_VERSION = "0.09.18";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -82,7 +83,14 @@ uint8_t touchRotation=DEFAULT_ROTATION;
 RowerMetrics metrics;
 cydmotion::Engine motion;
 cydble::DutySchedule bleDuty;
-volatile uint32_t ftmsNotifications=0;
+// An ACL is not proof that the Garmin subscribed to FTMS Rowing Data.
+volatile uint32_t ftmsNotifications=0; // notify requests to subscribed peers only
+volatile uint32_t ftmsNotifyAfterSubscribe=0;
+volatile uint32_t ftmsSubscriptionChanges=0;
+volatile uint32_t ftmsSubscribedAtMs=0;
+volatile bool ftmsSubscribed=false;
+uint32_t ftmsLastHealthReportMs=0;
+uint8_t ftmsUnsubscribedRetries=0;
 volatile uint32_t ftmsConnectedAtMs=0;
 volatile uint32_t ftmsDisconnectedAtMs=0;
 volatile uint16_t receivedHr=0;
@@ -215,6 +223,7 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *) override {
     deviceConnected=true;
     ftmsConnectedAtMs=millis();
+    ftmsSubscribed=false;ftmsSubscribedAtMs=0;ftmsNotifyAfterSubscribe=0;
     Serial.printf("FTMS: CONNECTED at %lu, HR=%s, packets=%lu\n",
                   (unsigned long)ftmsConnectedAtMs,
                   hrStatus(hrState),(unsigned long)ftmsNotifications);
@@ -224,6 +233,7 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer *) override {
     deviceConnected=false;
+    ftmsSubscribed=false;ftmsSubscribedAtMs=0;ftmsNotifyAfterSubscribe=0;
     ftmsDisconnectedAtMs=millis();
     Serial.printf("FTMS: DISCONNECTED at %lu, HR=%s, packets=%lu\n",
                   (unsigned long)ftmsDisconnectedAtMs,
@@ -238,6 +248,29 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
 class MyCallbacks : public NimBLECharacteristicCallbacks {
  public:
   void onWrite(NimBLECharacteristic *) override {}
+  // NimBLE-Arduino 1.4.3 callback for 0x2AD1's 0x2902 CCCD.
+  void onSubscribe(NimBLECharacteristic *chr,ble_gap_conn_desc *desc,
+                   uint16_t subValue) override {
+    if(chr!=pDtCharacteristic) {
+      Serial.printf("FTMS: other CCCD uuid=%s subValue=%u (not 2AD1)\n",
+                    chr->getUUID().toString().c_str(),(unsigned)subValue);
+      return;
+    }
+    const bool enabled=(subValue&1U)!=0;
+    ftmsSubscribed=enabled;
+    ftmsSubscribedAtMs=enabled?millis():0;
+    ftmsNotifyAfterSubscribe=0;
+    ++ftmsSubscriptionChanges;
+    Serial.printf("FTMS: 2AD1 CCCD %s subValue=%u acl=%u changes=%lu\n",
+                  enabled?"NOTIFY ENABLED":"NOTIFY DISABLED",
+                  (unsigned)subValue,
+                  desc?(unsigned)desc->conn_handle:65535U,
+                  (unsigned long)ftmsSubscriptionChanges);
+    if(!enabled && hrClientHandle!=HR_INVALID_HANDLE) {
+      hrDisabledAfterFtmsDrop=true;
+      Serial.println("HR: disabled; FTMS Rower Data subscription lost");
+    }
+  }
 };
 
 void initBLE() {
@@ -264,9 +297,11 @@ void initBLE() {
   pBatCharacteristic = pBatteryService->createCharacteristic(
       NimBLEUUID((uint16_t)batteryLevel),
       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  pBatCharacteristic->setCallbacks(new MyCallbacks());
   pStCharacteristic = pService->createCharacteristic(
       NimBLEUUID((uint16_t)FitnessMachineStatus),
       NIMBLE_PROPERTY::NOTIFY);
+  pStCharacteristic->setCallbacks(new MyCallbacks());
   pService->start();
   pBatteryService->start();
   NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
@@ -283,6 +318,8 @@ void initBLE() {
   NimBLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
       NimBLEUUID((uint16_t)0x2A29), NIMBLE_PROPERTY::READ);
   pService2->start();
+  Serial.printf("FTMS: 2AD1 value handle=%u, notify subscriptions tracked\n",
+                (unsigned)pDtCharacteristic->getHandle());
   // Preserve original device-information characteristic strings, not new IDs.
   pCharacteristic24->setValue("4");
   pCharacteristic25->setValue("0000");
@@ -353,7 +390,11 @@ void setCxRowerData() {
   }
   put16(data, offset, bounded16(metrics.seconds()));
   pDtCharacteristic->setValue(data, offset);
-  pDtCharacteristic->notify();
+  if(ftmsSubscribed && pDtCharacteristic->getSubscribedCount()>0) {
+    pDtCharacteristic->notify();
+    ++ftmsNotifications;
+    ++ftmsNotifyAfterSubscribe;
+  }
   // GPIO33 on CYD is the touch CS, NOT the Heltec battery ADC. The board is
   // USB-powered; keep the existing Battery Service present but report full
   // external power availability instead of reading bogus touch-pin voltages.
@@ -1096,7 +1137,7 @@ void updateUI() {
   if(activeMode==Mode::Race && !ghostWorkout) {renderRaceUI();return;}
   if(calibrationScreen && !ghostWorkout) {calibrationPage();return;}
   if(!pageRendered || detailPage!=displayedDetails || ghostWorkout!=displayedGhostWorkout)pageLayout();
-  textPatch(0,160,2,85,19,deviceConnected?"BLE OK":"BLE ...",
+  textPatch(0,160,2,85,19,cydble::FtmsHealth::streamReady(deviceConnected,ftmsSubscribed,ftmsNotifyAfterSubscribe)?"BLE OK":(deviceConnected?"BLE LINK":"BLE ..."),
             deviceConnected?speedColor:labelColor,panelColor,2);
   textPatch(1,250,2,70,19,String(hrStatus(displayedHrState(millis()))),
             liveHr(millis())?heartColor:labelColor,panelColor,2,true);
@@ -1301,7 +1342,7 @@ void renderRaceUI() {
   textPatch(17,165,149,148,25,
             String(metrics.speed*3.6f,1)+" km/h",
             speedColor,backgroundColor,4);
-  textPatch(18,180,2,83,20,deviceConnected?"BLE OK":"BLE ...",
+  textPatch(18,180,2,83,20,cydble::FtmsHealth::streamReady(deviceConnected,ftmsSubscribed,ftmsNotifyAfterSubscribe)?"BLE OK":(deviceConnected?"BLE LINK":"BLE ..."),
             deviceConnected?speedColor:labelColor,panelColor,2);
   textPatch(19,267,3,50,20,armed?"--:--":raceTime(ghost.elapsed(now)),
             labelColor,panelColor,2,true);
@@ -1358,7 +1399,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.17 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.18 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1487,10 +1528,32 @@ void loop() {
                     hrStatus(hrState),(unsigned long)ftmsNotifications);
     }
   }
+  // Recover from an ACL with no Rowing Data CCCD. No active data session is
+  // ever disconnected. Limit retries to avoid endless Garmin reconnection.
+  if(cydble::FtmsHealth::retryUnsubscribed(
+       now,deviceConnected,ftmsSubscribed,ftmsConnectedAtMs,
+       ftmsUnsubscribedRetries) &&
+     hrFtmsHandle!=HR_INVALID_HANDLE) {
+    ++ftmsUnsubscribedRetries;
+    // Let the current disconnect complete; no two retries in the same loop.
+    ftmsConnectedAtMs=now;
+    Serial.printf("FTMS: ACL connected without 2AD1 subscription for 20s; retry %u/2. If it persists, remove/re-add WR S4BL3 on Garmin.\n",
+                  (unsigned)ftmsUnsubscribedRetries);
+    const int rc=pServer->disconnect(hrFtmsHandle);
+    Serial.printf("FTMS: unsubscribed recovery disconnect rc=%d\n",rc);
+  }
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
-    setCxRowerData();
-    ++ftmsNotifications;
+    setCxRowerData(); // unchanged FTMS payload, notify only when subscribed
+  }
+  if((uint32_t)(now-ftmsLastHealthReportMs)>=8000) {
+    ftmsLastHealthReportMs=now;
+    Serial.printf("FTMS: health ACL=%u CCCD=%u subscribers=%u notifyRequests=%lu thisSubscription=%lu HR=%s hrACL=%u\n",
+                  deviceConnected?1U:0U,ftmsSubscribed?1U:0U,
+                  pDtCharacteristic?(unsigned)pDtCharacteristic->getSubscribedCount():0U,
+                  (unsigned long)ftmsNotifications,
+                  (unsigned long)ftmsNotifyAfterSubscribe,
+                  hrStatus(hrState),(unsigned)hrClientHandle);
   }
   if(now-trendLastMs>=TREND_SAMPLE_MS) {
     trendLastMs=now;
