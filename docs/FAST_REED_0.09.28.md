@@ -39,3 +39,11 @@ W fizycznej próbie 0.09.31 użytkownik potwierdził naturalniejsze opadanie pr�
 Po wejściu w auto pauzę wznowienie wymaga czterech kolejnych impulsów ze strumienia licznika ruchów, z przerwami do 350 ms między sąsiednimi impulsami. Dłuższa przerwa zeruje próbę potwierdzenia. Czas aktywny i zegar ducha ruszają przy czwartym impulsie, a pierwsze odstępy zostają uwzględnione w dystansie. W trybie `pulsetrace` USB pokazuje też impulsy oczekujące na potwierdzenie. Ośmiosekundowy dobieg pozostaje bez zmian.
 
 W próbie na CYD po wejściu w pauzę zarejestrowano pojedynczy impuls oczekujący na potwierdzenie. Czas aktywny pozostał na 33,439 s, dystans na 15,34 m, a kolejne odczyty przez ponad 30 s nadal wskazywały pauzę.
+
+Użytkownik potwierdził, że auto pauza działa prawidłowo w próbie 0.09.32.
+
+## Skala symulowanej łodzi w 0.09.33
+
+Bazowy krok dystansu podniesiono z 0,16 do 0,21 m na przyjęty odstęp, czyli o 31,25%. Przy zapisanym mnożniku 0,70 krok wynosi 0,147 m. Dla tych samych impulsów wcześniejsze około 7 km/h w spokojnej serii i 9 km/h w szybszej odpowiadają teraz około 9,2 i 11,8 km/h. To dobrana skala symulatora, a nie pomiar osiągów łodzi na wodzie. Ten sam krok wyznacza prędkość, dystans i tempo /500 m. Bezwładność oraz wznowienie po czterech impulsach pozostają zgodne z 0.09.32.
+
+Nowe wyniki, przebiegi tętna i medale zapisują się pod kluczami `g6_*`, `h6_*` i `w6_*`. Poprzednie rekordy i zapisany mnożnik kalibracji pozostają w NVS.

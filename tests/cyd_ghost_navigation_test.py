@@ -41,7 +41,7 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.32"' in src
+assert 'FIRMWARE_VERSION = "0.09.33"' in src
 adc=(root/'cyd_rower/src/CydTouch.h').read_text()
 assert 'spi_->transfer16(' not in adc
 assert 'z1=adc(0xB1),z2=adc(0xC1)' in adc
@@ -56,6 +56,6 @@ assert 'KONTYNUUJ Z DUCHEM' in src and 'ZMIEN DYSTANS' in src
 assert 'ghost.beatGhost() && !recordSaveFailed' in src
 assert 'drawVictoryCup();' in src
 assert 'ghost.advance(raceClockMs(),metrics.distance())' in src
-assert 'g5_500' in src and 'h5_500' in src and 'w5_500' in src
+assert 'g6_500' in src and 'h6_500' in src and 'w6_500' in src
 assert 'metrics.paused?"AUTO PAUZA"' in src
 print("PASS: byte-oriented pressure/release, calibrated menu, one BOOT entry and one Ghost toggle per finger")

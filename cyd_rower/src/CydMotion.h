@@ -31,7 +31,7 @@ class Engine {
  public:
   // Both directions contribute to the total pulse rate. The virtual
   // distance per accepted interval is provisional, not S4-calibrated.
-  static constexpr float kMetersPerPulse = 0.16f;
+  static constexpr float kMetersPerPulse = 0.21f;
   static constexpr float kDefaultCalibration = 0.70f;
   static constexpr float kSpeedTauSeconds = 3.5f;
   static constexpr uint32_t kCoastUs = 3000000;

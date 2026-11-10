@@ -474,7 +474,7 @@ static bool scanAndConnectHr() {
 
 #include "GarminGattProbe.h"
 static void hrWorker(void *) {
-  Serial.println("HR: coexist v0.09.32 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
+  Serial.println("HR: coexist v0.09.33 PUBLIC FTMS and RANDOM HR; bootstrap HR-first");
   uint32_t processedEpoch=UINT32_MAX;
   uint32_t lastReport=0,lastAttempt=millis(),connectedAt=hrConnectedAtMs;
   uint8_t failures=0;
