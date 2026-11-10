@@ -32,6 +32,12 @@ assert "tft.fillScreen(" in body("pageLayout")
 assert "tft.fillScreen(" in body("initDisplay")
 assert "tft.fillScreen(" in body("paintRaceLayout")
 assert "tft.fillScreen(backgroundColor);" in source
+assert "tft.setRotation(displayRotation);" in source
+assert "displayRotation=cydview::checkedRotation(" in source
+assert "cydview::mapTouchToDisplay(fx,fy,touchRotation,displayRotation);" in source
+assert "p.putUChar(\"tc_rot\",displayRotation);" in source
+assert "toggleDisplayOrientation();" in source
+assert "tft.drawString(\"OBROT 180\",11,31,1);" in source
 for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "loop"):
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
