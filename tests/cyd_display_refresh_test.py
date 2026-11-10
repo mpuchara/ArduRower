@@ -44,6 +44,8 @@ assert "DEFAULT_ROTATION = 1;" in source and "LEGACY_TOUCH_ROTATION = 3;" in sou
 assert "tft.setRotation(DEFAULT_ROTATION)" in source
 assert "if (touchRotation!=DEFAULT_ROTATION) {fx=319-fx;fy=239-fy;}" in source
 assert "trendDrawn!=trendRevision" in source
+loop = body("loop")
+assert loop.index("pauseResume.confirm(pulseTime,firstUs)") < loop.index("metrics.pulse(pulseTime)")
 assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
 assert "ghost.start(0)" in source

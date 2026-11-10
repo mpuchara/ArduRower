@@ -13,3 +13,9 @@ Nowe rekordy, przebiegi tętna i medale trafiają do kluczy `g5_*`, `h5_*`, `w5_
 ## Powtórka na firmware 0.09.28
 
 Na CYD licznik wzrósł o sześć w każdej z dwóch serii. Zarejestrowane impulsy dają odpowiednio 6,52 i 9,09 km/h średnio w przedziale od pierwszego do ostatniego impulsu oraz szczyty filtra około 8,2 i 10,8 km/h. W szybszej serii pomiar dystansu przyjął dodatkowe impulsy, które nie zasiliły detektora ruchów. Kolejka nie zgubiła zdarzeń. Po zatrzymaniu dystans ustabilizował się na 59,14 m, a prędkość spadła do zera. Podczas próby log potwierdził równoczesne FTMS i tętno z Garmina.
+
+## Wznowienie w 0.09.29
+
+W fizycznej próbie 0.09.28 użytkownik widział około 7 km/h przy spokojnym ruchu i 9 km/h przy szybszym. Zgłosił również sporadyczne wyjście z automatycznej pauzy. W logu 0.09.27 pojedyncze zbocze potrafiło wznowić czas bez przyrostu dystansu.
+
+W 0.09.29 trening po pauzie wznawia się dopiero po dwóch impulsach ze strumienia licznika ruchów w odstępie do 350 ms. Odstęp między nimi trafia do dystansu, a czas aktywny rusza od potwierdzenia. Zbyt późne zbocze rozpoczyna nową próbę potwierdzenia. Testy obejmują osamotnione zbocza, wznowienie po parze i przepełnienie licznika mikrosekund.

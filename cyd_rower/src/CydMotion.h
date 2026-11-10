@@ -8,6 +8,27 @@
 
 namespace cydmotion {
 enum class Phase : uint8_t { Waiting, Drive, Return };
+// A lone reed edge while paused is not enough to restart the clock.
+class PauseResumeGate {
+ public:
+  void reset() { pending=false; }
+
+  bool confirm(uint32_t nowUs, uint32_t &firstUs) {
+    if(pending && nowUs-candidateUs<=350000UL) {
+      firstUs=candidateUs;
+      reset();
+      return true;
+    }
+    candidateUs=nowUs;
+    pending=true;
+    return false;
+  }
+
+ private:
+  uint32_t candidateUs=0;
+  bool pending=false;
+};
+
 class Engine {
  public:
   // Both directions contribute to the total pulse rate. The virtual

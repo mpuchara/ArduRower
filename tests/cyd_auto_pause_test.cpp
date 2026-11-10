@@ -4,6 +4,15 @@
 #include <math.h>
 #include <stdio.h>
 int main(){
+  cydmotion::PauseResumeGate resume;
+  uint32_t first=0;
+  assert(!resume.confirm(1000000,first));
+  assert(!resume.confirm(2600000,first)); // isolated edge after a stop
+  assert(resume.confirm(2680000,first) && first==2600000);
+  assert(!resume.confirm(2690000,first)); // requires a fresh pair
+  resume.reset();
+  assert(!resume.confirm(0xfffffff0UL,first));
+  assert(resume.confirm(100000,first) && first==0xfffffff0UL);
   ghostrace::Race reference;reference.arm(500,nullptr);reference.start(0);
   for(int i=1;i<=125;++i)reference.advance(i*1000,i*4.0f);
   RowerMetrics m;cydmotion::Engine movement;ghostrace::Race race;
