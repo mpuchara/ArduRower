@@ -90,6 +90,7 @@ volatile uint32_t ftmsSubscriptionChanges=0;
 volatile uint32_t ftmsSubscribedAtMs=0;
 volatile bool ftmsSubscribed=false;
 uint32_t ftmsLastHealthReportMs=0;
+uint8_t ftmsUnsubscribedRetries=0;
 volatile uint32_t ftmsConnectedAtMs=0;
 volatile uint32_t ftmsDisconnectedAtMs=0;
 volatile uint16_t receivedHr=0;
@@ -250,7 +251,11 @@ class MyCallbacks : public NimBLECharacteristicCallbacks {
   // NimBLE-Arduino 1.4.3 callback for 0x2AD1's 0x2902 CCCD.
   void onSubscribe(NimBLECharacteristic *chr,ble_gap_conn_desc *desc,
                    uint16_t subValue) override {
-    if(chr!=pDtCharacteristic)return;
+    if(chr!=pDtCharacteristic) {
+      Serial.printf("FTMS: other CCCD uuid=%s subValue=%u (not 2AD1)\n",
+                    chr->getUUID().toString().c_str(),(unsigned)subValue);
+      return;
+    }
     const bool enabled=(subValue&1U)!=0;
     ftmsSubscribed=enabled;
     ftmsSubscribedAtMs=enabled?millis():0;
@@ -292,9 +297,11 @@ void initBLE() {
   pBatCharacteristic = pBatteryService->createCharacteristic(
       NimBLEUUID((uint16_t)batteryLevel),
       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  pBatCharacteristic->setCallbacks(new MyCallbacks());
   pStCharacteristic = pService->createCharacteristic(
       NimBLEUUID((uint16_t)FitnessMachineStatus),
       NIMBLE_PROPERTY::NOTIFY);
+  pStCharacteristic->setCallbacks(new MyCallbacks());
   pService->start();
   pBatteryService->start();
   NimBLEService *pService2 = pServer->createService(NimBLEUUID((uint16_t)DEVICE_INFORMATION));
@@ -311,6 +318,8 @@ void initBLE() {
   NimBLECharacteristic *pCharacteristic29 = pService2->createCharacteristic(
       NimBLEUUID((uint16_t)0x2A29), NIMBLE_PROPERTY::READ);
   pService2->start();
+  Serial.printf("FTMS: 2AD1 value handle=%u, notify subscriptions tracked\n",
+                (unsigned)pDtCharacteristic->getHandle());
   // Preserve original device-information characteristic strings, not new IDs.
   pCharacteristic24->setValue("4");
   pCharacteristic25->setValue("0000");
@@ -1518,6 +1527,18 @@ void loop() {
       Serial.printf("FTMS: advertising active; waiting for Garmin, HR=%s tx=%lu\n",
                     hrStatus(hrState),(unsigned long)ftmsNotifications);
     }
+  }
+  // Recover from an ACL with no Rowing Data CCCD. No active data session is
+  // ever disconnected. Limit retries to avoid endless Garmin reconnection.
+  if(cydble::FtmsHealth::retryUnsubscribed(
+       now,deviceConnected,ftmsSubscribed,ftmsConnectedAtMs,
+       ftmsUnsubscribedRetries) &&
+     hrFtmsHandle!=HR_INVALID_HANDLE) {
+    ++ftmsUnsubscribedRetries;
+    Serial.printf("FTMS: ACL connected without 2AD1 subscription for 20s; retry %u/2. If it persists, remove/re-add WR S4BL3 on Garmin.\n",
+                  (unsigned)ftmsUnsubscribedRetries);
+    const int rc=pServer->disconnect(hrFtmsHandle);
+    Serial.printf("FTMS: unsubscribed recovery disconnect rc=%d\n",rc);
   }
   if (deviceConnected && now - lastBleMs >= 1000) {
     lastBleMs = now;
