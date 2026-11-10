@@ -15,6 +15,11 @@ int main() {
   assert(!FtmsHealth::canTryHr(19002,true,false,1000,10,true));
   assert(!FtmsHealth::canTryHr(19002,false,true,1000,10,true));
   assert(!FtmsHealth::canTryHr(19002,true,true,0,10,true));
+  assert(!FtmsHealth::retryUnsubscribed(19999,true,false,1000,0));
+  assert(FtmsHealth::retryUnsubscribed(21000,true,false,1000,0));
+  assert(!FtmsHealth::retryUnsubscribed(21000,true,true,1000,0));
+  assert(!FtmsHealth::retryUnsubscribed(21000,false,false,1000,0));
+  assert(!FtmsHealth::retryUnsubscribed(21000,true,false,1000,2));
   assert(!FtmsHealth::mustYieldHr(true,true));
   assert(FtmsHealth::mustYieldHr(true,false));
   assert(FtmsHealth::mustYieldHr(false,true));
