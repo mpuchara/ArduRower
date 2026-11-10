@@ -17,12 +17,19 @@ class Engine {
   static constexpr float kReportedSpeedTauSeconds = 2.5f;
   static constexpr uint32_t kDeadTimeUs = 15000;
   static constexpr uint32_t kRearmGapUs = 1600000;
+  static constexpr uint32_t kFastTurnMinGapUs = 36000;
+  static constexpr uint32_t kFastPhaseMinUs = 160000;
   Phase phase=Phase::Waiting;
   uint32_t pulses=0, strokes=0, transitions=0;
   float speed=0, reportedSpeed=0, meters=0, spm=0, calibration=kDefaultCalibration;
   uint16_t phasePulses=0;
   uint32_t phaseStartUs=0, lastPulseUs=0, lastTickUs=0, lastStrokeUs=0;
   float averageGapUs=0;
+  // Compare each period with the period one full four-magnet revolution ago:
+  // a consistently uneven magnet spacing must not look like a turnaround.
+  uint32_t previousGapsUs[4] = {};
+  uint8_t gapIndex=0, gapCount=0;
+  uint32_t pendingFastTurnGapUs=0;
   bool started=false, haveStroke=false;
 
   void reset(uint32_t nowUs) {
@@ -33,6 +40,9 @@ class Engine {
     phaseStartUs=lastPulseUs=lastTickUs=nowUs;
     lastStrokeUs=0;
     averageGapUs=0;
+    pendingFastTurnGapUs=0;
+    gapIndex=gapCount=0;
+    for(uint8_t i=0;i<4;++i) previousGapsUs[i]=0;
     started=haveStroke=false;
   }
   void setCalibration(float value) {
@@ -81,17 +91,28 @@ class Engine {
       phasePulses=1;
       phaseStartUs=lastPulseUs=nowUs;
       averageGapUs=0;
+      pendingFastTurnGapUs=0;
+      gapIndex=gapCount=0;
+      for(uint8_t i=0;i<4;++i)previousGapsUs[i]=0;
       if(gap>=kRearmGapUs)spm=0;
       return;
     }
     const bool hasBaseline=averageGapUs>0;
-    // A single slow section is not a stroke boundary: require sufficient
-    // elapsed time, pulse count, and a slowdown relative to local cadence.
+    const uint32_t elapsed=static_cast<uint32_t>(nowUs-phaseStartUs);
+    // Keep the proven conservative detection for clearly slow turnarounds.
     const float threshold=fmaxf(105000.0f, fminf(360000.0f,
                                averageGapUs*2.65f));
-    const bool boundary=hasBaseline && gap>threshold &&
-                        phasePulses>=6 &&
-                        static_cast<uint32_t>(nowUs-phaseStartUs)>320000;
+    const bool longTurn=hasBaseline && gap>threshold &&
+                        phasePulses>=6 && elapsed>320000;
+    // At higher cadence both reversals can be shorter than 105 ms. Detect
+    // a local slowdown, then confirm it only if the next magnet arrives
+    // sooner. Comparing with the same gap one 4-magnet revolution earlier
+    // rejects a fixed large spacing between two unevenly placed magnets.
+    const uint32_t sameMagnetGap=(gapCount==4)?previousGapsUs[gapIndex]:0;
+    const bool fastPhaseReady=phasePulses>=6 && elapsed>=kFastPhaseMinUs;
+    const bool fastTurnConfirmed=fastPhaseReady && pendingFastTurnGapUs>0 &&
+                                gap<pendingFastTurnGapUs*0.82f;
+    const bool boundary=longTurn || fastTurnConfirmed;
     if(boundary) {
       if(phase==Phase::Drive) {
         // Count once when the driven pull finishes; the return is NOT a stroke.
@@ -99,7 +120,7 @@ class Engine {
           if(haveStroke) {
             const float interval=(nowUs-lastStrokeUs)/1000000.0f;
             const float instantaneous=60.0f/interval;
-            if(instantaneous>=8 && instantaneous<=65)
+            if(instantaneous>=8 && instantaneous<=90)
               spm=(spm>0) ? spm*0.55f+instantaneous*0.45f : instantaneous;
           }
           ++strokes;lastStrokeUs=nowUs;haveStroke=true;
@@ -113,14 +134,23 @@ class Engine {
       phaseStartUs=nowUs;
       // Reset baseline at direction changes; this gap is deliberately excluded.
       averageGapUs=0;
+      pendingFastTurnGapUs=0;
     } else {
-      // Never train baseline on a turnaround candidate: otherwise the
-      // slowdown itself rapidly raises the threshold.
-      if(gap<400000 && (!hasBaseline || gap<averageGapUs*1.8f))
+      const bool fastTurnCandidate=hasBaseline && fastPhaseReady &&
+          sameMagnetGap>0 &&
+          gap>=kFastTurnMinGapUs && gap<250000 &&
+          gap>averageGapUs*1.55f && gap>sameMagnetGap*1.35f;
+      pendingFastTurnGapUs=fastTurnCandidate?gap:0;
+      // Do not include the suspected reversal in the local running cadence.
+      if(!fastTurnCandidate && gap<400000 &&
+         (!hasBaseline || gap<averageGapUs*1.8f))
         averageGapUs=hasBaseline ? averageGapUs*0.82f+gap*0.18f : gap;
     }
     ++phasePulses;
     lastPulseUs=nowUs;
+    previousGapsUs[gapIndex]=gap;
+    gapIndex=(gapIndex+1)&3;
+    if(gapCount<4)++gapCount;
     if(phase==Phase::Drive && gap<240000) {
       // Only driving pulses add energy. Reverse/return pulses never
       // accelerate the virtual flywheel. Virtual speed continues through
