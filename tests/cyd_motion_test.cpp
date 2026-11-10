@@ -69,6 +69,24 @@ int main(){
   REQUIRE(quicker.speed==0 && quicker.meters==steady.meters);
   quicker.onPulse(quickerUs+6000000);
   REQUIRE(quicker.meters==steady.meters); // interval across a rest
+  // Fast reel: an alternating 13/37 ms pair loses one edge with
+  // 15 ms debounce. Include both for distance and keep stroke input intact.
+  Engine fastReel, strokeInputOnly;
+  uint32_t pairTime=100000;
+  fastReel.onPulse(pairTime);
+  strokeInputOnly.onPulse(pairTime);
+  for(int i=0;i<100;++i) {
+    fastReel.onPulse(pairTime+2500,false); // bounce remains ignored
+    fastReel.onPulse(pairTime+13000,false);
+    pairTime+=50000;
+    fastReel.onPulse(pairTime);
+    strokeInputOnly.onPulse(pairTime);
+  }
+  REQUIRE(fastReel.pulses==strokeInputOnly.pulses);
+  REQUIRE(fastReel.strokes==strokeInputOnly.strokes);
+  REQUIRE(fastReel.transitions==strokeInputOnly.transitions);
+  REQUIRE(fabsf(fastReel.meters-2*strokeInputOnly.meters)<0.001f);
+  REQUIRE(fastReel.speed>1.9f*strokeInputOnly.speed);
   // Short 50-70ms reversals during fast strokes were previously rejected
   // by the fixed 105ms / 320ms gates; this caused ~half the strokes to vanish.
   e.reset(0);

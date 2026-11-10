@@ -1,12 +1,12 @@
 # ArduRower
 
-## ArduRower CYD 0.09.27
+## ArduRower CYD 0.09.28
 
-Aktualne wydanie jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Prędkość i dystans wynikają z tych samych impulsów kontaktronu, niezależnie od fazy ruchu rozpoznanej przez licznik. [Model pomiaru i kalibracja](docs/PULSE_DISTANCE_0.09.27.md). Na fizycznym CYD sprawdzono serię **10 szybkich ruchów z 10 naliczeniami**. [Zmiany i wyniki testów](docs/MOTION_TRENDS_0.09.26.md).
+Aktualne wydanie jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Prędkość i dystans wynikają z tych samych impulsów kontaktronu, niezależnie od fazy ruchu rozpoznanej przez licznik. [Model pomiaru i kalibracja](docs/FAST_REED_0.09.28.md). Na fizycznym CYD sprawdzono serię **10 szybkich ruchów z 10 naliczeniami**. [Zmiany i wyniki testów](docs/MOTION_TRENDS_0.09.26.md).
 
-- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.27`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
+- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.28`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
 - **Garmin** — pole **ArduRower HR 015** odbiera dane z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
-- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 5 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Wydanie 0.09.27 zapisuje rekordy w osobnym zestawie zgodnym z nowym dystansem. [Zasady](docs/GHOST_0.09.24.md).
+- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 5 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Wydanie 0.09.28 zapisuje rekordy w osobnym zestawie zgodnym z nowym dystansem. [Zasady](docs/GHOST_0.09.24.md).
 - **Ekran i dotyk** — zachowano poziomą orientację z 0.09.25, obróconą o 180° względem 0.09.24, wraz z przeliczeniem starszej kalibracji. [Sprzęt, sterowanie i diagnostyka](cyd_rower/README.md).
 
 ## Oryginalny wariant Heltec OLED

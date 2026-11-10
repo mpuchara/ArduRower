@@ -31,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.27";
+static constexpr const char *FIRMWARE_VERSION = "0.09.28";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -171,8 +171,9 @@ uint32_t lastGhostMenuHeartbeatMs=0;
 
 portMUX_TYPE pulseMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t pulseQueue[QUEUE_SIZE];
+volatile bool strokePulseQueue[QUEUE_SIZE];
 volatile uint16_t queueHead = 0, queueTail = 0;
-volatile uint32_t lastEdgeUs = 0, droppedPulses = 0;
+volatile uint32_t lastEdgeUs = 0, lastDistanceEdgeUs = 0, droppedPulses = 0;
 volatile bool haveEdge = false;
 uint32_t lastDisplayMs = 0, lastBleMs = 0, lastHistoryMs = 0;
 bool detailPage = false, buttonDown = false, longPressDone = false;
@@ -459,13 +460,18 @@ void setCxRowerData() {
 void IRAM_ATTR rowerdebounceinterrupt() {
   const uint32_t now = micros();
   portENTER_CRITICAL_ISR(&pulseMux);
-  if (!haveEdge || (uint32_t)(now - lastEdgeUs) >= SENSOR_DEBOUNCE_US) {
-    haveEdge = true;
-    lastEdgeUs = now;
-    const uint16_t next = (queueHead + 1) % QUEUE_SIZE;
-    if (next != queueTail) {
-      pulseQueue[queueHead] = now;
-      queueHead = next;
+  const bool strokePulse=!haveEdge || now-lastEdgeUs>=SENSOR_DEBOUNCE_US;
+  const bool distancePulse=!haveEdge ||
+      now-lastDistanceEdgeUs>=cydmotion::Engine::kDistanceDeadTimeUs;
+  if(strokePulse)lastEdgeUs=now;
+  if(distancePulse)lastDistanceEdgeUs=now;
+  if(strokePulse || distancePulse) {
+    haveEdge=true;
+    const uint16_t next=(queueHead+1)%QUEUE_SIZE;
+    if(next!=queueTail) {
+      pulseQueue[queueHead]=now;
+      strokePulseQueue[queueHead]=strokePulse;
+      queueHead=next;
     } else ++droppedPulses;
   }
   portEXIT_CRITICAL_ISR(&pulseMux);
@@ -499,10 +505,10 @@ void renderRaceUI();
 const uint16_t raceDistances[3] = {500, 1000, 2000};
 // Preserve wall-clock v2 records under their original keys. Active-clock
 // races use a separate version/key so rests never unfairly beat old records.
-// Keep flywheel-model records in their original NVS keys.
-const char *raceKeys[3] = {"g4_500", "g4_1000", "g4_2000"};
-const char *heartKeys[3] = {"h4_500", "h4_1000", "h4_2000"};
-const char *winKeys[3] = {"w4_500", "w4_1000", "w4_2000"};
+// Preserve records from previous distance models in their original keys.
+const char *raceKeys[3] = {"g5_500", "g5_1000", "g5_2000"};
+const char *heartKeys[3] = {"h5_500", "h5_1000", "h5_2000"};
+const char *winKeys[3] = {"w5_500", "w5_1000", "w5_2000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
@@ -1461,7 +1467,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.27 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.28 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1539,7 +1545,7 @@ void loop() {
       } else if(strcmp(usbCommand,"pulsetrace")==0) {
         pulseTraceStarted=millis();
         pulseTrace=true;
-        Serial.println("PULSE TRACE: time_us,raw_strokes,phase,turns,queued_drops");
+        Serial.println("PULSE TRACE: time_us,raw_strokes,phase,turns,queued_drops,stroke_input");
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
@@ -1593,20 +1599,24 @@ void loop() {
   while (true) {
     portENTER_CRITICAL(&pulseMux);
     const bool available = queueTail != queueHead;
+    bool strokePulse=false;
     if (available) {
+      strokePulse=strokePulseQueue[queueTail];
       pulseTime = pulseQueue[queueTail];
       queueTail = (queueTail + 1) % QUEUE_SIZE;
     } else pulseTime = micros();
     portEXIT_CRITICAL(&pulseMux);
     if (!available) { metrics.tick(pulseTime); break; }
-    metrics.pulse(pulseTime);
-    motion.onPulse(pulseTime);
-    bleDuty.onMotion(millis());
+    if(strokePulse) {
+      metrics.pulse(pulseTime);
+      bleDuty.onMotion(millis());
+    }
+    motion.onPulse(pulseTime,strokePulse);
     if(pulseTrace && millis()-pulseTraceStarted>=120000UL)pulseTrace=false;
     if(pulseTrace) {
-      Serial.printf("P,%lu,%lu,%u,%lu,%lu\n",(unsigned long)pulseTime,
+      Serial.printf("P,%lu,%lu,%u,%lu,%lu,%d\n",(unsigned long)pulseTime,
                     (unsigned long)motion.strokes,(unsigned)motion.phase,
-                    (unsigned long)motion.transitions,(unsigned long)droppedPulses);
+                    (unsigned long)motion.transitions,(unsigned long)droppedPulses,strokePulse);
     }
   }
   const uint32_t now=millis();

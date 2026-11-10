@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.27
+# ArduRower CYD 0.09.28
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
@@ -13,7 +13,7 @@ Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO t
 
 Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans lub wróć do zwykłego treningu z menu. Pauza włącza się po 5 sekundach bez impulsów, a ruch ją wznawia. [Szczegóły Ghost Race](../docs/GHOST_0.09.24.md).
 
-Detektor wnioskuje o fazach napędu i powrotu z odstępów między impulsami czterech magnesów na zwijaczu. Jeden kontaktron nie mierzy kierunku bezpośrednio. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/PULSE_DISTANCE_0.09.27.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
+Detektor wnioskuje o fazach napędu i powrotu z odstępów między impulsami czterech magnesów na zwijaczu. Jeden kontaktron nie mierzy kierunku bezpośrednio. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
 Na Garminie dodaj pole **ArduRower HR 015**. Odbiera dystans, tempo i kadencję przez FTMS z `WR S4BL3`, a przez to samo połączenie odsyła tętno. [Instalacja pola](../connect_iq/README.md).
 
@@ -30,7 +30,7 @@ COM3 to przykład. Zapis samej aplikacji zakłada zgodną tablicę partycji i za
 
 ## Weryfikacja
 
-Po restarcie sprawdź numer wersji, reakcję ekranu na dotyk i działanie kontaktronu. Porównaj licznik z ręcznie odliczoną serią spokojnych i szybkich ruchów. Po zatrzymaniu sprawdź pauzę, a podczas treningu potwierdź dane na Garminie i tętno na CYD. Monitor szeregowy działa przy 115200 baud. Polecenie USB `pulsetrace` przez 120 s rejestruje czas przyjętych impulsów, licznik ruchów, fazę, zmiany fazy i przepełnienia kolejki.
+Po restarcie sprawdź numer wersji, reakcję ekranu na dotyk i działanie kontaktronu. Porównaj licznik z ręcznie odliczoną serią spokojnych i szybkich ruchów. Po zatrzymaniu sprawdź pauzę, a podczas treningu potwierdź dane na Garminie i tętno na CYD. Monitor szeregowy działa przy 115200 baud. Polecenie USB `pulsetrace` przez 120 s rejestruje czas przyjętych impulsów, licznik ruchów, fazę, zmiany fazy i przepełnienia kolejki i znacznik wejścia detektora ruchów.
 
 <details>
 <summary>Archiwalne notatki CYD do 0.09.15</summary>
