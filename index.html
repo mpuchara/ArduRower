@@ -52,16 +52,19 @@
 
   <section class="card alert">
     <strong>Ważne przed wgraniem</strong>
-    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Zmiany w wersji 0.09.15 są zweryfikowane automatycznie, ale wymagają sprawdzenia na fizycznym CYD i Garminie.</div>
+    <div>Instalacja zastąpi aktualne firmware na płytce. Nie odłączaj kabla podczas zapisu. Zmiany w wersji 0.09.16 są zweryfikowane automatycznie, ale wymagają sprawdzenia na fizycznym CYD i ergometrze. Obsługa Garmin BLE nie została zmieniona.</div>
   </section>
 
   <section class="card">
-    <h2>ArduRower 0.09.15 — HR-first / FTMS-first: eksperyment BLE</h2>
+    <h2>ArduRower 0.09.16 — stabilna prędkość i szybkie ruchy</h2>
     <p>Wykryty i sprawdzony na Twojej płytce profil: <b>ST7789 z podświetleniem GPIO21</b>. Inne warianty zostały usunięte z instalatora i kompilacji.</p>
     <p class="notice"><b>Nowość:</b> wspólny wykres tętna i prędkości z ostatnich 10 minut, duże wartości oraz szacowana moc w dolnym rzędzie. Tętno odbieramy przez BLE tylko gdy Garmin nadaje je w standardowej usłudze HR (0x180D). Brak transmisji nie blokuje FTMS. Dłuższe dotknięcie nagłówka w dashboardzie otwiera regulację skali wirtualnego dystansu; nowy model wykrywa dwie fazy ruchu koła. To model eksperymentalny, nie pomiar oryginalnego S4.</p><p class="notice">Ekran zachowuje płynne odświeżanie. <b>Ghost Race:</b> przesuń palcem w lewo lub w prawo, aby przejść do menu wyścigów 500, 1000 i 2000 m. Wybierz dystans dotknięciem; wyścig zacznie się przy pierwszym ruchu. Kolejny swipe wraca do dashboardu. Bez przycisku BOOT. Przy pierwszym uruchomieniu kalibracja trzech punktow jest automatyczna, jesli nie ma zapisu.</p>
   </section>
 
   <section class="card">
+    <h2>0.09.16 — dokładniejsze szybkie ruchy, gładszy wykres</h2>
+    <p><b>Prędkość:</b> oddzielono model do całkowania dystansu od wygładzonej wartości na ekran, wykres i BLE. Filtr 2,5 s ogranicza nagłe skoki km/h, bez wpływu na naliczanie metrów. Po 5 sekundach bez impulsów pomiar wraca do zera.</p>
+    <p><b>SPM i ruchy:</b> dodatkowy detektor krótkich zwrotów taśmy rozpoznaje przyspieszenie po lokalnym spowolnieniu, co poprawia wykrywanie przy szybkim wiosłowaniu. Porównanie z impulsem sprzed czterech magnesów ogranicza błędy wynikające z nierównych odstępów. SPM obsługuje sprint do 90 ruchów/min. Model pozostaje estymacją z jednego kontaktronu i wymaga testu sprzętowego.</p>
     <h2>0.09.15 — HR jako pierwszy, FTMS ma priorytet</h2>
     <p><b>Ghost Race wyłącznie ekranem:</b> Przywrocono XPT2046(33,36), dotyk przez touch.touched() oraz rozpoznawanie przesuniecia dopiero po rzeczywistym oderwaniu palca, dokladnie wedlug projektu HA_UBOX_bridge. Jeden kontakt moze wywolac tylko jeden gest, z czasem ponownego uzbrojenia. Wrocil kreator kalibracji 3 punktow przed uruchomieniem Bluetooth, a w menu Ghost jest przycisk KALIBRUJ. Tap w wiersz 500, 1000 lub 2000 m wybiera dystans. Swipe w obie strony przełącza Ghost Race i ekran treningu. Nie trzeba przycisku BOOT; przycisk KALIBRUJ jest na ekranie Ghost.</p>
     <p><b>Nowy widok:</b> po wybraniu 500/1000/2000m pojawia się pulpit DUCH z przygaszonym wykresem prędkości i pulsu. Przerywana linia obrazuje prędkość zapisanego ducha. Pole TEMPO /500m zastępuje ROZNICA / DUCH: metry przewagi lub straty. Bez wcześniejszego rekordu: -- m.</p>
@@ -92,7 +95,7 @@
       </esp-web-install-button>
     </template>
     <div id="not-published" class="notice" hidden role="alert">
-      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.15.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.15</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
+      <strong>Instalacja wstrzymana — brak zweryfikowanego firmware 0.09.16.</strong> Sprawdź, czy akcja „ArduRower CYD — Pages installer” zakończyła się sukcesem. Otwórz tę stronę ponownie z <b>Ctrl+F5</b> albo dopisz do adresu <code>?v=0.09.16</code>. Przycisk instalacji pojawi się tylko wtedy, gdy wersja strony, manifestu i czterech obrazów BIN są zgodne.
     </div>
     <div id="status" class="muted" aria-live="polite" style="margin-top:12px">Sprawdzanie dostępności obrazu firmware…</div>
   </section>
@@ -111,7 +114,7 @@
   // Fail closed: an old manifest or cached BIN must NEVER be accepted as
   // the requested update. In particular GitHub Pages can briefly serve files
   // from different deployments while its CDN caches are being refreshed.
-  const EXPECTED_PREFIX = '0.09.15-ble-coexist-';
+  const EXPECTED_PREFIX = '0.09.16-motion-';
   const MANIFEST_PATH = './manifests/st7789-gpio21.json';
   async function checkedJSON(url) {
     const response = await fetch(url, {cache: 'no-store'});
