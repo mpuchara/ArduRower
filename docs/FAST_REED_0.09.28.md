@@ -9,3 +9,7 @@ Bazowy krok dystansu podniesiono o około 14%, z 0,14 do 0,16 m na przyjęty ods
 Nowe rekordy, przebiegi tętna i medale trafiają do kluczy `g5_*`, `h5_*`, `w5_*`. Wcześniejsze dane Ghost Race i ustawienia kalibracji pozostają w NVS.
 
 [Poprzedni model prędkości i dystansu](PULSE_DISTANCE_0.09.27.md) · [Instalacja](WEB_INSTALL_CYD.md)
+
+## Powtórka na firmware 0.09.28
+
+Na CYD licznik wzrósł o sześć w każdej z dwóch serii. Zarejestrowane impulsy dają odpowiednio 6,52 i 9,09 km/h średnio w przedziale od pierwszego do ostatniego impulsu oraz szczyty filtra około 8,2 i 10,8 km/h. W szybszej serii pomiar dystansu przyjął dodatkowe impulsy, które nie zasiliły detektora ruchów. Kolejka nie zgubiła zdarzeń. Po zatrzymaniu dystans ustabilizował się na 59,14 m, a prędkość spadła do zera. Podczas próby log potwierdził równoczesne FTMS i tętno z Garmina.
