@@ -42,6 +42,10 @@ jobs:
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
           /tmp/cyd_motion_test
+      - name: Test persistence of CYD landscape orientation and touch transform
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_orientation_test.cpp -o /tmp/cyd_orientation_test
+          /tmp/cyd_orientation_test
       - name: Test autoscaling of CYD heart rate and speed trend
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_trend_autoscale_test.cpp -o /tmp/cyd_trend_autoscale_test
