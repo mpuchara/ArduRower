@@ -1535,6 +1535,8 @@ void loop() {
        ftmsUnsubscribedRetries) &&
      hrFtmsHandle!=HR_INVALID_HANDLE) {
     ++ftmsUnsubscribedRetries;
+    // Let the current disconnect complete; no two retries in the same loop.
+    ftmsConnectedAtMs=now;
     Serial.printf("FTMS: ACL connected without 2AD1 subscription for 20s; retry %u/2. If it persists, remove/re-add WR S4BL3 on Garmin.\n",
                   (unsigned)ftmsUnsubscribedRetries);
     const int rc=pServer->disconnect(hrFtmsHandle);
