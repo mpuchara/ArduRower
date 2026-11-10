@@ -22,6 +22,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include <math.h>
 #include <Preferences.h>
 #include "CydMotion.h"
+#include "TrendAutoScale.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
@@ -30,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.25";
+static constexpr const char *FIRMWARE_VERSION = "0.09.26";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -41,7 +42,6 @@ static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
 static constexpr uint16_t QUEUE_SIZE = 256;
 static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
-static constexpr bool LOG_SENSOR_PULSES = false;
 static constexpr uint32_t TREND_SAMPLE_MS=2000;
 static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
 static constexpr uint32_t HR_TIMEOUT_MS=6500;
@@ -415,6 +415,10 @@ void put16(uint8_t *data, uint8_t &offset, uint16_t value) {
   data[offset++] = value & 0xff;
   data[offset++] = value >> 8;
 }
+float reportedPace() {
+  return motion.reportedSpeed > 0.05f && !metrics.paused ?
+         500.0f / motion.reportedSpeed : 0;
+}
 void setCxRowerData() {
   // Byte format and flag semantics copied from the working ArduRower v0.07.
   uint8_t data[19];
@@ -428,7 +432,8 @@ void setCxRowerData() {
   data[offset++] = distance & 0xff;
   data[offset++] = (distance >> 8) & 0xff;
   data[offset++] = (distance >> 16) & 0xff;
-  put16(data, offset, metrics.pace() > 0 ? bounded16(metrics.pace()) : 0xffff);
+  const float pace=reportedPace();
+  put16(data, offset, pace > 0 ? bounded16(pace) : 0xffff);
   put16(data, offset, metrics.averagePace() > 0 ? bounded16(metrics.averagePace()) : 0xffff);
   if (SEND_EQUIVALENT_POWER) {
     put16(data, offset, min(bounded16(metrics.equivalentPower()), (uint16_t)32767));
@@ -875,10 +880,11 @@ String formatTime(uint32_t seconds) {
 String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
 }
+uint16_t speedTenths(float kmh) {
+  return static_cast<uint16_t>(lroundf(constrain(kmh*10.0f,0.0f,600.0f)));
+}
 void recordTrend(uint32_t now) {
-  const float kmh=motion.speed*3.6f;
-  const float tenth=fmaxf(0.0f,fminf(600.0f,kmh*10.0f));
-  trends[trendHead]={static_cast<uint16_t>(lroundf(tenth)),
+  trends[trendHead]={speedTenths(motion.reportedSpeed*3.6f),
                      static_cast<uint8_t>(liveHr(now)),0};
   trendHead=(trendHead+1)%TREND_SAMPLES;
   if(trendCount<TREND_SAMPLES)++trendCount;
@@ -888,7 +894,7 @@ const TrendPoint &trendAt(uint16_t i) {
   return trends[(trendHead+TREND_SAMPLES-trendCount+i)%TREND_SAMPLES];
 }
 void recordHistory() {
-  history[historyHead] = {(float)liveHr(millis()), metrics.speed * 3.6f};
+  history[historyHead] = {(float)liveHr(millis()), motion.reportedSpeed * 3.6f};
   historyHead = (historyHead + 1) % HISTORY_LENGTH;
   if (historyCount < HISTORY_LENGTH) ++historyCount;
   ++historyRevision;
@@ -946,7 +952,7 @@ void cardValue(uint8_t slot, int x, bool power) {
     Serial.printf("UI cardValue: invalid slot %u\n", (unsigned)slot);
     return;
   }
-  const float val = power ? metrics.equivalentPower() : metrics.speed * 3.6f;
+  const float val = power ? metrics.equivalentPower() : motion.reportedSpeed * 3.6f;
   const String txt = power ? "~" + String((int)roundf(val)) : String(val, 1);
   if (previousValid[slot] && previousField[slot] == txt) return;
   previousValid[slot] = true; previousField[slot] = txt;
@@ -1004,17 +1010,37 @@ void plot(int x, int y, int w, int h, bool power) {
     if (scratchReady) scratch.pushSprite(x+left,y,0,0,part,h);
   }
 }
-// Two independent units on one long graph, with a fixed mapping to avoid
-// rescaling mid-session. Heartbeat samples that are stale/absent break the HR
-// line; they must never be drawn as zero or mistaken for a real measurement.
+// Ghost speeds use the saved distance curve on the active training clock.
+TrendPoint ghostTrendAt(uint32_t elapsed) {
+  const uint32_t start=elapsed>2000?elapsed-2000:0;
+  const float meters=ghostrace::interpolate(ghost.best,elapsed)-
+                     ghostrace::interpolate(ghost.best,start);
+  const float kmh=elapsed>start ? meters*3600.0f/(elapsed-start) : 0;
+  return {speedTenths(kmh),hasBestHeart?ghostrace::replayHeart(bestHeart,elapsed):uint8_t(0),0};
+}
 void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false) {
-  const int16_t speedMaxTenth=220; // 22.0 km/h right scale
-  const int hrMin=60,hrMax=190; // 60..190 BPM left scale
   const uint16_t speedInk=speedColor;
   const uint16_t hrInk=heartColor;
   const uint16_t ghostInk=(speedColor>>1)&0x7BEF;
   const bool ghostCurve=ghostTraining && ghost.hasBest && ghost.phase==ghostrace::Phase::Running;
   const uint32_t ghostElapsed=ghostCurve?ghost.elapsed(raceClockMs()):0;
+  // Compute both axes once from the exact points in this window. Cache the
+  // replay samples so the sprite strips use the same data as the scale pass.
+  static TrendPoint ghostSamples[TREND_SAMPLES];
+  cydplot::AutoScale scale;
+  for(uint16_t i=0;i<trendCount;++i) {
+    const TrendPoint &sample=trendAt(i);
+    scale.includeSpeed(sample.tenthKmh);
+    scale.includeHeart(sample.heartBpm);
+    const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
+    if(ghostCurve && ghostElapsed>=age) {
+      const TrendPoint replay=ghostTrendAt(ghostElapsed-age);
+      ghostSamples[i]=replay;
+      scale.includeSpeed(replay.tenthKmh);
+      scale.includeHeart(replay.heartBpm);
+    }
+  }
+  scale.finish();
   for(int left=0;left<width;left+=BUFFER_W) {
     const int part=min((int)BUFFER_W,width-left);
     if(scratchReady) {
@@ -1033,27 +1059,15 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
     for(uint16_t i=0;i<trendCount;++i) {
       const TrendPoint &sample=trendAt(i);
       const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
-      const int hrY=height-1-(int)((constrain((int)sample.heartBpm,hrMin,hrMax)-hrMin)*
-                                  (height-1)/(hrMax-hrMin));
-      const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
-                                (int)speedMaxTenth))*(height-1)/speedMaxTenth);
-      bool hrValid=sample.heartBpm>=35;
+      const int hrY=scale.heartY(sample.heartBpm,height);
+      const int spY=scale.speedY(sample.tenthKmh,height);
+      const bool hrValid=sample.heartBpm>=35;
       const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
       const bool ghostValid=ghostCurve && ghostElapsed>=age;
-      int ghostY=height-1;
-      int ghostHrY=height-1;
-      bool ghostHrValid=false;
-      if(ghostValid) {
-        const uint32_t t=ghostElapsed-age,start=t>2000?t-2000:0;
-        const float dt=(t-start)*0.001f;
-        const float meters=ghostrace::interpolate(ghost.best,t)-
-                           ghostrace::interpolate(ghost.best,start);
-        const float kmh=dt>0?constrain(meters*3.6f/dt,0.0f,22.0f):0;
-        ghostY=height-1-(int)(kmh*10.0f*(height-1)/speedMaxTenth);
-        const uint8_t bpm=hasBestHeart?ghostrace::replayHeart(bestHeart,t):0;
-        ghostHrValid=bpm>=35;
-        ghostHrY=height-1-(constrain((int)bpm,hrMin,hrMax)-hrMin)*(height-1)/(hrMax-hrMin);
-      }
+      const TrendPoint replay=ghostValid?ghostSamples[i]:TrendPoint{};
+      const int ghostY=scale.speedY(replay.tenthKmh,height);
+      const int ghostHrY=scale.heartY(replay.heartBpm,height);
+      const bool ghostHrValid=replay.heartBpm>=35;
       // Paint historical traces first, so bright live curves stay on top.
       if(i>0 && ghostValid && prevGhostValid && xx>=left-2 && previousX<left+part) {
         if(scratchReady)scratch.drawLine(previousX-left,previousGhostY,xx-left,ghostY,ghostInk);
@@ -1162,7 +1176,7 @@ void updateUI() {
     const uint16_t bpm=liveHr(millis());
     textPatch(2,8,49,145,34,bpm?String(bpm)+" BPM":"-- BPM",
               heartColor,backgroundColor,4);
-    textPatch(3,164,49,149,34,String(metrics.speed*3.6f,1)+" km/h",
+    textPatch(3,164,49,149,34,String(motion.reportedSpeed*3.6f,1)+" km/h",
               speedColor,backgroundColor,4);
     textPatch(4,8,166,102,26,formatTime((uint32_t)metrics.seconds()),
               whiteColor,backgroundColor,4);
@@ -1172,7 +1186,7 @@ void updateUI() {
               whiteColor,backgroundColor,4);
     const String paceOrDelta=ghostWorkout ? (ghost.hasBest ?
       String(ghost.meterLead(raceClockMs())>=0?"+":"")+String((int)lroundf(ghost.meterLead(raceClockMs())))+"m" : "-- m") :
-      formatPace(metrics.pace());
+      formatPace(reportedPace());
     textPatch(7,8,207,102,26,paceOrDelta,
               whiteColor,backgroundColor,4);
     textPatch(8,115,207,104,26,
@@ -1395,7 +1409,7 @@ void renderRaceUI() {
             liveHr(millis())?String(liveHr(millis()))+" BPM":"-- BPM",
             heartColor,backgroundColor,4);
   textPatch(17,165,149,148,25,
-            String(metrics.speed*3.6f,1)+" km/h",
+            String(motion.reportedSpeed*3.6f,1)+" km/h",
             speedColor,backgroundColor,4);
   textPatch(18,180,2,83,20,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
@@ -1446,7 +1460,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.25 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.26 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1504,6 +1518,8 @@ void loop() {
   // USB maintenance commands; no blocking reads in the rowing/BLE loop.
   static char usbCommand[24]={};
   static uint8_t usbLength=0;
+  static uint32_t pulseTraceStarted=0;
+  static bool pulseTrace=false;
   while(Serial.available()) {
     const char c=Serial.read();
     if(c=='\n') {
@@ -1519,6 +1535,10 @@ void loop() {
         Serial.println("USB: requested restart");Serial.flush();ESP.restart();
       } else if(strcmp(usbCommand,"trace")==0) {
         touchTraceUntil=millis()+30000UL;
+      } else if(strcmp(usbCommand,"pulsetrace")==0) {
+        pulseTraceStarted=millis();
+        pulseTrace=true;
+        Serial.println("PULSE TRACE: time_us,raw_strokes,phase,turns,queued_drops");
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
@@ -1581,10 +1601,11 @@ void loop() {
     metrics.pulse(pulseTime);
     motion.onPulse(pulseTime);
     bleDuty.onMotion(millis());
-    if (LOG_SENSOR_PULSES) {
-      Serial.print("P,"); Serial.print(pulseTime);
-      Serial.print(','); Serial.print(metrics.pulses);
-      Serial.print(','); Serial.println(metrics.strokes);
+    if(pulseTrace && millis()-pulseTraceStarted>=120000UL)pulseTrace=false;
+    if(pulseTrace) {
+      Serial.printf("P,%lu,%lu,%u,%lu,%lu\n",(unsigned long)pulseTime,
+                    (unsigned long)motion.strokes,(unsigned)motion.phase,
+                    (unsigned long)motion.transitions,(unsigned long)droppedPulses);
     }
   }
   const uint32_t now=millis();
