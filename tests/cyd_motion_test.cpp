@@ -21,6 +21,7 @@ int main(){
   REQUIRE(e.reportedSpeed>=0 && e.reportedSpeed<7.5);
   printf("30 cycles detected %u; phase transitions %u; distance %.1fm; speed %.2fm/s\n",
         e.strokes,e.transitions,e.meters,e.speed);
+  const float slowMeanSpeed=e.meters*1000000.0f/(now-100000);
   const float before=e.meters;
   now+=6000000;e.tick(now);
   REQUIRE(e.speed==0);
@@ -79,7 +80,10 @@ int main(){
   REQUIRE(e.transitions>=56);
   REQUIRE(e.spm>=45 && e.spm<=60);
   REQUIRE(e.meters>0);
-  printf("Fast 51 SPM: %u strokes, %u phase transitions, %.1f SPM, %.1fm\\n",
+  // Fast rowing must improve the virtual 500m pace, not make it worse.
+  const float fastMeanSpeed=e.meters*1000000.0f/(now-100000);
+  REQUIRE(fastMeanSpeed>slowMeanSpeed*1.10f);
+  printf("Fast 51 SPM: %u strokes, %u phase transitions, %.1f SPM, %.1fm\n",
          e.strokes,e.transitions,e.spm,e.meters);
   // Sprint cadence above 65 SPM must no longer freeze cadence reporting.
   e.reset(0);
