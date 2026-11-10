@@ -36,6 +36,16 @@ for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "pa
     assert "tft.fillScreen(" not in body(method), method
 assert "scratch.pushSprite(" in source
 assert "trendDrawn!=trendRevision" in source
+assert '#include "TrendAutoScale.h"' in source
+trend_body = body("renderSharedTrend")
+assert "cydplot::AutoScale axis;" in trend_body
+assert "axis.includeSpeed(sample.tenthKmh);" in trend_body
+assert "axis.includeHeart(sample.heartBpm);" in trend_body
+assert "axis.includeSpeed(ghostTrendTenthKmh(ghostElapsed,age))" in trend_body
+assert "axis.speedY(sample.tenthKmh,height)" in trend_body
+assert "axis.heartY(sample.heartBpm,height)" in trend_body
+assert "speedMaxTenth=220" not in trend_body
+assert "hrMin=60,hrMax=190" not in trend_body
 assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
 assert "ghost.start(now)" in source

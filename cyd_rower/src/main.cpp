@@ -21,13 +21,14 @@ extern "C" bool bleInUse(void) { return true; }
 #include <math.h>
 #include <Preferences.h>
 #include "CydMotion.h"
+#include "TrendAutoScale.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.15";
+static constexpr const char *FIRMWARE_VERSION = "0.09.16";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -749,7 +750,7 @@ String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
 }
 void recordTrend(uint32_t now) {
-  const float kmh=motion.speed*3.6f;
+  const float kmh=motion.reportedSpeed*3.6f;
   const float tenth=fmaxf(0.0f,fminf(600.0f,kmh*10.0f));
   trends[trendHead]={static_cast<uint16_t>(lroundf(tenth)),
                      static_cast<uint8_t>(liveHr(now)),0};
@@ -877,17 +878,49 @@ void plot(int x, int y, int w, int h, bool power) {
     if (scratchReady) scratch.pushSprite(x+left,y,0,0,part,h);
   }
 }
-// Two independent units on one long graph, with a fixed mapping to avoid
-// rescaling mid-session. Heartbeat samples that are stale/absent break the HR
-// line; they must never be drawn as zero or mistaken for a real measurement.
+// Estimate speed of the saved ghost over the same 2-second trend interval.
+// Do not clamp to the previous fixed 22 km/h axis: both curves share the
+// dynamically chosen speed axis, including when the ghost is faster.
+uint16_t ghostTrendTenthKmh(uint32_t ghostElapsed,uint32_t age) {
+  if(ghostElapsed<age)return 0;
+  const uint32_t t=ghostElapsed-age,start=t>2000?t-2000:0;
+  const float dt=(t-start)*0.001f;
+  if(dt<=0)return 0;
+  const float meters=ghostrace::interpolate(ghost.best,t)-
+                     ghostrace::interpolate(ghost.best,start);
+  return static_cast<uint16_t>(lroundf(
+      fminf(600.0f,fmaxf(0.0f,meters*36.0f/dt))));
+}
+
+// Two independent vertical axes, based on the data *visible* in the chart:
+// left: BPM; right: km/h. Both speed curves share one axis for a fair Ghost
+// Race comparison. Scales are computed once per refresh (not per sprite).
+// Missing/stale HR samples remain gaps, not artificial zero-BPM values.
 void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false) {
-  const int16_t speedMaxTenth=220; // 22.0 km/h right scale
-  const int hrMin=60,hrMax=190; // 60..190 BPM left scale
   const uint16_t speedInk=ghostTraining?(speedColor>>1)&0x7BEF:speedColor;
   const uint16_t hrInk=ghostTraining?(heartColor>>1)&0x7BEF:heartColor;
   const uint16_t ghostInk=(powerColor>>1)&0x7BEF;
   const bool ghostCurve=ghostTraining && ghost.hasBest && ghost.phase==ghostrace::Phase::Running;
   const uint32_t ghostElapsed=ghostCurve?ghost.elapsed(millis()):0;
+
+  cydplot::AutoScale axis;
+  for(uint16_t i=0;i<trendCount;++i) {
+    const TrendPoint &sample=trendAt(i);
+    axis.includeSpeed(sample.tenthKmh);
+    axis.includeHeart(sample.heartBpm);
+    if(ghostCurve) {
+      const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
+      if(ghostElapsed>=age)axis.includeSpeed(ghostTrendTenthKmh(ghostElapsed,age));
+    }
+  }
+  axis.finish();
+
+  // Display the actual upper scale ticks so auto-rescaling is interpretable.
+  // The compact 28px Ghost Race chart keeps all its height for the curves.
+  const bool showScaleLabels=height>=40;
+  const String hrLabel=axis.hasHeartRate?String(axis.heartMax)+" BPM":String("HR --");
+  const String speedLabel=String(axis.speedMaxTenth/10)+" km/h";
+  const int speedLabelX=width-3-(int)speedLabel.length()*6;
   for(int left=0;left<width;left+=BUFFER_W) {
     const int part=min((int)BUFFER_W,width-left);
     if(scratchReady) {
@@ -905,22 +938,13 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
     for(uint16_t i=0;i<trendCount;++i) {
       const TrendPoint &sample=trendAt(i);
       const int xx=width-1-(int)((trendCount-1-i)*(width-1)/(TREND_SAMPLES-1));
-      const int hrY=height-1-(int)((constrain((int)sample.heartBpm,hrMin,hrMax)-hrMin)*
-                                  (height-1)/(hrMax-hrMin));
-      const int spY=height-1-(int)((constrain((int)sample.tenthKmh,0,
-                                (int)speedMaxTenth))*(height-1)/speedMaxTenth);
-      bool hrValid=sample.heartBpm>=hrMin;
+      const int hrY=axis.heartY(sample.heartBpm,height);
+      const int spY=axis.speedY(sample.tenthKmh,height);
+      const bool hrValid=sample.heartBpm>0;
       const uint32_t age=(uint32_t)(trendCount-1-i)*TREND_SAMPLE_MS;
       const bool ghostValid=ghostCurve && ghostElapsed>=age;
-      int ghostY=height-1;
-      if(ghostValid) {
-        const uint32_t t=ghostElapsed-age,start=t>2000?t-2000:0;
-        const float dt=(t-start)*0.001f;
-        const float meters=ghostrace::interpolate(ghost.best,t)-
-                           ghostrace::interpolate(ghost.best,start);
-        const float kmh=dt>0?constrain(meters*3.6f/dt,0.0f,22.0f):0;
-        ghostY=height-1-(int)(kmh*10.0f*(height-1)/speedMaxTenth);
-      }
+      const int ghostY=ghostValid?axis.speedY(
+          ghostTrendTenthKmh(ghostElapsed,age),height):height-1;
       if(i>0 && xx>=left-2 && previousX<left+part) {
         if(prevSpeedValid) {
           if(scratchReady)scratch.drawLine(previousX-left,previousSpeedY,xx-left,spY,speedInk);
@@ -938,6 +962,36 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
       }
       previousX=xx;previousHrY=hrY;previousSpeedY=spY;previousGhostY=ghostY;
       prevHrValid=hrValid;prevSpeedValid=true;prevGhostValid=ghostValid;
+    }
+    if(showScaleLabels) {
+      if(left==0) {
+        const int w=(int)hrLabel.length()*6+4;
+        if(scratchReady) {
+          scratch.fillRect(1,0,w,10,panelColor);
+          scratch.setTextDatum(TL_DATUM);
+          scratch.setTextColor(hrInk,panelColor);
+          scratch.drawString(hrLabel,3,1,1);
+        }else{
+          tft.fillRect(x+1,y,w,10,panelColor);
+          tft.setTextDatum(TL_DATUM);
+          tft.setTextColor(hrInk,panelColor);
+          tft.drawString(hrLabel,x+3,y+1,1);
+        }
+      }
+      if(speedLabelX>=left && speedLabelX<left+part) {
+        const int labelWidth=(int)speedLabel.length()*6+2;
+        if(scratchReady) {
+          scratch.fillRect(speedLabelX-left-1,0,labelWidth,10,panelColor);
+          scratch.setTextDatum(TL_DATUM);
+          scratch.setTextColor(speedInk,panelColor);
+          scratch.drawString(speedLabel,speedLabelX-left,1,1);
+        }else{
+          tft.fillRect(x+speedLabelX-1,y,labelWidth,10,panelColor);
+          tft.setTextDatum(TL_DATUM);
+          tft.setTextColor(speedInk,panelColor);
+          tft.drawString(speedLabel,x+speedLabelX,y+1,1);
+        }
+      }
     }
     if(scratchReady) scratch.pushSprite(x+left,y,0,0,part,height);
   }
@@ -1264,7 +1318,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.15 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.16 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1341,7 +1395,7 @@ void loop() {
   bleDuty.onFtms(deviceConnected,now);
   checkHrStall(now);
   motion.tick(micros());
-  metrics.setExternalTelemetry(motion.meters,motion.speed,
+  metrics.setExternalTelemetry(motion.meters,motion.reportedSpeed,
                                motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
