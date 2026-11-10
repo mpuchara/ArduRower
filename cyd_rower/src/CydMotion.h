@@ -12,11 +12,14 @@ class Engine {
  public:
   static constexpr float kMetersPerDrivePulse = 0.14f; // provisional; NOT S4-calibrated
   static constexpr float kDefaultCalibration = 0.70f;
+  // Low-pass the *reported* speed over approximately one rowing stroke.
+  // The flywheel model and integrated distance remain untouched.
+  static constexpr float kReportedSpeedTauSeconds = 2.5f;
   static constexpr uint32_t kDeadTimeUs = 15000;
   static constexpr uint32_t kRearmGapUs = 1600000;
   Phase phase=Phase::Waiting;
   uint32_t pulses=0, strokes=0, transitions=0;
-  float speed=0, meters=0, spm=0, calibration=kDefaultCalibration;
+  float speed=0, reportedSpeed=0, meters=0, spm=0, calibration=kDefaultCalibration;
   uint16_t phasePulses=0;
   uint32_t phaseStartUs=0, lastPulseUs=0, lastTickUs=0, lastStrokeUs=0;
   float averageGapUs=0;
@@ -25,7 +28,7 @@ class Engine {
   void reset(uint32_t nowUs) {
     phase=Phase::Waiting;
     pulses=strokes=transitions=0;
-    speed=meters=spm=0;
+    speed=reportedSpeed=meters=spm=0;
     phasePulses=0;
     phaseStartUs=lastPulseUs=lastTickUs=nowUs;
     lastStrokeUs=0;
@@ -51,10 +54,17 @@ class Engine {
       const float tau=(phase==Phase::Drive && idle<160000) ? 8.0f : 2.8f;
       const float decay=expf(-dt/tau);
       const float newSpeed=speed*decay;
-      meters += (speed+newSpeed)*0.5f*dt;
+      const float meanSpeed=(speed+newSpeed)*0.5f;
+      meters += meanSpeed*dt;
+      // Smooth the physical-model estimate for UI/FTMS without feeding the
+      // filtered value back into the flywheel or distance integrator.
+      // Time-aware alpha keeps output stable across TFT/BLE loop jitter.
+      const float alpha=1.0f-expf(-dt/kReportedSpeedTauSeconds);
+      reportedSpeed += alpha*(meanSpeed-reportedSpeed);
       speed=newSpeed;
       if(idle>=5000000) {
         speed=0;
+        reportedSpeed=0;
         spm=0;
       }
     }
