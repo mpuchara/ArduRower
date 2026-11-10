@@ -749,7 +749,7 @@ String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
 }
 void recordTrend(uint32_t now) {
-  const float kmh=motion.speed*3.6f;
+  const float kmh=motion.reportedSpeed*3.6f;
   const float tenth=fmaxf(0.0f,fminf(600.0f,kmh*10.0f));
   trends[trendHead]={static_cast<uint16_t>(lroundf(tenth)),
                      static_cast<uint8_t>(liveHr(now)),0};
@@ -1341,7 +1341,7 @@ void loop() {
   bleDuty.onFtms(deviceConnected,now);
   checkHrStall(now);
   motion.tick(micros());
-  metrics.setExternalTelemetry(motion.meters,motion.speed,
+  metrics.setExternalTelemetry(motion.meters,motion.reportedSpeed,
                                motion.strokes,motion.spm);
   updateButton(now);
   updateTouch(now);
