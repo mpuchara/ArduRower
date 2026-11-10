@@ -65,6 +65,41 @@ int main(){
   REQUIRE(e.strokes==0);
   e.tick(wobbleUs+6000000);
   REQUIRE(e.reportedSpeed==0);
-  puts("PASS: two turnaround phases, 30 real strokes, flywheel decay, calibration, bounce, micros wrap");
+  // Short 50-70ms reversals during fast strokes were previously rejected
+  // by the fixed 105ms / 320ms gates; this caused ~half the strokes to vanish.
+  e.reset(0);
+  now=100000;
+  for(int n=0;n<30;++n) {
+    for(int i=0;i<19;++i) {now+=26000;e.onPulse(now);}
+    now+=55000;e.onPulse(now);
+    for(int i=0;i<17;++i) {now+=33000;e.onPulse(now);}
+    now+=70000;e.onPulse(now);
+  }
+  REQUIRE(e.strokes>=28 && e.strokes<=31);
+  REQUIRE(e.transitions>=56);
+  REQUIRE(e.spm>=45 && e.spm<=60);
+  REQUIRE(e.meters>0);
+  printf("Fast 51 SPM: %u strokes, %u phase transitions, %.1f SPM, %.1fm\\n",
+         e.strokes,e.transitions,e.spm,e.meters);
+  // Sprint cadence above 65 SPM must no longer freeze cadence reporting.
+  e.reset(0);
+  now=100000;
+  for(int n=0;n<30;++n) {
+    for(int i=0;i<12;++i) {now+=25000;e.onPulse(now);}
+    now+=50000;e.onPulse(now);
+    for(int i=0;i<12;++i) {now+=30000;e.onPulse(now);}
+    now+=65000;e.onPulse(now);
+  }
+  REQUIRE(e.strokes>=28 && e.strokes<=31);
+  REQUIRE(e.spm>=65 && e.spm<=90);
+  // Four unevenly spaced magnets must NOT create artificial strokes.
+  e.reset(0);
+  now=100000;
+  for(int n=0;n<150;++n) {
+    const uint32_t gap=(n%4==3)?46000:25000;
+    now+=gap;e.onPulse(now);
+  }
+  REQUIRE(e.strokes==0 && e.transitions==0);
+  puts("PASS: slow & fast turning, 65+ SPM sprint, uneven magnets, smooth speed, pause, wrap");
   return 0;
 }
