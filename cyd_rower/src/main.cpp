@@ -31,7 +31,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.31";
+static constexpr const char *FIRMWARE_VERSION = "0.09.32";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -1469,7 +1469,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.31 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.32 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1611,11 +1611,16 @@ void loop() {
     if (!available) { metrics.tick(pulseTime); break; }
     if(!metrics.paused)metrics.tick(pulseTime);
     if(metrics.paused) {
-      uint32_t firstUs;
-      if(!strokePulse || !pauseResume.confirm(pulseTime,firstUs))continue;
-      // Keep the first measured interval, but restart active time only when
-      // the second edge confirms movement.
-      motion.onPulse(firstUs);
+      if(!strokePulse)continue;
+      const uint32_t *confirmed=pauseResume.confirm(pulseTime);
+      if(!confirmed) {
+        if(pulseTrace)Serial.printf("PAUSE: candidate us=%lu\n",(unsigned long)pulseTime);
+        continue;
+      }
+      // Replay the initial intervals for distance and stroke detection.
+      // Active time resumes only at the confirming edge.
+      for(uint8_t i=0;i+1<cydmotion::PauseResumeGate::kRequiredPulses;++i)
+        motion.onPulse(confirmed[i]);
     }
     if(strokePulse) {
       metrics.pulse(pulseTime);

@@ -33,3 +33,7 @@ Odtworzenie impulsów na nowym filtrze daje szczyty około 7,9 i 10,1 km/h dla s
 CYD utrzymuje aktywny trening przez osiem sekund od ostatniego impulsu licznika ruchów. Przez pierwsze trzy sekundy po impulsie prędkość wygasa ze stałą 3,5 s, a następnie ze stałą 1,5 s. Czas treningu i zegar ducha biegną w trakcie dobiegu. Dystans nadal rośnie tylko od przyjętych impulsów, a po ośmiu sekundach prędkość jest zerowana. Wznowienie nadal wymaga dwóch impulsów w odstępie do 350 ms. Kontaktron znajduje się na zwijaczu taśmy, dlatego dobieg jest estymowany bez bezpośredniego pomiaru wirnika.
 
 W fizycznej próbie 0.09.31 użytkownik potwierdził naturalniejsze opadanie prędkości i właściwy moment wejścia w auto pauzę.
+
+## Odporność wznowienia w 0.09.32
+
+Po wejściu w auto pauzę wznowienie wymaga czterech kolejnych impulsów ze strumienia licznika ruchów, z przerwami do 350 ms między sąsiednimi impulsami. Dłuższa przerwa zeruje próbę potwierdzenia. Czas aktywny i zegar ducha ruszają przy czwartym impulsie, a pierwsze odstępy zostają uwzględnione w dystansie. W trybie `pulsetrace` USB pokazuje też impulsy oczekujące na potwierdzenie. Ośmiosekundowy dobieg pozostaje bez zmian.

@@ -1,12 +1,12 @@
 # ArduRower
 
-## ArduRower CYD 0.09.31
+## ArduRower CYD 0.09.32
 
 Aktualne wydanie jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Prędkość zachowuje większą bezwładność między pociągnięciami. Prędkość i dystans wynikają z tych samych impulsów kontaktronu, niezależnie od fazy ruchu rozpoznanej przez licznik. [Model pomiaru i kalibracja](docs/FAST_REED_0.09.28.md). Na fizycznym CYD sprawdzono serię **10 szybkich ruchów z 10 naliczeniami**. [Zmiany i wyniki testów](docs/MOTION_TRENDS_0.09.26.md).
 
-- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.31`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
+- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.32`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
 - **Garmin** — pole **ArduRower HR 015** odbiera dane z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
-- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 8 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Dwa impulsy w ciągu 350 ms wznawiają trening. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Nowy model dystansu od 0.09.28 ma osobny zestaw rekordów. [Zasady](docs/GHOST_0.09.24.md).
+- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 8 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Cztery kolejne impulsy w odstępach do 350 ms wznawiają trening. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Nowy model dystansu od 0.09.28 ma osobny zestaw rekordów. [Zasady](docs/GHOST_0.09.24.md).
 - **Ekran i dotyk** — zachowano poziomą orientację z 0.09.25, obróconą o 180° względem 0.09.24, wraz z przeliczeniem starszej kalibracji. [Sprzęt, sterowanie i diagnostyka](cyd_rower/README.md).
 
 ## Oryginalny wariant Heltec OLED

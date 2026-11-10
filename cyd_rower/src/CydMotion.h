@@ -8,25 +8,23 @@
 
 namespace cydmotion {
 enum class Phase : uint8_t { Waiting, Drive, Return };
-// A lone reed edge while paused is not enough to restart the clock.
+// A short burst of reed edges while paused does not restart the clock.
 class PauseResumeGate {
  public:
-  void reset() { pending=false; }
+  static constexpr uint8_t kRequiredPulses=4;
+  void reset() { count=0; }
 
-  bool confirm(uint32_t nowUs, uint32_t &firstUs) {
-    if(pending && nowUs-candidateUs<=350000UL) {
-      firstUs=candidateUs;
-      reset();
-      return true;
-    }
-    candidateUs=nowUs;
-    pending=true;
-    return false;
+  const uint32_t *confirm(uint32_t nowUs) {
+    if(count && nowUs-timestamps[count-1]>350000UL)reset();
+    timestamps[count++]=nowUs;
+    if(count<kRequiredPulses)return nullptr;
+    reset();
+    return timestamps;
   }
 
  private:
-  uint32_t candidateUs=0;
-  bool pending=false;
+  uint32_t timestamps[kRequiredPulses]={};
+  uint8_t count=0;
 };
 
 class Engine {

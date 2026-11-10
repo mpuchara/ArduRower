@@ -5,14 +5,22 @@
 #include <stdio.h>
 int main(){
   cydmotion::PauseResumeGate resume;
-  uint32_t first=0;
-  assert(!resume.confirm(1000000,first));
-  assert(!resume.confirm(2600000,first)); // isolated edge after a stop
-  assert(resume.confirm(2680000,first) && first==2600000);
-  assert(!resume.confirm(2690000,first)); // requires a fresh pair
+  assert(!resume.confirm(1000000));
+  assert(!resume.confirm(1050000));
+  assert(!resume.confirm(1100000)); // a short noise burst does not wake training
+  assert(!resume.confirm(2600000)); // gap resets the pending burst
+  assert(!resume.confirm(2680000));
+  assert(!resume.confirm(2780000));
+  const uint32_t *confirmed=resume.confirm(2880000);
+  assert(confirmed && confirmed[0]==2600000 && confirmed[1]==2680000 &&
+         confirmed[2]==2780000 && confirmed[3]==2880000);
+  assert(!resume.confirm(2890000)); // a fresh burst is required
   resume.reset();
-  assert(!resume.confirm(0xfffffff0UL,first));
-  assert(resume.confirm(100000,first) && first==0xfffffff0UL);
+  assert(!resume.confirm(0xfffffff0UL));
+  assert(!resume.confirm(100000));
+  assert(!resume.confirm(200000));
+  confirmed=resume.confirm(300000);
+  assert(confirmed && confirmed[0]==0xfffffff0UL);
   ghostrace::Race reference;reference.arm(500,nullptr);reference.start(0);
   for(int i=1;i<=125;++i)reference.advance(i*1000,i*4.0f);
   RowerMetrics m(cydmotion::Engine::kPauseAfterUs);cydmotion::Engine movement;ghostrace::Race race;
