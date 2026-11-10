@@ -50,6 +50,10 @@ jobs:
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_trend_autoscale_test.cpp -o /tmp/cyd_trend_autoscale_test
           /tmp/cyd_trend_autoscale_test
+      - name: Verify subscription-aware FTMS transport
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ftms_health_test.cpp -o /tmp/cyd_ftms_health_test
+          /tmp/cyd_ftms_health_test
       - name: Test FTMS-first HR maintenance scheduling
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
