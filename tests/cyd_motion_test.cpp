@@ -18,11 +18,13 @@ int main(){
   REQUIRE(e.transitions>=56);
   REQUIRE(e.meters>40 && e.meters<270);
   REQUIRE(e.speed>=0 && e.speed<7.5);
+  REQUIRE(e.reportedSpeed>=0 && e.reportedSpeed<7.5);
   printf("30 cycles detected %u; phase transitions %u; distance %.1fm; speed %.2fm/s\n",
         e.strokes,e.transitions,e.meters,e.speed);
   const float before=e.meters;
   now+=6000000;e.tick(now);
   REQUIRE(e.speed==0);
+  REQUIRE(e.reportedSpeed==0);
   REQUIRE(e.meters>=before);
   REQUIRE(e.meters<before+3.0f);
   REQUIRE(e.spm==0);
@@ -42,7 +44,27 @@ int main(){
   // Synthetic pulses keep the algorithm working across 32-bit micros wrap.
   e.reset(0xfffffff0UL);
   e.onPulse(0x0000c350UL);
-  REQUIRE(e.pulses==1 && isfinite(e.speed));
+  REQUIRE(e.pulses==1 && isfinite(e.speed) && isfinite(e.reportedSpeed));
+  // Alternating 11/3 km/h raw readings each second must yield a much less
+  // jagged reported reading; this must not change the stroke detector.
+  e.reset(0);
+  e.onPulse(100000);
+  uint32_t wobbleUs=100000;
+  float filteredMin=100.0f,filteredMax=0.0f;
+  for(int i=0;i<400;++i) {
+    wobbleUs+=100000;
+    e.lastPulseUs=wobbleUs; // keep this test focused on the speed filter
+    e.speed=((i/10)%2==0?11.0f:3.0f)/3.6f;
+    e.tick(wobbleUs);
+    if(i>=200) {
+      if(e.reportedSpeed<filteredMin)filteredMin=e.reportedSpeed;
+      if(e.reportedSpeed>filteredMax)filteredMax=e.reportedSpeed;
+    }
+  }
+  REQUIRE((filteredMax-filteredMin)*3.6f<2.0f);
+  REQUIRE(e.strokes==0);
+  e.tick(wobbleUs+6000000);
+  REQUIRE(e.reportedSpeed==0);
   puts("PASS: two turnaround phases, 30 real strokes, flywheel decay, calibration, bounce, micros wrap");
   return 0;
 }
