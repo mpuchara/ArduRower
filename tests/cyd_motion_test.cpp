@@ -63,6 +63,20 @@ int main(){
   REQUIRE(steady.meters==quicker.meters);
   REQUIRE(quicker.speed>steady.speed*1.25f);
   REQUIRE(500.0f/quicker.speed<500.0f/steady.speed);
+  Engine coast=quicker;
+  Engine sparseTicks=quicker;
+  const float movingSpeed=coast.speed;
+  const float movingDistance=coast.meters;
+  coast.tick(quickerUs+1000000);
+  REQUIRE(coast.speed>movingSpeed*0.74f && coast.speed<movingSpeed*0.76f);
+  coast.tick(quickerUs+2000000);
+  REQUIRE(coast.speed>movingSpeed*0.56f && coast.speed<movingSpeed*0.57f);
+  coast.tick(quickerUs+4000000);
+  REQUIRE(coast.speed<movingSpeed*0.08f);
+  sparseTicks.tick(quickerUs+4000000);
+  REQUIRE(fabsf(sparseTicks.speed-coast.speed)<0.0001f);
+  coast.tick(quickerUs+5000000);
+  REQUIRE(coast.speed==0 && coast.meters==movingDistance);
   quicker.onPulse(quickerUs+5000); // contact bounce
   REQUIRE(quicker.meters==steady.meters);
   quicker.tick(quickerUs+5000000);

@@ -19,3 +19,11 @@ Na CYD licznik wzrósł o sześć w każdej z dwóch serii. Zarejestrowane impul
 W fizycznej próbie 0.09.28 użytkownik widział około 7 km/h przy spokojnym ruchu i 9 km/h przy szybszym. Zgłosił również sporadyczne wyjście z automatycznej pauzy. W logu 0.09.27 pojedyncze zbocze potrafiło wznowić czas bez przyrostu dystansu.
 
 W 0.09.29 trening po pauzie wznawia się dopiero po dwóch impulsach ze strumienia licznika ruchów w odstępie do 350 ms. Odstęp między nimi trafia do dystansu, a czas aktywny rusza od potwierdzenia. Zbyt późne zbocze rozpoczyna nową próbę potwierdzenia. Testy obejmują osamotnione zbocza, wznowienie po parze i przepełnienie licznika mikrosekund.
+
+Użytkownik potwierdził na CYD, że pauza utrzymuje się w przerwie i znika po wznowieniu wiosłowania.
+
+## Bezwładność prędkości w 0.09.30
+
+Na podstawie dwóch zarejestrowanych serii wydłużono stałą wygładzania prędkości z 2,5 s do 3,5 s. Po sekundzie bez impulsów wskaźnik zachowuje około 75% prędkości zamiast 67%, a po dwóch sekundach 56% zamiast 45%. Po dwóch sekundach bez impulsów włącza się szybsze wygaszanie (stała 1 s). Po pięciu sekundach wskazanie spada do zera i włącza się auto pauza.
+
+Odtworzenie impulsów na nowym filtrze daje szczyty około 7,9 i 10,1 km/h dla spokojnej i szybkiej serii. Skala dystansu pozostaje przy 0,16 m razy zapisany mnożnik, a filtr nadal stosuje tę samą stałą do zasilania i wygładzania prędkości podczas ruchu, więc przy stałym tempie impulsów średnia prędkość nadal wynika z dystansu i czasu. Wygładzanie nie zwiększa dystansu po zatrzymaniu. Jest to dostrojenie wskazań do zapisu z ergometru, bez zewnętrznego pomiaru prędkości łodzi.

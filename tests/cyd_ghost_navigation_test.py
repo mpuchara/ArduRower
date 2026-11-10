@@ -41,7 +41,7 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.29"' in src
+assert 'FIRMWARE_VERSION = "0.09.30"' in src
 adc=(root/'cyd_rower/src/CydTouch.h').read_text()
 assert 'spi_->transfer16(' not in adc
 assert 'z1=adc(0xB1),z2=adc(0xC1)' in adc

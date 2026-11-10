@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.29
+# ArduRower CYD 0.09.30
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
@@ -13,7 +13,7 @@ Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO t
 
 Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans lub wróć do zwykłego treningu z menu. Pauza włącza się po 5 sekundach bez impulsów, a dwa impulsy w ciągu 350 ms ją wznawiają. [Szczegóły Ghost Race](../docs/GHOST_0.09.24.md).
 
-Detektor wnioskuje o fazach napędu i powrotu z odstępów między impulsami czterech magnesów na zwijaczu. Jeden kontaktron nie mierzy kierunku bezpośrednio. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
+Detektor wnioskuje o fazach napędu i powrotu z odstępów między impulsami czterech magnesów na zwijaczu. Jeden kontaktron nie mierzy kierunku bezpośrednio. Prędkość zachowuje większą bezwładność między pociągnięciami. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
 Na Garminie dodaj pole **ArduRower HR 015**. Odbiera dystans, tempo i kadencję przez FTMS z `WR S4BL3`, a przez to samo połączenie odsyła tętno. [Instalacja pola](../connect_iq/README.md).
 

@@ -35,7 +35,9 @@ class Engine {
   // distance per accepted interval is provisional, not S4-calibrated.
   static constexpr float kMetersPerPulse = 0.16f;
   static constexpr float kDefaultCalibration = 0.70f;
-  static constexpr float kSpeedTauSeconds = 2.5f;
+  static constexpr float kSpeedTauSeconds = 3.5f;
+  static constexpr uint32_t kCoastUs = 2000000;
+  static constexpr float kStopTauSeconds = 1.0f;
   static constexpr uint32_t kDeadTimeUs = 15000;
   static constexpr uint32_t kDistanceDeadTimeUs = 10000;
   static constexpr uint32_t kRearmGapUs = 1600000;
@@ -79,10 +81,16 @@ class Engine {
     // Queued ISR timestamps can predate a recent loop tick if BLE/TFT work
     // delayed processing. Never mistake a stale sample for a 71-minute gap.
     if(!duration || duration>0x7fffffffUL)return;
-    if(distanceStarted && nowUs-lastDistancePulseUs>=5000000UL) {
+    const uint32_t idleUs=nowUs-lastDistancePulseUs;
+    if(distanceStarted && idleUs>=5000000UL) {
       speed=0;
     } else if(speed>0) {
-      speed*=expf(-(duration/1000000.0f)/kSpeedTauSeconds);
+      // Keep inertia across the stroke. Once an extended break starts,
+      // cross the coast boundary at the same time regardless of loop jitter.
+      const uint32_t beyondCoastUs=idleUs>kCoastUs?idleUs-kCoastUs:0;
+      const uint32_t stopUs=beyondCoastUs<duration?beyondCoastUs:duration;
+      const float decay=(duration-stopUs)/kSpeedTauSeconds+stopUs/kStopTauSeconds;
+      speed*=expf(-decay/1000000.0f);
     }
     if(started && nowUs-lastPulseUs>=5000000UL)spm=0;
     lastTickUs=nowUs;
