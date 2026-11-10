@@ -143,10 +143,14 @@ class Engine {
       averageGapUs=0;
       pendingFastTurnGapUs=0;
     } else {
+      // A short gap followed by a normal longer gap can look like a turn
+      // on an uneven reel. Require a slowdown versus both recent intervals.
+      const float recentGap=fmaxf(previousGapsUs[(gapIndex+2)&3],
+                                  previousGapsUs[(gapIndex+3)&3]);
       const bool fastTurnCandidate=hasBaseline && fastPhaseReady &&
           sameMagnetGap>0 &&
           gap>=kFastTurnMinGapUs && gap<250000 &&
-          gap>averageGapUs*1.55f && newSlowdown;
+          gap>averageGapUs*1.55f && gap>recentGap*1.10f && newSlowdown;
       pendingFastTurnGapUs=fastTurnCandidate?gap:0;
       // Do not include the suspected reversal in the local running cadence.
       if(!fastTurnCandidate && gap<400000 &&

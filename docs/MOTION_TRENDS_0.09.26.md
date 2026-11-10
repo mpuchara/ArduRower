@@ -11,3 +11,7 @@ Baza to commit [a532be5](https://github.com/mpuchara/ArduRower/commit/a532be5963
 Testy hosta obejmują 30 spokojnych ruchów, 30 ruchów przy 50,8 SPM, 30 ruchów przy 77,4 SPM, dwie sekwencje nierównych magnesów, wygładzanie i pauzę, tempo przy większej intensywności, zakresy wykresów oraz kontrakty FTMS i wyświetlacza. Wyniki dotyczą danych syntetycznych. Fizyczny test wymaga wiosłowania oraz połączenia z polem ArduRower HR 015 na Garminie.
 
 Profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Aktualizacja działającej płytki przez esptool zapisuje jedynie aplikację od `0x10000`. Pakiet przeglądarkowy z `web/build_site.py` zawiera cztery osobne segmenty oraz manifest ESP Web Tools. Żaden zakres zapisu nie wchodzi do NVS. Instalator jest aktywny po wystawieniu całego pakietu przez HTTPS (lub localhost).
+
+## Test szybkiej serii na CYD
+
+W zapisie z COM3 po 10 fizycznych ruchach detektor naliczył 12. Kolejka ISR nie zgubiła impulsów. Kandydat na krótki nawrót musi teraz być co najmniej o 10% dłuższy od obu ostatnich odstępów, oprócz porównania z lokalną średnią i tym samym magnesem. Odtworzenie tych samych impulsów w teście daje 10 naliczeń. Potrzebna jest kolejna fizyczna seria po wgraniu poprawki. W logu tej próby zegarek jednocześnie subskrybował dane FTMS i odsyłał aktualny puls.

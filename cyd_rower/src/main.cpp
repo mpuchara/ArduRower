@@ -42,7 +42,6 @@ static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
 static constexpr uint16_t QUEUE_SIZE = 256;
 static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
-static constexpr bool LOG_SENSOR_PULSES = false;
 static constexpr uint32_t TREND_SAMPLE_MS=2000;
 static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
 static constexpr uint32_t HR_TIMEOUT_MS=6500;
@@ -1519,6 +1518,8 @@ void loop() {
   // USB maintenance commands; no blocking reads in the rowing/BLE loop.
   static char usbCommand[24]={};
   static uint8_t usbLength=0;
+  static uint32_t pulseTraceStarted=0;
+  static bool pulseTrace=false;
   while(Serial.available()) {
     const char c=Serial.read();
     if(c=='\n') {
@@ -1534,6 +1535,10 @@ void loop() {
         Serial.println("USB: requested restart");Serial.flush();ESP.restart();
       } else if(strcmp(usbCommand,"trace")==0) {
         touchTraceUntil=millis()+30000UL;
+      } else if(strcmp(usbCommand,"pulsetrace")==0) {
+        pulseTraceStarted=millis();
+        pulseTrace=true;
+        Serial.println("PULSE TRACE: time_us,raw_strokes,phase,turns,queued_drops");
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
@@ -1596,10 +1601,11 @@ void loop() {
     metrics.pulse(pulseTime);
     motion.onPulse(pulseTime);
     bleDuty.onMotion(millis());
-    if (LOG_SENSOR_PULSES) {
-      Serial.print("P,"); Serial.print(pulseTime);
-      Serial.print(','); Serial.print(metrics.pulses);
-      Serial.print(','); Serial.println(metrics.strokes);
+    if(pulseTrace && millis()-pulseTraceStarted>=120000UL)pulseTrace=false;
+    if(pulseTrace) {
+      Serial.printf("P,%lu,%lu,%u,%lu,%lu\n",(unsigned long)pulseTime,
+                    (unsigned long)motion.strokes,(unsigned)motion.phase,
+                    (unsigned long)motion.transitions,(unsigned long)droppedPulses);
     }
   }
   const uint32_t now=millis();
