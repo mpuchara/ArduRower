@@ -22,6 +22,9 @@ extern "C" bool bleInUse(void) { return true; }
 #include <math.h>
 #include <Preferences.h>
 #include "CydMotion.h"
+#include "ReedSignalFilter.h"
+#include "ReedEventQueue.h"
+#include "ReedTrace.h"
 #include "TrendAutoScale.h"
 #include "BleDutySchedule.h"
 #include "TouchGestures.h"
@@ -31,7 +34,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.34";
+static constexpr const char *FIRMWARE_VERSION = "0.09.35";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -40,7 +43,7 @@ static constexpr uint8_t LEGACY_TOUCH_ROTATION = 3;
 static constexpr uint32_t DISPLAY_INTERVAL_MS = 500;
 static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
-static constexpr uint16_t QUEUE_SIZE = 256;
+static constexpr uint16_t QUEUE_SIZE = 512;
 static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
 static constexpr uint32_t TREND_SAMPLE_MS=2000;
 static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
@@ -170,12 +173,15 @@ uint32_t lastFtmsAdvertCheckMs=0, lastFtmsAdvertReportMs=0;
 uint32_t lastGhostMenuHeartbeatMs=0;
 
 portMUX_TYPE pulseMux = portMUX_INITIALIZER_UNLOCKED;
-volatile uint32_t pulseQueue[QUEUE_SIZE];
-volatile bool strokePulseQueue[QUEUE_SIZE];
-volatile uint16_t queueHead = 0, queueTail = 0;
-volatile uint32_t lastEdgeUs = 0, lastDistanceEdgeUs = 0, droppedPulses = 0;
-volatile bool haveEdge = false;
+cydreed::EventQueue<QUEUE_SIZE> reedEdges;
 cydmotion::PauseResumeGate pauseResume;
+cydreed::Filter diagnosticReed;
+ReedTrace reedTrace;
+bool reedTracing=false;
+uint32_t reedTraceStarted=0;
+bool reedTraceWaiting=false;
+uint32_t rawLowSince=0,rawHighSince=0,rawLastFall=0;
+bool rawWasHigh=true;
 uint32_t lastDisplayMs = 0, lastBleMs = 0, lastHistoryMs = 0;
 bool detailPage = false, buttonDown = false, longPressDone = false;
 bool rawButtonDown = false;
@@ -461,29 +467,15 @@ void setCxRowerData() {
 void IRAM_ATTR rowerdebounceinterrupt() {
   const uint32_t now = micros();
   portENTER_CRITICAL_ISR(&pulseMux);
-  const bool strokePulse=!haveEdge || now-lastEdgeUs>=SENSOR_DEBOUNCE_US;
-  const bool distancePulse=!haveEdge ||
-      now-lastDistanceEdgeUs>=cydmotion::Engine::kDistanceDeadTimeUs;
-  if(strokePulse)lastEdgeUs=now;
-  if(distancePulse)lastDistanceEdgeUs=now;
-  if(strokePulse || distancePulse) {
-    haveEdge=true;
-    const uint16_t next=(queueHead+1)%QUEUE_SIZE;
-    if(next!=queueTail) {
-      pulseQueue[queueHead]=now;
-      strokePulseQueue[queueHead]=strokePulse;
-      queueHead=next;
-    } else ++droppedPulses;
-  }
+  reedEdges.push(now,digitalRead(ROWERINPUT)!=LOW);
   portEXIT_CRITICAL_ISR(&pulseMux);
 }
 
 void resetWorkout() {
   pauseResume.reset();
   portENTER_CRITICAL(&pulseMux);
-  queueHead = queueTail = 0;
-  haveEdge = false;
-  droppedPulses = 0;
+  reedEdges.reset();
+  diagnosticReed.reset(micros(),digitalRead(ROWERINPUT)!=LOW);
   metrics.reset(micros());
   portEXIT_CRITICAL(&pulseMux);
   motion.reset(micros());
@@ -1469,7 +1461,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.34 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.35 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1509,7 +1501,8 @@ void setup() {
                 scratch.getColorDepth(), (unsigned)ESP.getFreeHeap());
   resetWorkout();
   loadBestTimes();
-  attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, FALLING);
+  diagnosticReed.reset(micros(),digitalRead(ROWERINPUT)!=LOW);
+  attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, CHANGE);
   // Experimental second BLE identity. Keep PUBLIC FTMS unaffected on low heap.
   const uint32_t beforeHr=ESP.getFreeHeap();
   if(legacyHrDiagnostics && beforeHr>40000)
@@ -1523,6 +1516,53 @@ void setup() {
                 (unsigned)beforeHr,hrStatus(hrState));
   updateUI();
 }
+void processReedPulse(const cydreed::Pulse &pulse,bool pulseTrace) {
+  if(reedTracing && reedTraceWaiting) {
+    reedTraceWaiting=false;
+    reedTraceStarted=millis();
+  }
+  if(reedTracing) {
+    char line[100];
+    const int n=snprintf(line,sizeof(line),"F,%lu,%lu,%lu,%lu\n",
+        (unsigned long)pulse.timeUs,(unsigned long)pulse.lowUs,
+        (unsigned long)pulse.highUs,(unsigned long)pulse.gapUs);
+    reedTrace.line(line,n);
+  }
+  if(!metrics.paused)metrics.tick(pulse.timeUs);
+  if(metrics.paused) {
+    const uint32_t *confirmed=pauseResume.confirm(pulse.timeUs);
+    if(!confirmed) {
+      if(pulseTrace) {
+        char line[64];
+        const int n=snprintf(line,sizeof(line),"PAUSE: candidate us=%lu\n",(unsigned long)pulse.timeUs);
+        reedTrace.line(line,n);
+      }
+      return;
+    }
+    for(uint8_t i=0;i+1<cydmotion::PauseResumeGate::kRequiredPulses;++i)
+      motion.onVerifiedPulse(confirmed[i]);
+  }
+  metrics.pulse(pulse.timeUs);
+  motion.onVerifiedPulse(pulse.timeUs);
+  bleDuty.onMotion(millis());
+  if(pulseTrace) {
+    char line[100];
+    const int n=snprintf(line,sizeof(line),"P,%lu,%lu,%u,%lu,%lu,1\n",(unsigned long)pulse.timeUs,
+        (unsigned long)motion.strokes,(unsigned)motion.phase,
+        (unsigned long)motion.transitions,(unsigned long)reedEdges.dropped);
+    reedTrace.line(line,n);
+  }
+  if(reedTracing) {
+    char line[128];
+    const int n=snprintf(line,sizeof(line),"M,%lu,%.2f,%.2f,%.2f,%u,%u,%.2f,%lu,%.2f,%lu\n",
+        (unsigned long)pulse.timeUs,motion.reelSpeed,motion.filteredReelSpeed,
+        motion.acceleration,(unsigned)motion.phase,motion.turnCandidate?1:0,
+        motion.confidence,(unsigned long)motion.strokes,motion.spm,
+        (unsigned long)motion.rejectedTurns);
+    reedTrace.line(line,n);
+  }
+}
+
 void loop() {
   // USB maintenance commands; no blocking reads in the rowing/BLE loop.
   static char usbCommand[24]={};
@@ -1548,6 +1588,13 @@ void loop() {
         pulseTraceStarted=millis();
         pulseTrace=true;
         Serial.println("PULSE TRACE: time_us,raw_strokes,phase,turns,queued_drops,stroke_input");
+      } else if(strcmp(usbCommand,"reedtrace")==0) {
+        reedTrace.clear();
+        reedTracing=true;
+        reedTraceWaiting=true;
+        reedTraceStarted=millis();
+        static const char heading[]="REEDTRACE unified contact filter; version=0.09.35\n";
+        reedTrace.line(heading,sizeof(heading)-1);
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
         if(p.begin("rower-test",false)) {
@@ -1596,44 +1643,61 @@ void loop() {
       usbLength=0;
     } else if(c!='\r' && usbLength<sizeof(usbCommand)-1)usbCommand[usbLength++]=c;
   }
-  uint32_t pulseTime;
-  // Keep the original ISR queue semantics and calculation order.
-  while (true) {
+  static uint32_t observedDrops=0;
+  if(reedEdges.dropped!=observedDrops) {
+    // Edge continuity is unknown after overflow. Discard the incomplete
+    // contact/cycle instead of inventing movement from a broken sequence.
     portENTER_CRITICAL(&pulseMux);
-    const bool available = queueTail != queueHead;
-    bool strokePulse=false;
-    if (available) {
-      strokePulse=strokePulseQueue[queueTail];
-      pulseTime = pulseQueue[queueTail];
-      queueTail = (queueTail + 1) % QUEUE_SIZE;
-    } else pulseTime = micros();
+    reedEdges.clear();
+    observedDrops=reedEdges.dropped;
+    diagnosticReed.reset(micros(),digitalRead(ROWERINPUT)!=LOW);
     portEXIT_CRITICAL(&pulseMux);
-    if (!available) { metrics.tick(pulseTime); break; }
-    if(!metrics.paused)metrics.tick(pulseTime);
-    if(metrics.paused) {
-      if(!strokePulse)continue;
-      const uint32_t *confirmed=pauseResume.confirm(pulseTime);
-      if(!confirmed) {
-        if(pulseTrace)Serial.printf("PAUSE: candidate us=%lu\n",(unsigned long)pulseTime);
-        continue;
-      }
-      // Replay the initial intervals for distance and stroke detection.
-      // Active time resumes only at the confirming edge.
-      for(uint8_t i=0;i+1<cydmotion::PauseResumeGate::kRequiredPulses;++i)
-        motion.onPulse(confirmed[i]);
-    }
-    if(strokePulse) {
-      metrics.pulse(pulseTime);
-      bleDuty.onMotion(millis());
-    }
-    motion.onPulse(pulseTime,strokePulse);
-    if(pulseTrace && millis()-pulseTraceStarted>=120000UL)pulseTrace=false;
-    if(pulseTrace) {
-      Serial.printf("P,%lu,%lu,%u,%lu,%lu,%d\n",(unsigned long)pulseTime,
-                    (unsigned long)motion.strokes,(unsigned)motion.phase,
-                    (unsigned long)motion.transitions,(unsigned long)droppedPulses,strokePulse);
-    }
+    pauseResume.reset();
+    motion.signalLost(micros());
   }
+  uint32_t pulseTime;
+  while(true) {
+    portENTER_CRITICAL(&pulseMux);
+    cydreed::Edge edge;
+    const bool available=reedEdges.pop(edge);
+    const bool levelHigh=available?edge.high:true;
+    pulseTime=available?edge.timeUs:micros();
+    portEXIT_CRITICAL(&pulseMux);
+    cydreed::Pulse filtered;
+    if(!available) {
+      if(diagnosticReed.poll(pulseTime,filtered))processReedPulse(filtered,pulseTrace);
+      metrics.tick(pulseTime);
+      break;
+    }
+    const bool accepted=diagnosticReed.edge(pulseTime,levelHigh,filtered);
+    if(reedTracing) {
+      const uint32_t lowUs=rawWasHigh?0:pulseTime-rawLowSince;
+      const uint32_t highUs=rawWasHigh?pulseTime-rawHighSince:0;
+      char line[128];
+      const int n=snprintf(line,sizeof(line),"R,%lu,%c,%u,%lu,%lu,%lu,%u,%lu,%lu,%u\n",
+          (unsigned long)pulseTime,levelHigh?'U':'D',levelHigh?1:0,
+          (unsigned long)lowUs,(unsigned long)highUs,
+          (unsigned long)(pulseTime-rawLastFall),accepted?1:0,
+          (unsigned long)diagnosticReed.shortLow,(unsigned long)diagnosticReed.shortHigh,
+          (unsigned)diagnosticReed.decision);
+      reedTrace.line(line,n);
+    }
+    rawWasHigh=levelHigh;
+    if(levelHigh)rawHighSince=pulseTime;
+    else {rawLowSince=pulseTime;rawLastFall=pulseTime;}
+    if(accepted)processReedPulse(filtered,pulseTrace);
+  }
+  if(pulseTrace && millis()-pulseTraceStarted>=120000UL)pulseTrace=false;
+  if(reedTracing && !reedTraceWaiting && millis()-reedTraceStarted>=120000UL) {
+    reedTracing=false;
+    char line[140];
+    const int n=snprintf(line,sizeof(line),"REEDTRACE END,raw_drops=%lu,trace_drops=%lu,accepted=%lu,short_low=%lu,short_high=%lu\n",
+        (unsigned long)reedEdges.dropped,(unsigned long)reedTrace.dropped,
+        (unsigned long)diagnosticReed.accepted,(unsigned long)diagnosticReed.shortLow,
+        (unsigned long)diagnosticReed.shortHigh);
+    reedTrace.line(line,n);
+  }
+  reedTrace.flush(Serial);
   const uint32_t now=millis();
   if((int32_t)(touchTraceUntil-now)>0 && now-touchTraceAt>=200) {
     touchTraceAt=now;const TS_Point p=touch.getPoint();

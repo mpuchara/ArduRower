@@ -1,5 +1,8 @@
 # ArduRower CYD 0.09.26
 
+Aktualną akwizycję kontaktronu i detektor cyklu opisuje [wydanie 0.09.35](REED_CYCLE_0.09.35.md).
+
+
 Baza to commit [a532be5](https://github.com/mpuchara/ArduRower/commit/a532be596313a094cbf094c32916cd9f477bc5b7) (0.09.25). Z [PR #15](https://github.com/mpuchara/ArduRower/pull/15) przeniesiono filtr prędkości, detekcję nawrotów i autoskalowanie.
 
 - EMA o stałej czasowej 2,5 s wygładza prędkość na ekranie i wykresie. Tempo chwilowe na ekranie i w FTMS wynika z tej samej prędkości. Dystans nadal całkuje model koła zamachowego z dotychczasową kalibracją. Tempo średnie wynika z aktywnego czasu i dystansu. Po automatycznej pauzie obie prędkości spadają do zera.

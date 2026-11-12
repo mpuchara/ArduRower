@@ -1,5 +1,8 @@
 # ArduRower CYD 0.09.28
 
+Aktualną akwizycję kontaktronu i detektor cyklu opisuje [wydanie 0.09.35](REED_CYCLE_0.09.35.md).
+
+
 Na fizycznym CYD zarejestrowano zbocza kontaktronu z dwóch serii po sześć pociągnięć podobnej długości. W spokojnej serii próg 15 ms nie pominął zarejestrowanych zboczy. W szybkiej odrzucił 52, z czego 46 pojawiło się około 13–15 ms po poprzednim zboczu. Odtworzenie szybkiej serii z progiem 10 ms przyjmuje 277 odstępów zamiast 228. W spokojnej serii w obu wariantach pozostaje 259 odstępów.
 
 Firmware rozdziela wejścia pomiaru drogi i detektora ruchów. Prędkość i dystans przyjmują zbocza co najmniej 10 ms od poprzedniego przyjętego zbocza. Licznik ruchów i kadencja zachowują dotychczasowy strumień z progiem 15 ms. Filtr prędkości ma tę samą stałą czasową 2,5 s, a dystans zatrzymuje się z ostatnim impulsem.

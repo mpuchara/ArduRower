@@ -7,6 +7,7 @@ on:
       - "ArduRower/RowerMetrics.h"
       - "ArduRower/ArduRower.ino"
       - "tests/**"
+      - "tools/replay_reed*"
       - ".github/workflows/cyd-rower.yml"
   pull_request:
     paths:
@@ -14,6 +15,7 @@ on:
       - "ArduRower/RowerMetrics.h"
       - "ArduRower/ArduRower.ino"
       - "tests/**"
+      - "tools/replay_reed*"
       - ".github/workflows/cyd-rower.yml"
   workflow_dispatch:
 
@@ -34,32 +36,16 @@ jobs:
         run: python3 tests/cyd_hr_diagnostics_test.py
       - name: Assert Ghost Race navigation and HR CCCD status flow
         run: python3 tests/cyd_ghost_navigation_test.py
-      - name: Test ghost racing, record integrity and timing
+      - name: Test movement, contact filtering, timing, touch and record integrity
         run: |
-          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
-          /tmp/ghost_race_test
-      - name: Test new reel cycle detector and calibration
-        run: |
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
-          /tmp/cyd_motion_test
-      - name: Test FTMS-first HR maintenance scheduling
-        run: |
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
-          /tmp/cyd_ble_duty_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_coexist_test.cpp -o /tmp/cyd_ble_coexist_test
-          /tmp/cyd_ble_coexist_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
-          /tmp/cyd_touch_swipe_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_state_test.cpp -o /tmp/cyd_touch_state_test
-          /tmp/cyd_touch_state_test
-          g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs tests/cyd_touch_adc_test.cpp -o /tmp/cyd_touch_adc_test
-          /tmp/cyd_touch_adc_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_heart_test.cpp -o /tmp/ghost_heart_test
-          /tmp/ghost_heart_test
-      - name: Test unchanged rowing calculations
-        run: |
-          g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
-          /tmp/metrics_test
+          set -euo pipefail
+          for source in tests/*_test.cpp; do
+            executable="/tmp/$(basename "$source" .cpp)"
+            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I ArduRower "$source" -o "$executable"
+            "$executable"
+          done
+          g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/replay_reed.cpp -o /tmp/replay_reed
+          python3 tests/reed_replay_regression.py /tmp/replay_reed
 
   build-cyd:
     runs-on: ubuntu-latest

@@ -11,6 +11,7 @@ on:
       - "index.html"
       - "web/**"
       - "tests/**"
+      - "tools/replay_reed*"
       - ".github/workflows/cyd-web-installer.yml"
   workflow_dispatch:
 
@@ -34,34 +35,20 @@ jobs:
 
       - name: Keep previous Garmin Connect IQ BLE contract
         run: |
+          set -euo pipefail
           python3 tests/cyd_ble_contract_test.py
           python3 tests/cyd_display_refresh_test.py
           python3 tests/cyd_text_cache_test.py
           python3 tests/cyd_installer_integrity_test.py
           python3 tests/cyd_hr_diagnostics_test.py
           python3 tests/cyd_ghost_navigation_test.py
-          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_race_test.cpp -o /tmp/ghost_race_test
-          /tmp/ghost_race_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_motion_test.cpp -o /tmp/cyd_motion_test
-          /tmp/cyd_motion_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_trend_autoscale_test.cpp -o /tmp/cyd_trend_autoscale_test
-          /tmp/cyd_trend_autoscale_test
-          g++ -std=c++11 -Wall -Wextra -Werror -I ArduRower tests/cyd_auto_pause_test.cpp -o /tmp/cyd_auto_pause_test
-          /tmp/cyd_auto_pause_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_duty_test.cpp -o /tmp/cyd_ble_duty_test
-          /tmp/cyd_ble_duty_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_ble_coexist_test.cpp -o /tmp/cyd_ble_coexist_test
-          /tmp/cyd_ble_coexist_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_swipe_test.cpp -o /tmp/cyd_touch_swipe_test
-          /tmp/cyd_touch_swipe_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/cyd_touch_state_test.cpp -o /tmp/cyd_touch_state_test
-          /tmp/cyd_touch_state_test
-          g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs tests/cyd_touch_adc_test.cpp -o /tmp/cyd_touch_adc_test
-          /tmp/cyd_touch_adc_test
-          g++ -std=c++11 -Wall -Wextra -Werror tests/ghost_heart_test.cpp -o /tmp/ghost_heart_test
-          /tmp/ghost_heart_test
-          g++ -std=c++11 -I ArduRower tests/metrics_test.cpp -o /tmp/metrics_test
-          /tmp/metrics_test
+          for source in tests/*_test.cpp; do
+            executable="/tmp/$(basename "$source" .cpp)"
+            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I ArduRower "$source" -o "$executable"
+            "$executable"
+          done
+          g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/replay_reed.cpp -o /tmp/replay_reed
+          python3 tests/reed_replay_regression.py /tmp/replay_reed
 
       - name: Install PlatformIO
         run: python -m pip install --disable-pip-version-check platformio
@@ -99,7 +86,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.34-ble-coexist-")
+          assert version["version"].startswith("0.09.35-ble-coexist-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]

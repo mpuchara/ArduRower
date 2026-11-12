@@ -1,0 +1,38 @@
+{
+  "baseline": "83937efb531fd748eb5a2ddd2eaa6a2517715a65",
+  "recording_firmware": "0.09.35-diag1",
+  "initial_level": 1,
+  "columns": [
+    "R",
+    "timestamp_us",
+    "edge",
+    "level",
+    "low_us",
+    "high_us",
+    "raw_gap_us",
+    "filter_emitted",
+    "short_low",
+    "short_high"
+  ],
+  "provenance": "Physical CYD on COM3. Counts labelled by user. In diag1, interleaved ordinary status lines were removed before extracting complete R rows. Both sessions reported raw_drops=0 and trace_drops=0.",
+  "sessions": [
+    {
+      "file": "reed_slow10.csv.gz",
+      "expected_strokes": 10,
+      "manual": "10 complete cycles, steady pace",
+      "baseline_strokes": 10
+    },
+    {
+      "file": "reed_fast10.csv.gz",
+      "expected_strokes": 10,
+      "manual": "10 complete cycles, faster pace",
+      "baseline_strokes": 10
+    },
+    {
+      "file": "reed_mixed30.csv.gz",
+      "expected_strokes": 30,
+      "manual": "30 complete cycles, changing cadence",
+      "baseline_strokes": 29
+    }
+  ]
+}
