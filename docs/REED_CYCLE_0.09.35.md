@@ -40,6 +40,18 @@ Zanonimizowane surowe CSV są w `tests/fixtures/*.csv.gz`, a ręczne oznaczenia 
 
 Różnica szczytowej prędkości w porównaniu na tych samych surowych zdarzeniach jest poniżej 0,05 km/h. Dystans na każdym oknie zgadza się w granicy 0,002 m. Oznacza to także zgodność średniej prędkości i równoważnego tempa /500 m dla tego samego czasu okna. To porównanie zapisów, bez dodatkowej próby fizycznych 500 m.
 
+Pełny audyt liczby zdarzeń i tempa z tych samych okien:
+
+| Seria | Surowe zdarzenia GPIO | Zdarzenia przekazane przez bramki 0.09.34 | Potwierdzone kontakty 0.09.35 | Średnia prędkość, oba modele | Równoważne tempo /500 m, oba modele |
+|---|---:|---:|---:|---:|---:|
+| Spokojna 10 | 3908 | 430 | 430 | 10,500 km/h | 2:51,438 |
+| Szybsza 10 | 4117 | 452 | 450 | 13,824 km/h | 2:10,207 |
+| Zmienna 30 | 11764 | 1297 | 1287 | 11,878 km/h | 2:31,544 |
+
+Liczba zdarzeń przekazanych przez stare bramki obejmuje sumę ich dwóch strumieni. Nie każde takie zdarzenie zwiększało dystans, ponieważ silnik ponownie sprawdzał odstęp dystansowy. Dlatego usunięcie nadmiarowych zdarzeń z tej kolumny nie zmienia dystansu czystego przebiegu. Średnia i tempo w tabeli dotyczą okna pomiędzy pierwszym i ostatnim przyjętym impulsem.
+
+W szybszej serii końcowa kadencja starego detektora wynosiła 47,53 SPM, a nowego 34,36 SPM, mimo identycznej liczby 10 ruchów. Nowa kadencja wykorzystuje rzeczywiste okresy zatwierdzonych cykli i ich medianę.
+
 Zachowano starszy zapis 10 ruchów z `cyd_motion_test.cpp`. Nowy detektor nadal daje 10/10. Testy trajektorii zwijacza dają 30/30 przy 20, 30, 50 i 75 SPM oraz różnych pozycjach nawrotu względem nierówno umieszczonych magnesów. Przejście 20→30→45→25 SPM daje 60/60. Wstrzyknięte drgania nie zwiększają liczby ruchów ani dystansu. Testy obejmują też brakujące zbocze, niepełny ruch, zatrzymany zamknięty kontaktron, szybkie ponowne przejście magnesu, przepełnienie micros(), opóźnienia przetwarzania i przepełnienie kolejki.
 
 ## Próby na ergometrze
