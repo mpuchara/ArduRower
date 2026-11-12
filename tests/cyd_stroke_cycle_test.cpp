@@ -87,6 +87,18 @@ int main() {
   assert(missing.meters==retained && missing.strokes==completed && missing.speed==0);
   missing.onVerifiedPulse(uint32_t(input.back()+2000));
   assert(missing.meters==retained && missing.strokes==completed);
+  // A verified closure can arrive after a TFT/BLE loop tick. Its speed
+  // contribution must be aged to that tick, not treated as a fresh impulse.
+  cydmotion::Engine timely,delayed;
+  timely.onVerifiedPulse(100000);
+  timely.onVerifiedPulse(140000);
+  timely.tick(160000);
+  delayed.onVerifiedPulse(100000);
+  delayed.tick(160000);
+  delayed.onVerifiedPulse(140000);
+  delayed.tick(160000);
+  assert(timely.meters==delayed.meters);
+  assert(fabsf(timely.speed-delayed.speed)<0.000001f);
   // A partial pull has no completed slowdown/recovery.
   std::vector<uint64_t> partial;
   phase(partial,0.26,5.01,100000,1000000,false);
