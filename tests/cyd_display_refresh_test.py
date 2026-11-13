@@ -48,9 +48,9 @@ processing = body("processReedPulse")
 assert processing.index("pauseResume.confirm(pulse.timeUs)") < processing.index("metrics.pulse(pulse.timeUs)")
 assert "const bool swipe=cydtouch::pageSwipe(" in source
 assert "TouchGestures.h" in source
-assert "ghost.start(0)" in source
-assert "saveBest(selectedDistance,ghost.attempt)" in source
-assert "previousValid[slot] && previousField[slot] == text" in source
+assert "race.start(0)" in source
+assert "saveBest(i,race.attempt)" in source
+assert "previousValid[slot] && previousField[slot] == text && previousColor[slot]==fg" in source
 
 # Only build/publish exactly the hardware variant confirmed by the user.
 assert platform.count("[env:") == 1

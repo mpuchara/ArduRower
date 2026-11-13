@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.35
+# ArduRower CYD 0.09.36
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
@@ -11,7 +11,7 @@ Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO t
 
 ## Trening i Garmin
 
-Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans lub wróć do zwykłego treningu z menu. Pauza włącza się po 8 sekundach bez impulsów, a cztery kolejne impulsy w odstępach do 350 ms ją wznawiają. [Szczegóły Ghost Race](../docs/GHOST_0.09.24.md).
+Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans 1000/3000/10000 m lub wróć do zwykłego treningu z menu. Wybór nie resetuje sesji. Rekordy wszystkich trzech dystansów zapisują się niezależnie od widoku, od początku sesji. Pauza włącza się po 8 sekundach bez impulsów, a cztery kolejne impulsy w odstępach do 350 ms ją wznawiają. [Szczegóły Ghost Race](../docs/GHOST_0.09.36.md).
 
 Filtr potwierdza zamknięcie i otwarcie kontaktronu, a detektor wnioskuje o pełnym cyklu z obwiedni odstępów między przejściami czterech magnesów. [Diagnostyka reedtrace i testy 0.09.35](../docs/REED_CYCLE_0.09.35.md). Jeden kontaktron nie mierzy kierunku bezpośrednio. Prędkość zachowuje większą bezwładność między pociągnięciami. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
@@ -39,7 +39,7 @@ Poniższe wpisy opisują starsze wersje.
 
 ## Tryb GHOST RACE (v0.08)
 
-**Swipe poziomo w lewo lub w prawo** na ekranie ST7789/GPIO21 przełącza pomiędzy obecnym dashboardem (z dwoma widokami) i **GHOST RACE**. Wejście do Ghost Race otwiera menu 500 m / 1000 m / 2000 m. Wybierz dystans dotykając całego wiersza. Jeśli nie ma kalibracji dotyku, przy pierwszym wejściu pojawią się trzy krzyżyki do dotknięcia; działająca kalibracja UBox CYD zostanie użyta automatycznie, jeśli zachowała się w NVS. Alternatywnie **krótki BOOT** przeskakuje między pozycjami menu, a **BOOT >1,5 s** wybiera dystans.
+**Swipe poziomo w lewo lub w prawo** na ekranie ST7789/GPIO21 przełącza pomiędzy obecnym dashboardem (z dwoma widokami) i **GHOST RACE**. Wejście do Ghost Race otwiera menu 1000 m / 3000 m / 10000 m. Wybierz dystans dotykając całego wiersza. Jeśli nie ma kalibracji dotyku, przy pierwszym wejściu pojawią się trzy krzyżyki do dotknięcia; działająca kalibracja UBox CYD zostanie użyta automatycznie, jeśli zachowała się w NVS. Alternatywnie **krótki BOOT** przeskakuje między pozycjami menu, a **BOOT >1,5 s** wybiera dystans.
 
 Po wyborze urządzenie czeka na pierwszy impuls kontaktronu, którym rozpoczyna się zegar wyścigu. Czas wyścigu biegnie także podczas przerwy, niezależnie od dotychczasowego treningowego czasu aktywnego i od protokołu BLE. Równolegle widać dwa paski dystansu (TY i DUCH), przewagę w metrach i sekundach, moc oraz prędkość z wykresami. Jeśli nie ma rekordu, pierwszy ukończony przejazd zostaje wzorcem; kolejne przejazdy ścigają się z najlepszym ukończonym rekordem. Przesunięcie z powrotem do dashboardu nie przerywa aktywnego wyścigu. Długie przytrzymanie BOOT podczas wyścigu anuluje próbę (rekord pozostaje). Po ukończeniu dotknięcie ekranu pokazuje menu; po wyjściu i powrocie do zakończonego trybu również pojawi się menu.
 

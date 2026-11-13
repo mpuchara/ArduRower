@@ -1,12 +1,12 @@
 # ArduRower
 
-## ArduRower CYD 0.09.35
+## ArduRower CYD 0.09.36
 
-Aktualne wydanie jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Filtruje oba zbocza kontaktronu i rozpoznaje ruch z potwierdzonego cyklu napędu i powrotu. W fizycznej próbie nowy detektor naliczył **30/30 spokojnych ruchów**; użytkownik potwierdził też szybszą próbę, podczas której rozłączyły się przewody. [Opis, porównanie z 0.09.34 i odtwarzalne zapisy](docs/REED_CYCLE_0.09.35.md).
+Wydanie 0.09.36 dodaje automatyczne rekordy i kolorową różnicę czasu bez zmian algorytmu ruchu z 0.09.35. Jest przeznaczone dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**. Filtruje oba zbocza kontaktronu i rozpoznaje ruch z potwierdzonego cyklu napędu i powrotu. W fizycznej próbie nowy detektor naliczył **30/30 spokojnych ruchów**; użytkownik potwierdził też szybszą próbę, podczas której rozłączyły się przewody. [Opis, porównanie z 0.09.34 i odtwarzalne zapisy](docs/REED_CYCLE_0.09.35.md).
 
-- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.35`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
+- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.36`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
 - **Garmin** — pole **ArduRower HR 015** odbiera dane z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
-- **Trening z duchem** — dotknij pulpitu i wybierz 500, 1000 lub 2000 m. Po 8 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Cztery kolejne impulsy w odstępach do 350 ms wznawiają trening. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Rekordy używają tej samej skali dystansu co 0.09.34. [Zasady](docs/GHOST_0.09.24.md).
+- **Trening z duchem** — dotknij pulpitu i wybierz 1000, 3000 lub 10000 m. Wybór jest tylko widokiem bieżącej sesji, nie zeruje treningu. Wszystkie trzy rekordy są zapisywane automatycznie po osiągnięciu dystansu od początku sesji, również bez ducha. Różnica czasu do poprzedniego rekordu na tym samym dystansie jest zielona (przewaga), żółta (remis) lub czerwona (strata), z płynnym przejściem. Po 8 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Cztery kolejne impulsy w odstępach do 350 ms wznawiają trening. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Rekordy używają tej samej skali dystansu co 0.09.34. [Zasady aktualnej wersji](docs/GHOST_0.09.36.md).
 - **Ekran i dotyk** — zachowano poziomą orientację z 0.09.25, obróconą o 180° względem 0.09.24, wraz z przeliczeniem starszej kalibracji. [Sprzęt, sterowanie i diagnostyka](cyd_rower/README.md).
 
 ## Oryginalny wariant Heltec OLED

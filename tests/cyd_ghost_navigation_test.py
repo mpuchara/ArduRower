@@ -23,11 +23,11 @@ checks = (
     'GHOST: started',
     'GHOST: finished',
     'ZWYKLY TRENING - WYJDZ',
-    'GHOST: SELECT 500',
     'GHOST: SELECT 1000',
-    'GHOST: SELECT 2000',
+    'GHOST: SELECT 3000',
+    'GHOST: SELECT 10000',
     'ghostWorkout!=displayedGhostWorkout',
-    'ghost.meterLead(raceClockMs())',
+    'selectedRace().timeLeadMs(raceClockMs())',
     'FTMS: advertising recovery',
 )
 
@@ -41,7 +41,7 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.35"' in src
+assert 'FIRMWARE_VERSION = "0.09.36"' in src
 adc=(root/'cyd_rower/src/CydTouch.h').read_text()
 assert 'spi_->transfer16(' not in adc
 assert 'z1=adc(0xB1),z2=adc(0xC1)' in adc
@@ -53,9 +53,20 @@ assert 'Mode activeMode = Mode::Dashboard' in src
 assert 'void exitGhostTraining()' in src
 assert 'raceOptionsOpen=true' in src
 assert 'KONTYNUUJ Z DUCHEM' in src and 'ZMIEN DYSTANS' in src
-assert 'ghost.beatGhost() && !recordSaveFailed' in src
+assert 'race.beatGhost() && !result.saveFailed' in src
 assert 'drawVictoryCup();' in src
-assert 'ghost.advance(raceClockMs(),metrics.distance())' in src
-assert 'g7_500' in src and 'h7_500' in src and 'w7_500' in src
+assert 'race.advance(raceClockMs(),metrics.distance())' in src
+assert all(key in src for key in ('g7_1000','g7_3000','g7_10000','h7_1000','w7_1000'))
+# Tracking belongs to the workout, not the selected page or race view.
+track=src[src.index('void updateRaceTracking('):src.index('void toggleMode()')]
+assert 'for(uint8_t i=0;i<ghostrace::kDistanceCount;++i)' in track
+assert 'saveBest(i,race.attempt)' in track
+assert 'activeMode' not in track
+assert src.index('updateRaceTracking(now);') < src.index('updateButton(now);')
+select=src[src.index('void startRace('):src.index('void openRaceMenu()')]
+assert 'resetWorkout();' not in select
+exit_view=src[src.index('void exitGhostTraining()'):src.index('void updateRaceTracking(')]
+assert 'resetWorkout();' not in exit_view and '.cancel()' not in exit_view
+assert 'selectedRace().timeLeadColor(raceClockMs())' in src
 assert 'metrics.paused?"AUTO PAUZA"' in src
 print("PASS: byte-oriented pressure/release, calibrated menu, one BOOT entry and one Ghost toggle per finger")

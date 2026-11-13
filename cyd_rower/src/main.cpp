@@ -34,7 +34,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.35";
+static constexpr const char *FIRMWARE_VERSION = "0.09.36";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -205,23 +205,29 @@ static constexpr uint8_t kMaxAssignedTextSlot = 25;
 static_assert(kTextSlotCount > kMaxAssignedTextSlot, "Ghost Race fields exceed text cache");
 String previousField[kTextSlotCount];
 bool previousValid[kTextSlotCount] = {};
+uint16_t previousColor[kTextSlotCount] = {};
 static_assert(sizeof(previousField) / sizeof(previousField[0]) ==
               sizeof(previousValid) / sizeof(previousValid[0]),
               "Text cache and validity flags must have matching sizes");
-// Race mode has independent elapsed time, including stationary intervals.
+// Record all milestones on the training clock; Race mode is only a view.
 enum class Mode : uint8_t { Dashboard, Race };
 Mode activeMode = Mode::Dashboard;
-ghostrace::Race ghost;
+ghostrace::Race trainingRaces[ghostrace::kDistanceCount];
 ghostrace::Record storedGhost;
-ghostrace::HeartRecord bestHeart={},attemptHeart={};
+ghostrace::HeartRecord bestHeart={},trainingHearts[ghostrace::kDistanceCount];
+// Compact NVS blobs avoid retaining hundreds of unused zero samples.
+uint8_t raceStorage[sizeof(ghostrace::Record)];
 bool hasBestHeart=false;
 uint32_t personalBestMs[3] = {};
 uint8_t selectedDistance=0;
 bool raceLayoutReady=false;
 uint8_t displayedRaceScreen=255;
 uint32_t lastRacePaintMs=0;
-bool recordSaveFailed=false;
-bool raceOptionsOpen=false,medalAwarded=false,medalSaved=false;
+struct RaceResult { bool saveFailed=false,medalAwarded=false,medalSaved=false; };
+RaceResult raceResults[ghostrace::kDistanceCount];
+bool raceOptionsOpen=false,ghostSelected=false;
+ghostrace::Race &selectedRace(){return trainingRaces[selectedDistance];}
+ghostrace::Phase ghostPhase(){return ghostSelected?selectedRace().phase:ghostrace::Phase::Idle;}
 bool reportedAutoPause=false;
 uint32_t ghostWins[3]={};
 uint8_t lastRaceSelection=255;
@@ -471,6 +477,7 @@ void IRAM_ATTR rowerdebounceinterrupt() {
   portEXIT_CRITICAL_ISR(&pulseMux);
 }
 
+void resetRaceTracking();
 void resetWorkout() {
   pauseResume.reset();
   portENTER_CRITICAL(&pulseMux);
@@ -490,98 +497,182 @@ void resetWorkout() {
   lastHistoryMs = millis();
   reportedAutoPause=false;
   ++historyRevision;
+  resetRaceTracking();
 }
 
 // Persistent reference runs (not rewritten each second). The NVS blob is
 // versioned/checksummed and accepted only for the same distance/calibration.
 void resetRenderCache();
 void renderRaceUI();
-const uint16_t raceDistances[3] = {500, 1000, 2000};
-// Preserve wall-clock v2 records under their original keys. Active-clock
-// races use a separate version/key so rests never unfairly beat old records.
-// Preserve records from previous distance models in their original keys.
-const char *raceKeys[3] = {"g7_500", "g7_1000", "g7_2000"};
-const char *heartKeys[3] = {"h7_500", "h7_1000", "h7_2000"};
-const char *winKeys[3] = {"w7_500", "w7_1000", "w7_2000"};
+const uint16_t (&raceDistances)[ghostrace::kDistanceCount] = ghostrace::kDistances;
+// Keep the existing 1 km NVS key and v3 blob support. Old 500/2000 m
+// records remain untouched; only the new distances are offered in the UI.
+const char *raceKeys[3] = {"g7_1000", "g7_3000", "g7_10000"};
+const char *heartKeys[3] = {"h7_1000", "h7_3000", "h7_10000"};
+const char *winKeys[3] = {"w7_1000", "w7_3000", "w7_10000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
-  const size_t n = p.getBytesLength(raceKeys[index]);
-  const size_t read = (n == sizeof(out)) ?
-      p.getBytes(raceKeys[index], &out, sizeof(out)) : 0;
+  const size_t n=p.getBytesLength(raceKeys[index]);
+  const size_t read=n<=sizeof(raceStorage) && n>0 ?
+      p.getBytes(raceKeys[index],raceStorage,n):0;
   p.end();
-  return read == sizeof(out) && ghostrace::valid(out, raceDistances[index],motion.calibrationMilli());
+  if(read!=n || !read)return false;
+  memset(&out,0,sizeof(out));
+  if(n==sizeof(out))memcpy(&out,raceStorage,n); // legacy or full v4
+  else {
+    const size_t header=offsetof(ghostrace::Record,decimeters);
+    if(n<header+sizeof(out.intervalSeconds)+sizeof(out.checksum))return false;
+    memcpy(&out,raceStorage,header);
+    if(out.version!=ghostrace::kVersion || !out.count || out.count>ghostrace::kSamples)return false;
+    const size_t samples=out.count*sizeof(uint16_t);
+    if(n!=header+samples+sizeof(out.intervalSeconds)+sizeof(out.checksum))return false;
+    memcpy(out.decimeters,raceStorage+header,samples);
+    memcpy(&out.intervalSeconds,raceStorage+header+samples,sizeof(out.intervalSeconds));
+    memcpy(&out.checksum,raceStorage+header+samples+sizeof(out.intervalSeconds),sizeof(out.checksum));
+  }
+  return ghostrace::valid(out,raceDistances[index],motion.calibrationMilli());
 }
 bool saveBest(uint8_t index, const ghostrace::Record &record) {
-  if (!ghostrace::valid(record, raceDistances[index],motion.calibrationMilli())) return false;
+  if (!ghostrace::valid(record,raceDistances[index],motion.calibrationMilli())) return false;
+  const size_t prefix=offsetof(ghostrace::Record,decimeters)+record.count*sizeof(uint16_t);
+  memcpy(raceStorage,&record,prefix);
+  memcpy(raceStorage+prefix,&record.intervalSeconds,sizeof(record.intervalSeconds));
+  memcpy(raceStorage+prefix+sizeof(record.intervalSeconds),&record.checksum,sizeof(record.checksum));
+  const size_t n=prefix+sizeof(record.intervalSeconds)+sizeof(record.checksum);
   Preferences p;
-  if (!p.begin("rower-races", false)) return false;
-  const bool ok = p.putBytes(raceKeys[index], &record, sizeof(record)) == sizeof(record);
+  if(!p.begin("rower-races",false))return false;
+  const bool ok=p.putBytes(raceKeys[index],raceStorage,n)==n;
+  p.end();
+  return ok;
+}
+bool loadHeart(uint8_t index,ghostrace::HeartRecord &out,const ghostrace::Record &record) {
+  Preferences p;
+  if(!p.begin("rower-races",true))return false;
+  const size_t n=p.getBytesLength(heartKeys[index]);
+  const size_t read=n<=sizeof(raceStorage) && n>0?p.getBytes(heartKeys[index],raceStorage,n):0;
+  p.end();
+  if(read!=n || !read)return false;
+  out={};
+  if(n==sizeof(out))memcpy(reinterpret_cast<uint8_t*>(&out),raceStorage,n);
+  else {
+    const size_t header=offsetof(ghostrace::HeartRecord,bpm);
+    if(n<header+sizeof(out.checksum))return false;
+    // Copy only the header fields, leaving the unused samples zeroed.
+    memcpy(reinterpret_cast<uint8_t*>(&out),raceStorage,header);
+    if(!out.count || out.count>ghostrace::kSamples ||
+       n!=header+out.count+sizeof(out.checksum))return false;
+    memcpy(out.bpm,raceStorage+header,out.count);
+    memcpy(&out.checksum,raceStorage+header+out.count,sizeof(out.checksum));
+  }
+  return ghostrace::validHeart(out,record);
+}
+bool saveHeart(uint8_t index,const ghostrace::HeartRecord &heart) {
+  const size_t prefix=offsetof(ghostrace::HeartRecord,bpm)+heart.count;
+  memcpy(raceStorage,&heart,prefix);
+  memcpy(raceStorage+prefix,&heart.checksum,sizeof(heart.checksum));
+  const size_t n=prefix+sizeof(heart.checksum);
+  Preferences p;
+  if(!p.begin("rower-races",false))return false;
+  const bool ok=p.putBytes(heartKeys[index],raceStorage,n)==n;
   p.end();
   return ok;
 }
 void loadBestTimes() {
-  for (int i=0;i<3;++i)
-    personalBestMs[i] = loadBest(i, storedGhost) ? storedGhost.finishMs : 0;
+  for(uint8_t i=0;i<ghostrace::kDistanceCount;++i)
+    personalBestMs[i]=loadBest(i,storedGhost)?storedGhost.finishMs:0;
   Preferences p;
   if(p.begin("rower-races",true)) {
     for(int i=0;i<3;++i)ghostWins[i]=p.getUInt(winKeys[i],0);
     p.end();
   }
 }
-void startRace(uint8_t index) {
-  if (index >= 3) return;
-  selectedDistance = index;
-  const bool found = loadBest(index, storedGhost);
-  bestHeart={};attemptHeart={};hasBestHeart=false;
-  if(found) {
-    Preferences p;
-    if(p.begin("rower-races",true)) {
-      hasBestHeart=p.getBytesLength(heartKeys[index])==sizeof(bestHeart) &&
-        p.getBytes(heartKeys[index],&bestHeart,sizeof(bestHeart))==sizeof(bestHeart) &&
-        ghostrace::validHeart(bestHeart,storedGhost);
-      p.end();
-    }
+void resetRaceTracking() {
+  ghostSelected=false;raceOptionsOpen=false;hasBestHeart=false;
+  for(uint8_t i=0;i<ghostrace::kDistanceCount;++i) {
+    const bool found=loadBest(i,storedGhost);
+    trainingRaces[i].arm(raceDistances[i],found?&storedGhost:nullptr,motion.calibrationMilli());
+    personalBestMs[i]=found?storedGhost.finishMs:0;
+    trainingHearts[i]={};raceResults[i]={};
   }
-  ghost.arm(raceDistances[index], found ? &storedGhost : nullptr,
-            motion.calibrationMilli());
-  // Start a fresh interval, so race distance is not polluted by earlier
-  // dashboard rowing. Do not change the BLE/FTMS encoder in any way.
-  resetWorkout();
-  activeMode = Mode::Race;
-  detailPage=false;pageRendered=false;
+}
+void startRace(uint8_t index) {
+  if(index>=ghostrace::kDistanceCount)return;
+  selectedDistance=index;ghostSelected=true;
+  bestHeart={};
+  hasBestHeart=selectedRace().hasBest && loadHeart(index,bestHeart,selectedRace().best);
+  // Selection is just a view; do not reset a workout or its milestone timers.
+  activeMode=Mode::Race;detailPage=false;pageRendered=false;
   Serial.println("GHOST: DASHBOARD enabled after distance choice");
   Serial.printf("GHOST: armed target=%u, best=%s, calibration=%lu\n",
-                (unsigned)ghost.targetMeters,found?"yes":"no",
+                (unsigned)selectedRace().targetMeters,selectedRace().hasBest?"yes":"no",
                 (unsigned long)motion.calibrationMilli());
-  raceLayoutReady = false;
-  lastRacePaintMs = 0;
-  recordSaveFailed=false;
-  raceOptionsOpen=false;medalAwarded=medalSaved=false;
+  raceLayoutReady=false;lastRacePaintMs=0;raceOptionsOpen=false;
 }
 void openRaceMenu() {
-  if (ghost.phase == ghostrace::Phase::Running ||
-      ghost.phase == ghostrace::Phase::Armed) ghost.cancel();
-  ghost.phase = ghostrace::Phase::Idle;
-  raceOptionsOpen=false;
-  loadBestTimes();
-  raceLayoutReady=false;
+  ghostSelected=false;raceOptionsOpen=false;
+  loadBestTimes();raceLayoutReady=false;
 }
 void exitGhostTraining() {
-  ghost.cancel();
+  ghostSelected=false;
   raceOptionsOpen=false;activeMode=Mode::Dashboard;detailPage=false;
   calibrationScreen=false;pageRendered=false;raceLayoutReady=false;
   resetRenderCache();
   Serial.println("GHOST: EXIT to ordinary training; current workout retained");
 }
+void updateRaceTracking(uint32_t now) {
+  if(!metrics.started)return;
+  for(uint8_t i=0;i<ghostrace::kDistanceCount;++i) {
+    auto &race=trainingRaces[i];
+    auto &heart=trainingHearts[i];
+    auto &result=raceResults[i];
+    if(race.phase==ghostrace::Phase::Armed) {
+      race.start(0);
+      ghostrace::captureHeart(heart,race.attempt,(uint8_t)liveHr(now));
+      Serial.printf("GHOST: started %u m at %lu, pulses=%lu\n",
+                    (unsigned)race.targetMeters,(unsigned long)now,(unsigned long)metrics.pulses);
+    }
+    if(race.phase!=ghostrace::Phase::Running)continue;
+    const bool improved=race.advance(raceClockMs(),metrics.distance());
+    ghostrace::captureHeart(heart,race.attempt,(uint8_t)liveHr(now));
+    if(improved) {
+      result.saveFailed=!saveBest(i,race.attempt);
+      if(!result.saveFailed) {
+        personalBestMs[i]=race.endMs;
+        heart.raceChecksum=race.attempt.checksum;
+        heart.checksum=ghostrace::hashHeart(heart);
+        const bool ok=saveHeart(i,heart);
+        Serial.printf("GHOST: optional best HR trace saved=%d\n",ok?1:0);
+      }
+    }
+    if(race.phase==ghostrace::Phase::Finished) {
+      if(race.beatGhost() && !result.saveFailed) {
+        result.medalAwarded=true;
+        Preferences p;
+        if(p.begin("rower-races",false)) {
+          const uint32_t next=ghostWins[i]==UINT32_MAX?UINT32_MAX:ghostWins[i]+1;
+          result.medalSaved=p.putUInt(winKeys[i],next)==sizeof(uint32_t);
+          if(result.medalSaved)ghostWins[i]=next;
+          p.end();
+        }
+      }
+      if(ghostSelected && i==selectedDistance)raceOptionsOpen=false;
+      if(!ghostSelected || i==selectedDistance)raceLayoutReady=false;
+      Serial.printf("GHOST: finished %u m, time=%lu PB=%d saved=%s medal=%d medalSaved=%d wins=%lu\n",
+                    (unsigned)race.targetMeters,(unsigned long)race.endMs,race.personalBest?1:0,
+                    improved?(result.saveFailed?"no":"yes"):"not needed",
+                    result.medalAwarded?1:0,result.medalSaved?1:0,(unsigned long)ghostWins[i]);
+    }
+  }
+}
 void toggleMode() {
   if (activeMode == Mode::Dashboard) {
     Serial.println("GHOST: ENTER");
     activeMode=Mode::Race;
-    if (ghost.phase == ghostrace::Phase::Finished ||
-        ghost.phase == ghostrace::Phase::Cancelled)
+    if (ghostPhase() == ghostrace::Phase::Finished ||
+        ghostPhase() == ghostrace::Phase::Cancelled)
       openRaceMenu();
-    else if (ghost.phase == ghostrace::Phase::Idle)
+    else if (ghostPhase() == ghostrace::Phase::Idle)
       loadBestTimes();
     raceLayoutReady=false;
     // Never launch a blocking touch-calibration wizard automatically when
@@ -601,27 +692,25 @@ void updateButton(uint32_t now) {
       if (activeMode == Mode::Dashboard) {
         toggleMode();
         Serial.println("GHOST: entered menu using single BOOT click");
-      } else if (ghost.phase == ghostrace::Phase::Idle)
+      } else if (ghostPhase() == ghostrace::Phase::Idle)
         selectedDistance=(selectedDistance+1)%3;
-      else if (ghost.phase == ghostrace::Phase::Finished ||
-               ghost.phase == ghostrace::Phase::Cancelled) openRaceMenu();
+      else if (ghostPhase() == ghostrace::Phase::Finished ||
+               ghostPhase() == ghostrace::Phase::Cancelled) openRaceMenu();
       else openRaceMenu();
     }
   }
   if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
     longPressDone=true;
     if (activeMode == Mode::Dashboard) {
-      if(ghost.phase==ghostrace::Phase::Running ||
-         ghost.phase==ghostrace::Phase::Armed)ghost.cancel();
       resetWorkout();
     }
-    else if (ghost.phase == ghostrace::Phase::Idle) {
+    else if (ghostPhase() == ghostrace::Phase::Idle) {
       Serial.printf("GHOST: BOOT long start %u m\n",
                     (unsigned)raceDistances[selectedDistance]);
       startRace(selectedDistance);
     }
-    else if (ghost.phase == ghostrace::Phase::Running ||
-             ghost.phase == ghostrace::Phase::Armed) openRaceMenu();
+    else if (ghostPhase() == ghostrace::Phase::Running ||
+             ghostPhase() == ghostrace::Phase::Armed) openRaceMenu();
     else openRaceMenu();
   }
 }
@@ -736,9 +825,6 @@ void touchTap(int16_t rx,int16_t ry) {
       saveMotionCalibration();
       // Calibration invalidates any in-progress Ghost Race measurement.
       // Never append samples under the new scale to an old-calibration race.
-      if(ghost.phase==ghostrace::Phase::Armed ||
-         ghost.phase==ghostrace::Phase::Running) ghost.cancel();
-      ghost.phase=ghostrace::Phase::Idle;
       // New calibration changes virtual meters. Invalidate race replay
       // compatibility through GhostRace::Record.scaleMilli.
       resetWorkout();loadBestTimes();
@@ -775,18 +861,22 @@ void touchTap(int16_t rx,int16_t ry) {
     else if(y>=170 || y<26)exitGhostTraining();
     return;
   }
-  if(ghost.phase==ghostrace::Phase::Finished || ghost.phase==ghostrace::Phase::Cancelled) {
+  if(ghostPhase()==ghostrace::Phase::Finished || ghostPhase()==ghostrace::Phase::Cancelled) {
     if(y<26 || (y>=205 && x>=160))exitGhostTraining();
-    else if(y>=205){if(medalAwarded)startRace(selectedDistance);else openRaceMenu();}
+    else if(y>=205){
+      const bool again=raceResults[selectedDistance].medalAwarded;
+      resetWorkout(); // explicit new workout, never a distance/view switch
+      if(again)startRace(selectedDistance);else openRaceMenu();
+    }
     return;
   }
-  if(ghost.phase==ghostrace::Phase::Running ||
-     ghost.phase==ghostrace::Phase::Armed) {
+  if(ghostPhase()==ghostrace::Phase::Running ||
+     ghostPhase()==ghostrace::Phase::Armed) {
     raceOptionsOpen=true;raceLayoutReady=false;
     Serial.println("GHOST: touch OPTIONS; race retained");
     return;
   }
-  if(ghost.phase!=ghostrace::Phase::Idle)return;
+  if(ghostPhase()!=ghostrace::Phase::Idle)return;
   if(y<25 || y>=190) {exitGhostTraining();return;}
   // Touch-only recalibration control in the Ghost menu. Restart safely so
   // the three-point wizard runs before starting BLE/FTMS, as in UBox.
@@ -804,9 +894,9 @@ void touchTap(int16_t rx,int16_t ry) {
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u calibrated=%d raw=%d,%d\n",
                 (int)x,(int)y,(unsigned)selectedDistance,calibrated?1:0,(int)rx,(int)ry);
   // Three entire rows are large touch targets with no small hitbox.
-  if(y>=50 && y<95) {Serial.println("GHOST: SELECT 500");startRace(0);}
-  else if(y>=95 && y<140) {Serial.println("GHOST: SELECT 1000");startRace(1);}
-  else if(y>=140 && y<185) {Serial.println("GHOST: SELECT 2000");startRace(2);}
+  if(y>=50 && y<95) {Serial.println("GHOST: SELECT 1000");startRace(0);}
+  else if(y>=95 && y<140) {Serial.println("GHOST: SELECT 3000");startRace(1);}
+  else if(y>=140 && y<185) {Serial.println("GHOST: SELECT 10000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
   if(!touchReady || (uint32_t)(now-touchLastPollMs)<20)return;
@@ -878,6 +968,13 @@ String formatTime(uint32_t seconds) {
   }
   return String(buffer);
 }
+String formatLead(float ms) {
+  // Compact enough for the 102 px dashboard cell, even for 10 km.
+  const float seconds=ms/1000.0f;
+  const String sign=seconds<0?"-":"+";
+  if(fabsf(seconds)<99.95f)return sign+String(fabsf(seconds),1)+"s";
+  return sign+formatTime((uint32_t)lroundf(fabsf(seconds)));
+}
 String formatPace(float seconds) {
   return seconds > 0 ? formatTime((uint32_t)roundf(seconds)) : String("--:--");
 }
@@ -930,8 +1027,8 @@ void textPatch(uint8_t slot, int x, int y, int w, int h, String text,
                   (unsigned)slot, (unsigned)(kTextSlotCount-1));
     return;
   }
-  if (previousValid[slot] && previousField[slot] == text) return;
-  previousValid[slot] = true; previousField[slot] = text;
+  if (previousValid[slot] && previousField[slot] == text && previousColor[slot]==fg) return;
+  previousValid[slot] = true; previousField[slot] = text; previousColor[slot]=fg;
   if (scratchReady) {
     scratch.fillSprite(bg);
     scratch.setTextColor(fg, bg);
@@ -1014,8 +1111,8 @@ void plot(int x, int y, int w, int h, bool power) {
 // Ghost speeds use the saved distance curve on the active training clock.
 TrendPoint ghostTrendAt(uint32_t elapsed) {
   const uint32_t start=elapsed>2000?elapsed-2000:0;
-  const float meters=ghostrace::interpolate(ghost.best,elapsed)-
-                     ghostrace::interpolate(ghost.best,start);
+  const float meters=ghostrace::interpolate(selectedRace().best,elapsed)-
+                     ghostrace::interpolate(selectedRace().best,start);
   const float kmh=elapsed>start ? meters*3600.0f/(elapsed-start) : 0;
   return {speedTenths(kmh),hasBestHeart?ghostrace::replayHeart(bestHeart,elapsed):uint8_t(0),0};
 }
@@ -1023,8 +1120,8 @@ void renderSharedTrend(int x,int y,int width,int height,bool ghostTraining=false
   const uint16_t speedInk=speedColor;
   const uint16_t hrInk=heartColor;
   const uint16_t ghostInk=(speedColor>>1)&0x7BEF;
-  const bool ghostCurve=ghostTraining && ghost.hasBest && ghost.phase==ghostrace::Phase::Running;
-  const uint32_t ghostElapsed=ghostCurve?ghost.elapsed(raceClockMs()):0;
+  const bool ghostCurve=ghostTraining && selectedRace().hasBest && ghostPhase()==ghostrace::Phase::Running;
+  const uint32_t ghostElapsed=ghostCurve?selectedRace().elapsed(raceClockMs()):0;
   // Compute both axes once from the exact points in this window. Cache the
   // replay samples so the sprite strips use the same data as the scale pass.
   static TrendPoint ghostSamples[TREND_SAMPLES];
@@ -1119,12 +1216,12 @@ void calibrationPage() {
 }
 void pageLayout() {
   const bool ghostWorkout=activeMode==Mode::Race &&
-   (ghost.phase==ghostrace::Phase::Armed || ghost.phase==ghostrace::Phase::Running);
+   (ghostPhase()==ghostrace::Phase::Armed || ghostPhase()==ghostrace::Phase::Running);
   tft.fillScreen(backgroundColor); // only on view change
   tft.setTextDatum(TL_DATUM);
   tft.fillRect(0,0,320,24,panelColor);
   tft.setTextColor(whiteColor,panelColor);
-  tft.drawString(ghostWorkout?("DUCH "+String(ghost.targetMeters)+"m"):String("ARDUROWER"),7,3,2);
+  tft.drawString(ghostWorkout?("DUCH "+String(selectedRace().targetMeters)+"m"):String("ARDUROWER"),7,3,2);
   // Header title: tap to enter Ghost Race; horizontal swipes are primary.
   if(!detailPage && !ghostWorkout) {
     tft.setTextColor(labelColor,backgroundColor);
@@ -1161,7 +1258,7 @@ void pageLayout() {
 }
 void updateUI() {
   const bool ghostWorkout=activeMode==Mode::Race &&
-   (ghost.phase==ghostrace::Phase::Armed || ghost.phase==ghostrace::Phase::Running);
+   (ghostPhase()==ghostrace::Phase::Armed || ghostPhase()==ghostrace::Phase::Running);
   if(activeMode==Mode::Race && (!ghostWorkout || raceOptionsOpen)) {renderRaceUI();return;}
   if(calibrationScreen && !ghostWorkout) {calibrationPage();return;}
   if(!pageRendered || detailPage!=displayedDetails || ghostWorkout!=displayedGhostWorkout)pageLayout();
@@ -1185,11 +1282,13 @@ void updateUI() {
               whiteColor,backgroundColor,4);
     textPatch(6,224,166,95,26,String((uint32_t)roundf(metrics.strokeRate)),
               whiteColor,backgroundColor,4);
-    const String paceOrDelta=ghostWorkout ? (ghost.hasBest ?
-      String(ghost.meterLead(raceClockMs())>=0?"+":"")+String((int)lroundf(ghost.meterLead(raceClockMs())))+"m" : "-- m") :
-      formatPace(reportedPace());
+    const float leadMs=ghostWorkout && selectedRace().hasBest ?
+      selectedRace().timeLeadMs(raceClockMs()):0;
+    const String paceOrDelta=ghostWorkout ? (selectedRace().hasBest ?
+      formatLead(leadMs) : "-- s") : formatPace(reportedPace());
     textPatch(7,8,207,102,26,paceOrDelta,
-              whiteColor,backgroundColor,4);
+              ghostWorkout && selectedRace().hasBest ?
+              selectedRace().timeLeadColor(raceClockMs()):whiteColor,backgroundColor,4);
     textPatch(8,115,207,104,26,
               "~"+String((int)roundf(metrics.equivalentPower())),
               whiteColor,backgroundColor,4);
@@ -1226,9 +1325,9 @@ String raceTime(uint32_t ms) {
 }
 uint8_t desiredRaceScreen() {
   if(raceOptionsOpen)return 3;
-  if(ghost.phase==ghostrace::Phase::Idle) return 0;
-  if(ghost.phase==ghostrace::Phase::Finished ||
-     ghost.phase==ghostrace::Phase::Cancelled) return 2;
+  if(ghostPhase()==ghostrace::Phase::Idle) return 0;
+  if(ghostPhase()==ghostrace::Phase::Finished ||
+     ghostPhase()==ghostrace::Phase::Cancelled) return 2;
   return 1; // Armed or Running
 }
 void raceActionButton(int x,int y,int w,int h,const char *label) {
@@ -1270,7 +1369,7 @@ void paintRaceLayout(uint8_t screen) {
       tft.drawString(String(raceDistances[i])+" m",23,yy+5,4);
       tft.setTextColor(labelColor,panelColor);
       const String pb=personalBestMs[i] ? "REKORD "+raceTime(personalBestMs[i]) :
-                             "PIERWSZY WYSCIG";
+                             "BRAK REKORDU";
       tft.drawRightString(pb,297,yy+12,2);
     }
     raceActionButton(10,191,300,43,"ZWYKLY TRENING - WYJDZ");
@@ -1287,45 +1386,49 @@ void paintRaceLayout(uint8_t screen) {
     tft.drawString("PULS",15,174,1);
     tft.drawString("km/h",174,174,1);
     tft.drawString("DOTKNIJ: MENU / SWIPE: WROC",9,228,1);
-    tft.drawRightString(String(ghost.targetMeters)+" m",313,228,1);
-  } else if(medalAwarded) {
+    tft.drawRightString(String(selectedRace().targetMeters)+" m",313,228,1);
+  } else if(raceResults[selectedDistance].medalAwarded) {
     tft.setTextColor(speedColor,backgroundColor);
     tft.drawCentreString("POKONALES DUCHA!",160,32,2);
     drawVictoryCup();
     tft.setTextColor(tft.color565(255,194,45),backgroundColor);
-    tft.drawString(medalSaved?"MEDAL #"+String(ghostWins[selectedDistance]):String("ZLOTY MEDAL"),100,65,2);
+    tft.drawString(raceResults[selectedDistance].medalSaved?"MEDAL #"+String(ghostWins[selectedDistance]):String("ZLOTY MEDAL"),100,65,2);
     tft.setTextColor(whiteColor,backgroundColor);
     tft.drawString("NOWY REKORD!",100,90,2);
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("DYSTANS",18,128,2);tft.drawString("CZAS",176,128,2);
     tft.setTextColor(whiteColor,backgroundColor);
-    tft.drawString(String(ghost.targetMeters)+" m",18,146,4);
-    tft.drawString(raceTime(ghost.endMs),176,146,4);
+    tft.drawString(String(selectedRace().targetMeters)+" m",18,146,4);
+    tft.drawString(raceTime(selectedRace().endMs),176,146,4);
     tft.setTextColor(speedColor,backgroundColor);
-    tft.drawCentreString("SZYBCIEJ O "+String((ghost.best.finishMs-ghost.endMs)/1000.0f,1)+" s",160,183,2);
+    tft.drawCentreString("SZYBCIEJ O "+String((selectedRace().best.finishMs-selectedRace().endMs)/1000.0f,1)+" s",160,183,2);
     raceActionButton(8,207,145,30,"JESZCZE RAZ");
     raceActionButton(161,207,151,30,"ZWYKLY TRENING");
   } else {
-    tft.setTextColor(ghost.personalBest && !recordSaveFailed ?
+    tft.setTextColor(selectedRace().personalBest && !raceResults[selectedDistance].saveFailed ?
                      speedColor : whiteColor,backgroundColor);
-    tft.drawString(recordSaveFailed?"BLAD ZAPISU!" :
-                   ghost.overflow?"LIMIT 34 MIN" :
-                   ghost.phase==ghostrace::Phase::Cancelled?"ANULOWANO" :
-                   !ghost.hasBest?"PIERWSZY REKORD":ghost.personalBest?"NOWY REKORD!":"META!",20,38,4);
+    tft.drawString(raceResults[selectedDistance].saveFailed?"BLAD ZAPISU!" :
+                   selectedRace().overflow?"BLAD POMIARU" :
+                   ghostPhase()==ghostrace::Phase::Cancelled?"ANULOWANO" :
+                   !selectedRace().hasBest?"PIERWSZY REKORD":selectedRace().personalBest?"NOWY REKORD!":"META!",20,38,4);
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("DYSTANS",20,90,2);
     tft.setTextColor(whiteColor,backgroundColor);
-    tft.drawString(String(ghost.targetMeters)+" m",20,112,4);
+    tft.drawString(String(selectedRace().targetMeters)+" m",20,112,4);
     tft.setTextColor(labelColor,backgroundColor);
     tft.drawString("CZAS",176,90,2);
     tft.setTextColor(whiteColor,backgroundColor);
-    tft.drawString(ghost.phase==ghostrace::Phase::Finished ?
-      raceTime(ghost.endMs) : "--:--",176,112,4);
-    if(ghost.hasBest) {
+    tft.drawString(ghostPhase()==ghostrace::Phase::Finished ?
+      raceTime(selectedRace().endMs) : "--:--",176,112,4);
+    if(selectedRace().hasBest) {
       tft.setTextColor(labelColor,backgroundColor);
       tft.drawString("POPRZEDNI REKORD",20,164,2);
-      tft.setTextColor(powerColor,backgroundColor);
-      tft.drawString(raceTime(ghost.best.finishMs),20,184,2);
+      tft.setTextColor(labelColor,backgroundColor);
+      tft.drawString(raceTime(selectedRace().best.finishMs),20,184,2);
+      if(ghostPhase()==ghostrace::Phase::Finished) {
+        tft.setTextColor(selectedRace().timeLeadColor(raceClockMs()),backgroundColor);
+        tft.drawRightString(formatLead(selectedRace().timeLeadMs(raceClockMs())),308,184,2);
+      }
     } else {
       tft.setTextColor(labelColor,backgroundColor);
       tft.drawString("BRAK POPRZEDNIEGO REKORDU",20,174,2);
@@ -1350,7 +1453,7 @@ void drawRaceSelection() {
 }
 void paintProgress(int y, float value, uint16_t fillInk) {
   const int x=16,w=288,h=13;
-  const float portion=ghost.targetMeters ? constrain(value/ghost.targetMeters,0.0f,1.0f):0;
+  const float portion=selectedRace().targetMeters ? constrain(value/selectedRace().targetMeters,0.0f,1.0f):0;
   const int fillWidth=(int)lroundf(w*portion);
   for(int start=0;start<w;start+=BUFFER_W){
     const int n=min((int)BUFFER_W,w-start);
@@ -1376,35 +1479,35 @@ void renderRaceUI() {
   }
   if(screen==2 || screen==3)return; // result/options are static, drawn once
   const uint32_t now=raceClockMs();
-  const bool armed=ghost.phase==ghostrace::Phase::Armed;
+  const bool armed=ghostPhase()==ghostrace::Phase::Armed;
   textPatch(12,153,29,158,22,
-            String((uint32_t)roundf(ghost.meters))+" m",
+            String((uint32_t)roundf(selectedRace().meters))+" m",
             whiteColor,backgroundColor,4,true);
   textPatch(13,153,80,158,22,
-            ghost.hasBest ?
-              String((uint32_t)roundf(ghost.ghostMeters(now)))+" m" : "-- m",
+            selectedRace().hasBest ?
+              String((uint32_t)roundf(selectedRace().ghostMeters(now)))+" m" : "-- m",
             speedColor,backgroundColor,4,true);
   if(armed) {
     textPatch(14,12,122,157,26,"CZEKAM NA RUCH",
               powerColor,backgroundColor,2);
     textPatch(15,175,122,135,26,"START NA CZUJNIK",
               labelColor,backgroundColor,1);
-  } else if(!ghost.hasBest) {
+  } else if(!selectedRace().hasBest) {
     textPatch(14,12,122,157,26,"PIERWSZY WYSCIG",
               speedColor,backgroundColor,2);
     textPatch(15,175,122,135,26,"ZAPIS REKORDU",
               labelColor,backgroundColor,1);
   } else {
-    const float lead=ghost.meterLead(now);
-    textPatch(14,12,122,157,26,lead>=0?"PROWADZISZ":"TRACISZ",
-              lead>=0?speedColor:powerColor,backgroundColor,2);
+    const float lead=selectedRace().meterLead(now);
+    const float leadMs=selectedRace().timeLeadMs(now);
+    const uint16_t ink=selectedRace().timeLeadColor(now);
+    textPatch(14,12,122,157,26,leadMs>0?"PROWADZISZ":leadMs<0?"TRACISZ":"ROWNO",
+              ink,backgroundColor,2);
     textPatch(15,175,121,135,18,
               String(lead>=0?"+":"")+String(lead,1)+" m",
-              lead>=0?speedColor:powerColor,backgroundColor,2,true);
-    const float leadSeconds=ghost.timeLeadMs(now)/1000.0f;
-    textPatch(20,175,139,135,10,
-              String(leadSeconds>=0?"+":"")+String(leadSeconds,1)+" s",
-              leadSeconds>=0?speedColor:powerColor,backgroundColor,1,true);
+              ink,backgroundColor,2,true);
+    textPatch(20,175,139,135,10,formatLead(leadMs),
+              ink,backgroundColor,1,true);
   }
   textPatch(16,12,149,145,25,
             liveHr(millis())?String(liveHr(millis()))+" BPM":"-- BPM",
@@ -1414,10 +1517,10 @@ void renderRaceUI() {
             speedColor,backgroundColor,4);
   textPatch(18,180,2,83,20,deviceConnected?"BLE OK":"BLE ...",
             deviceConnected?speedColor:labelColor,panelColor,2);
-  textPatch(19,267,3,50,20,armed?"--:--":raceTime(ghost.elapsed(now)),
+  textPatch(19,267,3,50,20,armed?"--:--":raceTime(selectedRace().elapsed(now)),
             labelColor,panelColor,2,true);
-  paintProgress(56,ghost.meters,powerColor);
-  paintProgress(106,ghost.ghostMeters(now),speedColor);
+  paintProgress(56,selectedRace().meters,powerColor);
+  paintProgress(106,selectedRace().ghostMeters(now),speedColor);
   if(trendDrawn!=trendRevision) {
     renderSharedTrend(15,189,290,28);
     trendDrawn=trendRevision;
@@ -1461,7 +1564,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.35 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.36 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1593,7 +1696,7 @@ void loop() {
         reedTracing=true;
         reedTraceWaiting=true;
         reedTraceStarted=millis();
-        static const char heading[]="REEDTRACE unified contact filter; version=0.09.35\n";
+        static const char heading[]="REEDTRACE unified contact filter; version=0.09.36\n";
         reedTrace.line(heading,sizeof(heading)-1);
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
@@ -1715,7 +1818,7 @@ void loop() {
       (unsigned long)hrNotifyPackets,simultaneous?1:0,
       pt.x,pt.y,pt.z,digitalRead(36),touchCalibrated?1:0,(unsigned)ESP.getFreeHeap(),
       (unsigned long)raceClockMs(),metrics.paused?1:0,metrics.distance(),
-      (unsigned long)ghost.elapsed(raceClockMs()),motion.speed*3.6f);
+      (unsigned long)selectedRace().elapsed(raceClockMs()),motion.speed*3.6f);
     lastStatus=now;lastStatusHr=hrNotifyPackets;lastStatusTx=ftmsTxComplete;
   }
   bleDuty.onFtms(deviceConnected,now);
@@ -1727,8 +1830,9 @@ void loop() {
     reportedAutoPause=metrics.paused;
     Serial.printf("TRAINING: AUTO %s activeMs=%lu meters=%.2f ghostMs=%lu\n",
       metrics.paused?"PAUSE":"RESUME",(unsigned long)raceClockMs(),metrics.distance(),
-      (unsigned long)ghost.elapsed(raceClockMs()));
+      (unsigned long)selectedRace().elapsed(raceClockMs()));
   }
+  updateRaceTracking(now); // always, before any UI action can reset the session
   updateButton(now);
   updateTouch(now);
   // Calibration always runs before BLE on boot; never block FTMS here.
@@ -1737,60 +1841,11 @@ void loop() {
      (uint32_t)(now-lastGhostMenuHeartbeatMs)>=6000) {
     lastGhostMenuHeartbeatMs=now;
     Serial.printf("GHOST: alive phase=%u selected=%u touch=%lu swipes=%lu FTMS=%d tx=%lu\n",
-                  (unsigned)ghost.phase,
+                  (unsigned)ghostPhase(),
                   (unsigned)raceDistances[selectedDistance],
                   (unsigned long)touchEvents,
                   (unsigned long)touchSwipeEvents,
                   deviceConnected?1:0,(unsigned long)ftmsNotifications);
-  }
-  if (ghost.phase==ghostrace::Phase::Armed && metrics.started) {
-    // resetWorkout zeroes the active clock when arming. Retain any first
-    // movement already processed from the ISR queue in this loop.
-    ghost.start(0);
-    attemptHeart.bpm[0]=(uint8_t)liveHr(now);
-    Serial.printf("GHOST: started %u m at %lu, pulses=%lu\n",
-                  (unsigned)ghost.targetMeters,(unsigned long)now,
-                  (unsigned long)metrics.pulses);
-  }
-  if (ghost.phase==ghostrace::Phase::Running) {
-    const uint16_t previousCount=ghost.attempt.count;
-    const bool improved=ghost.advance(raceClockMs(),metrics.distance());
-    // Do not invent HR history if the loop missed several sample intervals.
-    if(ghost.attempt.count>previousCount)
-      attemptHeart.bpm[ghost.attempt.count-1]=(uint8_t)liveHr(now);
-    if (improved) {
-      if (!saveBest(selectedDistance,ghost.attempt))recordSaveFailed=true;
-      else {
-        personalBestMs[selectedDistance]=ghost.endMs;
-        attemptHeart.count=ghost.attempt.count;
-        attemptHeart.raceChecksum=ghost.attempt.checksum;
-        attemptHeart.checksum=ghostrace::hashHeart(attemptHeart);
-        Preferences p;
-        if(p.begin("rower-races",false)) {
-          const bool ok=p.putBytes(heartKeys[selectedDistance],&attemptHeart,sizeof(attemptHeart))==sizeof(attemptHeart);
-          Serial.printf("GHOST: optional best HR trace saved=%d\n",ok?1:0);
-          p.end();
-        }
-      }
-    }
-    if(ghost.phase==ghostrace::Phase::Finished) {
-      if(ghost.beatGhost() && !recordSaveFailed) {
-        medalAwarded=true;
-        Preferences p;
-        if(p.begin("rower-races",false)) {
-          const uint32_t next=ghostWins[selectedDistance]==UINT32_MAX?
-            UINT32_MAX:ghostWins[selectedDistance]+1;
-          medalSaved=p.putUInt(winKeys[selectedDistance],next)==sizeof(uint32_t);
-          if(medalSaved)ghostWins[selectedDistance]=next;
-          p.end();
-        }
-      }
-      raceOptionsOpen=false;raceLayoutReady=false;
-      Serial.printf("GHOST: finished %u m, time=%lu PB=%d saved=%s medal=%d medalSaved=%d wins=%lu\n",
-        (unsigned)ghost.targetMeters,(unsigned long)ghost.endMs,ghost.personalBest?1:0,
-        improved?(recordSaveFailed?"no":"yes"):"not needed",medalAwarded?1:0,medalSaved?1:0,
-        (unsigned long)ghostWins[selectedDistance]);
-    }
   }
   if(!deviceConnected && oldDeviceConnected) {
     Serial.println("FTMS: disconnected; restart advertising");
