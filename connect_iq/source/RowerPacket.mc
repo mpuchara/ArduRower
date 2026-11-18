@@ -22,7 +22,7 @@ class RowerPacket {
             result[:rate] = b[p]/2.0;
             result[:strokes] = u16(b,p+1); p+=3;
         }
-        if ((flags & 2) != 0) { p+=1; }
+        if ((flags & 2) != 0) { result[:avgRate] = b[p]/2.0; p+=1; }
         if ((flags & 4) != 0) {
             result[:distance] = b[p] | (b[p+1]<<8) | (b[p+2]<<16); p+=3;
         }
@@ -30,7 +30,10 @@ class RowerPacket {
             var pace = u16(b,p); p+=2;
             result[:pace] = (pace==0xffff || pace==0) ? null : pace;
         }
-        if ((flags & 16) != 0) { p+=2; }
+        if ((flags & 16) != 0) {
+            var avgPace = u16(b,p); p+=2;
+            result[:avgPace] = (avgPace==0xffff || avgPace==0) ? null : avgPace;
+        }
         if ((flags & 32) != 0) {
             var power=u16(b,p);p+=2;
             result[:power]=(power>32767) ? power-65536 : power;

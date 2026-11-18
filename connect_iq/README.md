@@ -1,6 +1,6 @@
 # ArduRower HR: własne pole Connect IQ
 
-Wersja 0.1.5, nazwa na zegarku **ArduRower HR 015**, dla Garmin fēnix 6X Pro / Solar (`fenix6xpro`, sprawdzony numer 006-B3291-00, firmware 28.02). Wymaga ESP32 ArduRower CYD 0.09.23 lub nowszego z kanałem zwrotnym HR.
+Wersja 0.1.6, nazwa na zegarku **ArduRower HR 016**, dla Garmin fēnix 6X Pro / Solar (`fenix6xpro`, sprawdzony numer 006-B3291-00, firmware 28.02). Wymaga ESP32 ArduRower CYD 0.09.23 lub nowszego z kanałem zwrotnym HR.
 
 Pole odbiera Rowing Data z WR S4BL3 i odsyła `Activity.Info.currentHeartRate` zegarka przez to samo połączenie BLE. Nie wymaga nadawania tętna jako osobny czujnik 180D. Odczyt HR jest bieżącym tętnem aktywności; jeśli zegarek używa zewnętrznego czujnika HR, będzie to źródło wybrane przez zegarek.
 
@@ -9,12 +9,20 @@ Pole odbiera Rowing Data z WR S4BL3 i odsyła `Activity.Info.currentHeartRate` z
 1. Zbuduj `AROWERHR.PRG` dla `fenix6xpro`.
 2. Podłącz zegarek w trybie MTP. Skopiuj plik do `Primary/Garmin/Apps`. Zweryfikuj odczyt zwrotny pliku przed odłączeniem.
 3. Odłącz USB. W aktywności wioślarskiej usuń wcześniejsze pole BLE z ekranów tej aktywności; może pozostać zainstalowane na zegarku.
-4. Dodaj **ArduRower HR 015**. Można użyć małego pola: układ dopasowuje liczbę wierszy do jego wymiarów. Dwa różne pola zarządzające tym samym BLE mogą zajmować zasoby zegarka; usuń wcześniejsze pole BLE z ekranów tej aktywności.
+4. Dodaj **ArduRower HR 016**. Można użyć małego pola: układ dopasowuje liczbę wierszy do jego wymiarów. Dwa różne pola zarządzające tym samym BLE mogą zajmować zasoby zegarka; usuń wcześniejsze pole BLE z ekranów tej aktywności.
 5. Otwórz ten ekran przy włączonym komputerku. Przy braku pomiaru HR wysyłany jest jawny brak wartości, nie poprzednie BPM.
 
-Tło jest pobierane z `DataField.getBackgroundColor()` przy każdym rysowaniu, a kolor tekstu jest kontrastowy. Wszystkie liczby i jednostki używają `FONT_XTINY`. Zniknęły nagłówek wersji i długie statusy techniczne. Wysokie pole ma trzy wiersze, niskie dwa, a najniższe jeden z priorytetem dystansu i tempa. Szerokość tekstu jest mierzona przed rysowaniem; gdy brakuje miejsca, pomijane są dodatkowe etykiety lub metryki zamiast nakładania wierszy. Przy rozłączeniu widoczne są kreski i krótki komunikat.
+Tło jest pobierane z `DataField.getBackgroundColor()`, tekst pozostaje w `FONT_XTINY` i jest mierzony przed narysowaniem. Liczba wierszy (1–6) zależy od **rzeczywistej** wysokości pola. W większym polu widać dystans, tempo /500 m, prędkość w km/h, własny licznik ruchów, czas aktywny ergometru, kadencję i puls. W małych polach w pierwszej kolejności zostają dystans i tempo. Prędkość na zegarku jest wyliczona z chwilowego tempa FTMS, nie z GPS ani z tempa aktywności Garmina.
 
-Pole pokazuje dystans, tempo /500m, kadencję i tętno. Zapisuje własne pola FIT: dystans, prędkość, kadencję, opcjonalną moc równoważną i ważność połączenia. Metadane `nativeNum` wskazują odpowiedniki FIT; nie oznacza to zastąpienia wszystkich natywnych podsumowań aktywności przez system Garmina. Moc jest zapisywana wyłącznie wtedy, gdy firmware rzeczywiście dołącza ją do FTMS; obecnie jest domyślnie wyłączona.
+### Dodatkowe metryki Garmin Connect (0.1.6)
+
+Pole zapisuje przez FitContributor **osobne metryki Connect IQ**: dystans [m], prędkość [m/s], kadencję [spm], opcjonalną moc równoważną [W], ważność BLE, liczbę ruchów [strokes], czas aktywnego ruchu [s], średnie tempo [s/500m] i średnią kadencję [spm]. Ostatnie cztery odczytuje z **istniejących** bajtów FTMS 0.09.36 (bez zmian w firmware ESP32). Prędkość w km/h jest dodatkowo wyświetlana w polu, a do FIT trafia w m/s.
+
+**Ograniczenie Garmina:** te pola stanowią dane deweloperskie w FIT, a `nativeNum` nie zastępuje natywnego dystansu, prędkości i podsumowania aktywności Garmin Connect. Jeżeli natywny dystans w aktywności „Wioślarstwo w pomieszczeniu” nadal pokazuje 0 m, mimo poprawnego wykresu „Rower distance” w Connect IQ, nie jest to awaria komunikacji CYD. Natywny zapis wymaga innej ścieżki (np. zgodnego czujnika/protokołu ANT+ akceptowanego przez dany zegarek lub późniejszej świadomej obróbki FIT). Sam ESP32 nie nadaje ANT+ bez odpowiedniego dodatkowego sprzętu.
+
+Tętno jest **źródłem Garmina**, odsyłanym do komputerka po tym samym BLE; nie jest sztucznie zastępowane przez dane z czujnika CYD. Moc jest zapisywana tylko, gdy firmware ją naprawdę dołącza (w 0.09.36 jest domyślnie wyłączona). Czas „Rower active time” pochodzi z komputerka, więc może różnić się od czasu aktywności mierzonego przez zegarek. Własna liczba ruchów może różnić się od liczby wyznaczanej przez akcelerometr Garmina.
+
+Przed instalacją 0.1.6 zbuduj `AROWERHR.PRG` za pomocą **dotychczasowego klucza DER** i nie instaluj równolegle starszego pola BLE w aktywności. Zapis FIT działa tylko podczas nagrywania aktywności z dodanym aktywnym polem Connect IQ. Weryfikacja fizyczna wersji 0.1.6 oraz próba podglądu w Garmin Connect wymagają jeszcze wykonania.
 
 ## Protokół i ważność
 
