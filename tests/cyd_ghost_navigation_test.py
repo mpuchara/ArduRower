@@ -52,7 +52,7 @@ assert 'ghostWorkout?"ROZNICA / DUCH":"TEMPO /500m"' in src
 assert 'GHOST: SELECT 3000");startRace(0)' in src
 assert 'GHOST: SELECT 6000");startRace(1)' in src
 assert 'GHOST: SELECT 10000");startRace(2)' in src
-assert 'g7_1000' not in src, "Legacy 1 km data should remain unused in NVS"
+assert '"g7_1000"' not in src, "Legacy 1 km NVS slot must not be selected (10k remains allowed)"
 assert 'Mode activeMode = Mode::Dashboard' in src
 assert 'void exitGhostTraining()' in src
 assert 'raceOptionsOpen=true' in src
