@@ -5,7 +5,9 @@
 using namespace ghostrace;
 static bool near(float a,float b,float eps=1.0f){return fabsf(a-b)<eps;}
 int main(){
-  assert(allowedDistance(1000)&&allowedDistance(3000)&&allowedDistance(10000));
+  assert(allowedDistance(1000)&&allowedDistance(3000)&&allowedDistance(6000)&&allowedDistance(10000));
+  assert(kDistances[0]==3000&&kDistances[1]==6000&&kDistances[2]==10000);
+  assert(baseIntervalSeconds(6000)==6&&unitsPerMeter(6000)==10);
   assert(!allowedDistance(500)&&!allowedDistance(2000));
   Race first;
   first.arm(1000,nullptr);
@@ -54,8 +56,17 @@ int main(){
   for(unsigned i=0;i<kDistanceCount;++i){training[i].arm(kDistances[i],nullptr);training[i].start(0);}
   for(uint32_t ms=1000;ms<=2500000;ms+=1000)
     for(auto &race:training)race.advance(ms,ms*0.004f);
-  assert(training[0].endMs==250000&&training[1].endMs==750000&&training[2].endMs==2500000);
+  assert(training[0].endMs==750000&&training[1].endMs==1500000&&training[2].endMs==2500000);
   for(auto &race:training)assert(race.personalBest&&valid(race.attempt,race.targetMeters));
+  // 6 km stays in 16-bit samples at full decimeter resolution, and
+  // interpolates the finish between two sensor updates.
+  Race six; six.arm(6000,nullptr); six.start(0);
+  assert(!six.advance(1799000,5990));
+  assert(six.advance(1801000,6010)&&six.endMs==1800000);
+  assert(six.personalBest&&valid(six.attempt,6000));
+  assert(six.attempt.intervalSeconds==6);
+  assert(near(interpolate(six.attempt,900000),2993.34f,12));
+  assert(!valid(six.attempt,3000)&&!valid(six.attempt,10000));
   // Interpolate the crossing instead of counting the full overshooting tick.
   Race crossing;crossing.arm(3000,nullptr);crossing.start(0);
   crossing.advance(700000,2990);
@@ -70,5 +81,5 @@ int main(){
   const uint16_t ahead=leadColor565(2500,100000),behind=leadColor565(-2500,100000);
   assert(ahead!=0xffe0&&ahead!=0x07e0&&behind!=0xffe0&&behind!=0xf800);
   assert(leadColor565(1000,1000)!=0x07e0);
-  puts("PASS: all milestones, legacy 1 km, live lead gradient, long 10 km, active pause, crossing and wrap");
+  puts("PASS: 3/6/10 km milestones, standalone 6 km, legacy 1 km, gradient, long 10 km, pause, crossing and wrap");
 }
