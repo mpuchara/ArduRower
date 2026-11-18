@@ -34,7 +34,7 @@ extern "C" bool bleInUse(void) { return true; }
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.36";
+static constexpr const char *FIRMWARE_VERSION = "0.09.37";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -505,11 +505,12 @@ void resetWorkout() {
 void resetRenderCache();
 void renderRaceUI();
 const uint16_t (&raceDistances)[ghostrace::kDistanceCount] = ghostrace::kDistances;
-// Keep the existing 1 km NVS key and v3 blob support. Old 500/2000 m
-// records remain untouched; only the new distances are offered in the UI.
-const char *raceKeys[3] = {"g7_1000", "g7_3000", "g7_10000"};
-const char *heartKeys[3] = {"h7_1000", "h7_3000", "h7_10000"};
-const char *winKeys[3] = {"w7_1000", "w7_3000", "w7_10000"};
+// Keep existing 3 km and 10 km NVS slots unchanged. Replace only the
+// first 1 km menu slot with a new 6 km slot; legacy 1 km records and old
+// 500/2000 m records are left untouched in NVS (never erased or misread).
+const char *raceKeys[3] = {"g7_3000", "g7_6000", "g7_10000"};
+const char *heartKeys[3] = {"h7_3000", "h7_6000", "h7_10000"};
+const char *winKeys[3] = {"w7_3000", "w7_6000", "w7_10000"};
 bool loadBest(uint8_t index, ghostrace::Record &out) {
   Preferences p;
   if (!p.begin("rower-races", true)) return false;
@@ -894,8 +895,8 @@ void touchTap(int16_t rx,int16_t ry) {
   Serial.printf("GHOST: menu tap mapped=(%d,%d), selection=%u calibrated=%d raw=%d,%d\n",
                 (int)x,(int)y,(unsigned)selectedDistance,calibrated?1:0,(int)rx,(int)ry);
   // Three entire rows are large touch targets with no small hitbox.
-  if(y>=50 && y<95) {Serial.println("GHOST: SELECT 1000");startRace(0);}
-  else if(y>=95 && y<140) {Serial.println("GHOST: SELECT 3000");startRace(1);}
+  if(y>=50 && y<95) {Serial.println("GHOST: SELECT 3000");startRace(0);}
+  else if(y>=95 && y<140) {Serial.println("GHOST: SELECT 6000");startRace(1);}
   else if(y>=140 && y<185) {Serial.println("GHOST: SELECT 10000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
@@ -1564,7 +1565,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.36 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.37 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1696,7 +1697,7 @@ void loop() {
         reedTracing=true;
         reedTraceWaiting=true;
         reedTraceStarted=millis();
-        static const char heading[]="REEDTRACE unified contact filter; version=0.09.36\n";
+        static const char heading[]="REEDTRACE unified contact filter; version=0.09.37\n";
         reedTrace.line(heading,sizeof(heading)-1);
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
