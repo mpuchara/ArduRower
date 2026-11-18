@@ -23,7 +23,7 @@ checks = (
     'GHOST: started',
     'GHOST: finished',
     'ZWYKLY TRENING - WYJDZ',
-    'GHOST: SELECT 1000',
+    'GHOST: SELECT 6000',
     'GHOST: SELECT 3000',
     'GHOST: SELECT 10000',
     'ghostWorkout!=displayedGhostWorkout',
@@ -41,7 +41,7 @@ assert 'toggleMode();' in touch
 assert 'touch.touched()' in touch
 assert touch.count('toggleMode();')==1
 assert 'GHOST: LIVE SWIPE' not in touch
-assert 'FIRMWARE_VERSION = "0.09.36"' in src
+assert 'FIRMWARE_VERSION = "0.09.37"' in src
 adc=(root/'cyd_rower/src/CydTouch.h').read_text()
 assert 'spi_->transfer16(' not in adc
 assert 'z1=adc(0xB1),z2=adc(0xC1)' in adc
@@ -49,6 +49,10 @@ assert 'GHOST: entered menu using single BOOT click' in src
 assert 'dashboardBootClicks' not in src
 assert 'GHOST: entered menu using screen tap' in src
 assert 'ghostWorkout?"ROZNICA / DUCH":"TEMPO /500m"' in src
+assert 'GHOST: SELECT 3000");startRace(0)' in src
+assert 'GHOST: SELECT 6000");startRace(1)' in src
+assert 'GHOST: SELECT 10000");startRace(2)' in src
+assert '"g7_1000"' not in src, "Legacy 1 km NVS slot must not be selected (10k remains allowed)"
 assert 'Mode activeMode = Mode::Dashboard' in src
 assert 'void exitGhostTraining()' in src
 assert 'raceOptionsOpen=true' in src
@@ -56,7 +60,7 @@ assert 'KONTYNUUJ Z DUCHEM' in src and 'ZMIEN DYSTANS' in src
 assert 'race.beatGhost() && !result.saveFailed' in src
 assert 'drawVictoryCup();' in src
 assert 'race.advance(raceClockMs(),metrics.distance())' in src
-assert all(key in src for key in ('g7_1000','g7_3000','g7_10000','h7_1000','w7_1000'))
+assert all(key in src for key in ('g7_3000','g7_6000','g7_10000','h7_6000','w7_6000'))
 # Tracking belongs to the workout, not the selected page or race view.
 track=src[src.index('void updateRaceTracking('):src.index('void toggleMode()')]
 assert 'for(uint8_t i=0;i<ghostrace::kDistanceCount;++i)' in track

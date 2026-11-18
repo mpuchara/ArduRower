@@ -13,7 +13,7 @@ static constexpr uint32_t kMagic = 0x47525731UL;
 static constexpr uint16_t kVersion = 4;
 static const uint32_t kScaleMilli = 700;
 static constexpr uint8_t kDistanceCount = 3;
-static constexpr uint16_t kDistances[kDistanceCount] = {1000, 3000, 10000};
+static constexpr uint16_t kDistances[kDistanceCount] = {3000, 6000, 10000};
 
 struct Record {
   uint32_t magic;
@@ -22,7 +22,7 @@ struct Record {
   uint32_t scaleMilli;
   uint32_t finishMs;
   uint16_t count;
-  // 0.1 m for 1/3 km, 0.2 m for 10 km (100000 dm would overflow).
+  // 0.1 m for 1/3/6 km (60000 dm fits), 0.2 m for 10 km.
   uint16_t decimeters[kSamples];
   uint16_t intervalSeconds; // occupies the former v3 padding, same NVS layout
   uint32_t checksum;
@@ -38,8 +38,12 @@ inline uint32_t hashRecord(const Record &r) {
   }
   return h;
 }
-inline bool allowedDistance(uint16_t d) { return d==1000 || d==3000 || d==10000; }
-inline uint16_t baseIntervalSeconds(uint16_t d) { return d==10000 ? 10 : d==3000 ? 4 : 2; }
+// 1000 m is retained as a legacy record format for historical tests/NVS,
+// but it is no longer selectable in the Ghost Race menu.
+inline bool allowedDistance(uint16_t d) { return d==1000 || d==3000 || d==6000 || d==10000; }
+inline uint16_t baseIntervalSeconds(uint16_t d) {
+  return d==10000 ? 10 : d==6000 ? 6 : d==3000 ? 4 : 2;
+}
 inline uint32_t intervalMs(const Record &r) {
   return r.version==3 ? kIntervalMs : static_cast<uint32_t>(r.intervalSeconds)*1000U;
 }
