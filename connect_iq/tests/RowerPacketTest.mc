@@ -1,4 +1,5 @@
 import Toybox.Test;
+import Toybox.Application;
 (:test)
 function originalPacket(logger){
     var parser=new RowerPacket();
@@ -87,14 +88,19 @@ class TestFitField {
 
 (:test)
 function fitValuesAndMissingPower(logger){
-    var field=new RowerField(new RowerLink()); // Allocate the real FIT fields first.
+    // The simulator's activity already allocated this view's FIT budget.
+    // Reuse its fields before substituting sinks that expose written values.
+    var field=Application.getApp().getInitialView()[0] as RowerField;
+    var sample=new RowerPacket().decode(
+        [0x7e,8,60,15,0,56,0xf4,1,0,125,0,130,0,145,0,94,0,60,0]b);
+    Test.assert(sample!=null);
+    field.writeSample(sample);
     field.fitDistance=new TestFitField();field.fitSpeed=new TestFitField();
     field.fitCadence=new TestFitField();field.fitPower=new TestFitField();
     field.fitStrokes=new TestFitField();field.fitElapsed=new TestFitField();
     field.fitAvgPace=new TestFitField();field.fitAvgCadence=new TestFitField();
     field.fitPace=new TestFitField();field.fitAvgPower=new TestFitField();
-    field.writeSample(new RowerPacket().decode(
-        [0x7e,8,60,15,0,56,0xf4,1,0,125,0,130,0,145,0,94,0,60,0]b));
+    field.writeSample(sample);
     Test.assertEqual(field.fitDistance.samples[0],500.0);
     Test.assertEqual(field.fitSpeed.samples[0],4.0);
     Test.assertEqual(field.fitCadence.samples[0],30.0);
