@@ -11,7 +11,7 @@ html = (ROOT / "index.html").read_text(encoding="utf-8")
 
 
 def body(name):
-    start = re.search(r"\bvoid\s+" + re.escape(name) + r"\(.*?\)\s*\{", source, re.S)
+    start = re.search(r"\bvoid\s+" + re.escape(name) + r"\([^;]*?\)\s*\{", source)
     assert start, name
     depth = 1
     i = start.end()
@@ -29,7 +29,7 @@ def body(name):
 # clear per page transition and one splash-screen clear during startup.
 assert source.count("tft.fillScreen(") <= 5  # startup, view changes and touch calibration
 assert "tft.fillScreen(" in body("pageLayout")
-assert "tft.fillScreen(" in body("initDisplay")
+assert "if(changed) {\n    tft.fillScreen(backgroundColor);" in body("renderStartup")
 assert "tft.fillScreen(" in body("paintRaceLayout")
 assert "tft.fillScreen(backgroundColor);" in source
 for method in ("updateUI", "renderRaceUI", "textPatch", "cardValue", "plot", "paintProgress", "renderSharedTrend", "loop"):

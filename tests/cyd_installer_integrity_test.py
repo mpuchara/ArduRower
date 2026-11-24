@@ -25,5 +25,5 @@ assert "button.setAttribute('manifest', manifestURL)" in html
 assert "document.getElementById('install-widget').replaceChildren(fragment)" in html
 assert 'FIRMWARE_VERSION,108,8,1' in firmware, "Version missing in dashboard"
 assert 'FIRMWARE_VERSION,109,8,1' in firmware, "Version missing in Ghost Race"
-assert 'FW ") + FIRMWARE_VERSION' in firmware, "Version missing in boot splash"
+assert 'drawCentreString(FIRMWARE_VERSION,160,211,2)' in firmware, "Version missing in boot splash"
 print("PASS: fail-closed installer verifies page, manifest, revisioned binaries and visible firmware revision")

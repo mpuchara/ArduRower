@@ -17,7 +17,7 @@ ENVIRONMENTS = {
     "st7789-gpio21": "esp32-2432s028-st7789-gpio21",
 }
 REVISION = os.environ.get("GITHUB_SHA", "local")[:12]
-VERSION = "0.09.36-ghost-milestones-" + REVISION
+VERSION = "0.09.37-user-profiles-" + REVISION
 
 
 def require(path):

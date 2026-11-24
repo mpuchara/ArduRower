@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.36
+# ArduRower CYD 0.09.37
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
@@ -9,9 +9,18 @@ Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO t
 - **XPT2046** na SCK25 / MISO39 / MOSI32 / CS33 / IRQ36. Pozioma orientacja ekranu to rotation 1. Starsza kalibracja dla rotation 3 jest przeliczana automatycznie. Jeśli pojawi się kreator, dotknij kolejno trzech krzyżyków.
 - Wartość Battery Service to wskaźnik stałego zasilania USB. CYD nie mierzy stanu akumulatora.
 
+## Profile i sterowanie
+
+1. Po ekranie powitalnym wybierz profil od **1** do **4**. Urządzenie pyta o profil przy każdym uruchomieniu.
+2. Wybierz **Trening** albo **Wyścig z duchem**. Z menu trybu można wrócić do wyboru profilu.
+3. Aby zmienić profil po rozpoczęciu sesji, odczekaj do auto pauzy, otwórz wybór dystansu i dotknij **Zmień użytk.**. Potwierdź zakończenie sesji. Wznowienie wiosłowania w oknie potwierdzenia przywraca sesję.
+4. Bez dotyku krótkie naciśnięcie **BOOT** przesuwa zaznaczenie, a przytrzymanie **1,5 s** wybiera pozycję. Aby zakończyć sesję przyciskiem, wróć do zwykłego treningu i użyj dotychczasowego przytrzymania BOOT zerującego trening. Z pustego pulpitu krótko naciśnij BOOT, przejdź w menu dystansów na **Zmień użytk.** i przytrzymaj BOOT.
+
+Profil 1 używa istniejącej przestrzeni NVS `rower-races`. Profile 2–4 używają osobnych przestrzeni `rower-u2`, `rower-u3` i `rower-u4`. Dotychczasowe klucze i dane zachowują swój format. Gdy NVS zgłasza błąd lub brakuje miejsca, nieudany zapis jest widoczny w diagnostyce USB, wyniku wyścigu lub potwierdzeniu zmiany profilu. Próbki tętna są powiązane z sumą kontrolną odpowiadającego im przejazdu.
+
 ## Trening i Garmin
 
-Po uruchomieniu zobaczysz zwykły trening z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans 1000/3000/10000 m lub wróć do zwykłego treningu z menu. Wybór nie resetuje sesji. Rekordy wszystkich trzech dystansów zapisują się niezależnie od widoku, od początku sesji. Pauza włącza się po 8 sekundach bez impulsów, a cztery kolejne impulsy w odstępach do 350 ms ją wznawiają. [Szczegóły Ghost Race](../docs/GHOST_0.09.36.md).
+Tryb **Trening** otwiera pulpit z tempem /500 m. Dotknij pulpitu lub przesuń palcem w poziomie, aby otworzyć menu ducha. Wybierz dystans 1000/3000/10000 m lub wróć do zwykłego treningu z menu. Wybór nie resetuje sesji. Rekordy wszystkich trzech dystansów zapisują się niezależnie od widoku, od początku sesji. Pauza włącza się po 8 sekundach bez impulsów, a cztery kolejne impulsy w odstępach do 350 ms ją wznawiają. [Szczegóły Ghost Race](../docs/GHOST_0.09.36.md).
 
 Filtr potwierdza zamknięcie i otwarcie kontaktronu, a detektor wnioskuje o pełnym cyklu z obwiedni odstępów między przejściami czterech magnesów. [Diagnostyka reedtrace i testy 0.09.35](../docs/REED_CYCLE_0.09.35.md). Jeden kontaktron nie mierzy kierunku bezpośrednio. Prędkość zachowuje większą bezwładność między pociągnięciami. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
