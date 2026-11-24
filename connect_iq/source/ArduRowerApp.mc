@@ -40,11 +40,11 @@ class RowerField extends WatchUi.DataField {
         link.tick(info==null?null:info.currentHeartRate);
         var now=System.getTimer();
         var valid=link.freshAt(now,2500)?1:0;
-        if(valid!=fitValidity){
+        var d=link.fitSample(now,recorded);
+        if(valid!=fitValidity || d!=null){
             fitValidity=valid;
             fitLink.setData(valid);
         }
-        var d=link.fitSample(now,recorded);
         if(d!=null){
             recorded=link.revision;
             writeSample(d);
@@ -90,7 +90,7 @@ class RowerField extends WatchUi.DataField {
 
         var valid=link.fresh();
         if(!valid){
-            var state=fitText(dc,link.state,"BLE --",width);
+            var state=fitText(dc,link.subscribed?"Brak danych":link.state,"BLE --",width);
             dc.drawText(w/2,(h-fontHeight)/2,G.FONT_XTINY,state,G.TEXT_JUSTIFY_CENTER);
             return;
         }
