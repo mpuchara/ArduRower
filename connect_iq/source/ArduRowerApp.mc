@@ -7,11 +7,15 @@ using Toybox.Graphics as G;
 using Toybox.FitContributor as Fit;
 
 class ArduRowerApp extends Application.AppBase {
-    var link;
+    var link, field;
     function initialize(){AppBase.initialize();}
     function onStart(state){link=new RowerLink();link.start();}
-    function onStop(state){if(link!=null){link.stop();}}
-    function getInitialView(){return [new RowerField(link)];}
+    function onStop(state){if(link!=null){link.stop();}field=null;}
+    function getInitialView(){
+        // FIT definitions are registered once per activity app lifecycle.
+        if(field==null){field=new RowerField(link);}
+        return [field];
+    }
 }
 
 class RowerField extends WatchUi.DataField {
