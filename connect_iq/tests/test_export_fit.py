@@ -3,17 +3,19 @@ import unittest
 
 from garmin_fit_sdk import Decoder, Encoder, Stream
 
-from export_fit import APP_ID, MESSAGE, ROWER_FIELDS, export_fit
+from export_fit import APP_ID, MESSAGE, ROWER_FIELDS, ROWER_TYPES, export_fit
 
 
-def fixture(reset=False, tail=0):
+def fixture(reset=False, tail=0, sideload=False, missing_definition=False):
     start = 1_150_000_000
     encoder = Encoder()
     encoder.on_mesg(MESSAGE["FILE_ID"], {"type": "activity", "time_created": start})
-    developer = {"developer_data_index": 0, "application_id": list(APP_ID)}
+    developer = {"developer_data_index": 0,
+                 "application_id": [0] * 16 if sideload else list(APP_ID)}
     encoder.on_mesg(MESSAGE["DEVELOPER_DATA_ID"], developer)
-    for key, kind in {0:0x88, 1:0x88, 2:0x88, 3:0x88, 4:2, 5:0x84,
-                      6:0x84, 7:0x84, 8:0x88, 10:0x84}.items():
+    for key, kind in ROWER_TYPES.items():
+        if missing_definition and key == 9:
+            continue
         name, units = ROWER_FIELDS[key]
         description = {"developer_data_index": 0, "field_definition_number": key,
                        "fit_base_type_id": kind, "field_name": name, "units": units}
@@ -21,7 +23,7 @@ def fixture(reset=False, tail=0):
         encoder.on_mesg(MESSAGE["FIELD_DESCRIPTION"], description)
     encoder.on_mesg(MESSAGE["RECORD"], {
         "timestamp": start, "distance": 0, "heart_rate": 145, "power": 201,
-        "developer_fields": {0: 0, 1: 4, 2: 22.5, 3: 140, 4: 1, 5: 0},
+        "developer_fields": {0: 0, 1: 4, 2: 22.5, 3: 140, 4: 1, 5: 0, 6: 0xffff},
     })
     encoder.on_mesg(MESSAGE["RECORD"], {
         "timestamp": start+30, "distance": 0, "heart_rate": 146,
@@ -32,10 +34,14 @@ def fixture(reset=False, tail=0):
         encoder.on_mesg(MESSAGE["RECORD"], {
             "timestamp": start+31, "developer_fields": {0: 1, 5: 0},
         })
-    encoder.on_mesg(MESSAGE["SESSION"], {
+    summary = {
         "start_time": start, "timestamp": start+32+tail, "sport": "rowing", "sub_sport": "indoor_rowing",
         "total_distance": 0, "total_timer_time": 32, "avg_heart_rate": 146,
-    })
+    }
+    if sideload:
+        summary.update(total_elapsed_time=32, enhanced_avg_speed=0)
+        encoder.on_mesg(MESSAGE["LAP"], summary)
+    encoder.on_mesg(MESSAGE["SESSION"], summary)
     return bytes(encoder.close())
 
 
@@ -70,6 +76,19 @@ class FitExportTest(unittest.TestCase):
         self.assertEqual(updates["distance"], 1)
         self.assertNotIn("total_distance", updates)
         self.assertNotIn("avg_power", updates)
+
+    def test_sideload_zero_id_invalid_integers_and_delayed_save(self):
+        data, updates = export_fit(fixture(sideload=True, tail=30), True)
+        self.assertEqual(updates["total_distance"], 2)
+        messages, errors = Decoder(Stream.from_byte_array(data)).read()
+        self.assertFalse(errors)
+        for kind in ("session_mesgs", "lap_mesgs"):
+            summary = messages[kind][0]
+            self.assertEqual(summary["total_distance"], 100)
+            self.assertEqual(summary["avg_power"], 129)
+            self.assertAlmostEqual(summary["enhanced_avg_speed"], 500 / 140, places=3)
+        with self.assertRaisesRegex(ValueError, "No valid ArduRower"):
+            export_fit(fixture(sideload=True, missing_definition=True))
 
     def test_input_integrity_and_reset(self):
         with self.assertRaisesRegex(ValueError, "integrity"):
