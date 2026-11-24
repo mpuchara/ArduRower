@@ -1,11 +1,11 @@
-# Instalacja ArduRower CYD 0.09.37
+# Instalacja ArduRower CYD 0.09.38
 
 [Otwórz instalator GitHub Pages](https://mpuchara.github.io/ArduRower/). Obsługiwany profil to **ESP32-2432S028 z ST7789 i podświetleniem GPIO21**.
 
 1. Użyj Chrome lub Edge na komputerze. Podłącz CYD przez USB przewodem do transmisji danych i zamknij monitor portu szeregowego.
-2. Sprawdź oznaczenie kompilacji `0.09.37-user-profiles-…`. Jeśli strona pokazuje starszą wersję, odśwież ją przez Ctrl+F5 i sprawdź, czy wdrożenie w Actions się zakończyło.
-3. Kliknij „Połącz i zainstaluj”, wybierz port płytki i zaczekaj na zakończenie zapisu. Przy aktualizacji zachowaj dane flash. Po restarcie sprawdź numer `0.09.37` na ekranie powitalnym i wybierz profil. Dotychczasowe rekordy są dostępne w profilu 1.
-4. Sprawdź dotyk i kontaktron na GPIO22/GND. Na Garminie otwórz aktywność z polem [ArduRower HR 015](../connect_iq/README.md), aby odbierać dane treningowe i przesyłać tętno do CYD.
+2. Sprawdź oznaczenie kompilacji `0.09.38-garmin-telemetry-…`. Jeśli strona pokazuje starszą wersję, odśwież ją przez Ctrl+F5 i sprawdź, czy wdrożenie w Actions się zakończyło.
+3. Kliknij „Połącz i zainstaluj”, wybierz port płytki i zaczekaj na zakończenie zapisu. Przy aktualizacji zachowaj dane flash. Po restarcie sprawdź numer `0.09.38` na ekranie powitalnym i wybierz profil. Dotychczasowe rekordy są dostępne w profilu 1.
+4. Sprawdź dotyk i kontaktron na GPIO22/GND. Na Garminie otwórz aktywność z polem [ArduRower HR 017](../connect_iq/README.md), aby odbierać dane treningowe i przesyłać tętno do CYD.
 
 ## Partycje i NVS
 

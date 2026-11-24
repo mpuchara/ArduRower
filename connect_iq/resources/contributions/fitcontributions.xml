@@ -1,0 +1,24 @@
+<fitContributions>
+    <fitField id="0" sortOrder="0" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel0" chartTitle="@Strings.FitLabel0" unitLabel="@Strings.FitUnit0" />
+    <fitField id="1" sortOrder="2" displayInChart="true" precision="2"
+        dataLabel="@Strings.FitLabel1" chartTitle="@Strings.FitLabel1" unitLabel="@Strings.FitUnit1" />
+    <fitField id="2" sortOrder="4" displayInChart="true" precision="1"
+        dataLabel="@Strings.FitLabel2" chartTitle="@Strings.FitLabel2" unitLabel="@Strings.FitUnit2" />
+    <fitField id="3" sortOrder="1" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel3" chartTitle="@Strings.FitLabel3" unitLabel="@Strings.FitUnit3" />
+    <fitField id="4" sortOrder="10" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel4" chartTitle="@Strings.FitLabel4" unitLabel="@Strings.FitUnit4" />
+    <fitField id="5" sortOrder="5" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel5" chartTitle="@Strings.FitLabel5" unitLabel="@Strings.FitUnit5" />
+    <fitField id="6" sortOrder="6" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel6" chartTitle="@Strings.FitLabel6" unitLabel="@Strings.FitUnit6" />
+    <fitField id="7" sortOrder="7" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel7" chartTitle="@Strings.FitLabel7" unitLabel="@Strings.FitUnit7" />
+    <fitField id="8" sortOrder="8" displayInChart="true" precision="1"
+        dataLabel="@Strings.FitLabel8" chartTitle="@Strings.FitLabel8" unitLabel="@Strings.FitUnit8" />
+    <fitField id="9" sortOrder="3" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel9" chartTitle="@Strings.FitLabel9" unitLabel="@Strings.FitUnit9" />
+    <fitField id="10" sortOrder="9" displayInChart="true" precision="0"
+        dataLabel="@Strings.FitLabel10" chartTitle="@Strings.FitLabel10" unitLabel="@Strings.FitUnit10" />
+</fitContributions>

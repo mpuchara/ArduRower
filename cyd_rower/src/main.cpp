@@ -33,9 +33,10 @@ extern "C" bool bleInUse(void) { return true; }
 #include "GhostHeart.h"
 #include "UserRecordStorage.h"
 #include "WatchHrBridge.h"
+#include "FtmsRowerData.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.37";
+static constexpr const char *FIRMWARE_VERSION = "0.09.38";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -45,7 +46,7 @@ static constexpr uint32_t DISPLAY_INTERVAL_MS = 500;
 static constexpr uint32_t HISTORY_INTERVAL_MS = 1000;
 static constexpr uint8_t HISTORY_LENGTH = 120; // last 120 seconds
 static constexpr uint16_t QUEUE_SIZE = 512;
-static constexpr bool SEND_EQUIVALENT_POWER = false; // original FTMS payload default
+static constexpr bool SEND_EQUIVALENT_POWER = true;
 static constexpr uint32_t TREND_SAMPLE_MS=2000;
 static constexpr uint16_t TREND_SAMPLES=300; // 10 minutes, full-width shared plot
 static constexpr uint32_t HR_TIMEOUT_MS=6500;
@@ -367,8 +368,8 @@ void initBLE() {
   pCharacteristic28->setValue("4.3");
   pCharacteristic29->setValue("Waterrower");
   char cRower[8];
-  cRower[0] = 0x26;
-  cRower[1] = SEND_EQUIVALENT_POWER ? 0x50 : 0x10;
+  cRower[0] = ftmsrower::kFeatureByte0;
+  cRower[1] = ftmsrower::featureByte1(SEND_EQUIVALENT_POWER);
   cRower[2] = cRower[3] = cRower[4] = 0;
   cRower[5] = cRower[6] = cRower[7] = 0;
   pFmfCharacteristic->setValue((uint8_t *)cRower, 8);
@@ -425,42 +426,16 @@ void initBLE() {
                 (unsigned)oAdvertisementData.getPayload().size());
 }
 
-uint16_t bounded16(float value) {
-  if (!isfinite(value) || value <= 0) return 0;
-  return value >= 65535 ? 65535 : (uint16_t)roundf(value);
-}
-uint8_t encodedStrokeRate(float rate) {
-  return (uint8_t)min((uint16_t)255, bounded16(rate * 2.0f));
-}
-void put16(uint8_t *data, uint8_t &offset, uint16_t value) {
-  data[offset++] = value & 0xff;
-  data[offset++] = value >> 8;
-}
 float reportedPace() {
   return motion.speed > 0.05f && !metrics.paused ?
          500.0f / motion.speed : 0;
 }
 void setCxRowerData() {
-  // Byte format and flag semantics copied from the working ArduRower v0.07.
-  uint8_t data[19];
-  uint8_t offset = 0;
-  const uint16_t flags = SEND_EQUIVALENT_POWER ? 0x087e : 0x081e;
-  put16(data, offset, flags);
-  data[offset++] = encodedStrokeRate(metrics.strokeRate);
-  put16(data, offset, (uint16_t)min(metrics.strokes, (uint32_t)65535));
-  data[offset++] = encodedStrokeRate(metrics.averageStrokeRate());
-  const uint32_t distance = (uint32_t)min(metrics.distance(), 16777215.0f);
-  data[offset++] = distance & 0xff;
-  data[offset++] = (distance >> 8) & 0xff;
-  data[offset++] = (distance >> 16) & 0xff;
-  const float pace=reportedPace();
-  put16(data, offset, pace > 0 ? bounded16(pace) : 0xffff);
-  put16(data, offset, metrics.averagePace() > 0 ? bounded16(metrics.averagePace()) : 0xffff);
-  if (SEND_EQUIVALENT_POWER) {
-    put16(data, offset, min(bounded16(metrics.equivalentPower()), (uint16_t)32767));
-    put16(data, offset, min(bounded16(metrics.averageEquivalentPower()), (uint16_t)32767));
-  }
-  put16(data, offset, bounded16(metrics.seconds()));
+  uint8_t data[ftmsrower::kMaxPacketSize];
+  const ftmsrower::Sample sample={metrics.strokeRate,metrics.strokes,metrics.averageStrokeRate(),
+    metrics.distance(),reportedPace(),metrics.averagePace(),metrics.equivalentPower(),
+    metrics.activeUs?metrics.averageEquivalentPower():NAN,metrics.seconds()};
+  const uint8_t offset=ftmsrower::encode(sample,SEND_EQUIVALENT_POWER,data);
   pDtCharacteristic->setValue(data, offset);
   if(ftmsOnHrAcl && hrFtmsHandle!=HR_INVALID_HANDLE) {
     // NimBLE's high-level subscriber list only tracks server GAP callbacks.
@@ -1712,7 +1687,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.37 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.38 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1845,7 +1820,7 @@ void loop() {
         reedTracing=true;
         reedTraceWaiting=true;
         reedTraceStarted=millis();
-        static const char heading[]="REEDTRACE unified contact filter; version=0.09.37\n";
+        static const char heading[]="REEDTRACE unified contact filter; version=0.09.38\n";
         reedTrace.line(heading,sizeof(heading)-1);
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;

@@ -1,40 +1,52 @@
-# ArduRower HR: własne pole Connect IQ
+# ArduRower HR 017 dla Garmin fēnix 6X Pro / Pro Solar
 
-Wersja 0.1.5, nazwa na zegarku **ArduRower HR 015**, dla Garmin fēnix 6X Pro / Solar (`fenix6xpro`, sprawdzony numer 006-B3291-00, firmware 28.02). Wymaga ESP32 ArduRower CYD 0.09.23 lub nowszego z kanałem zwrotnym HR.
-
-Pole odbiera Rowing Data z WR S4BL3 i odsyła `Activity.Info.currentHeartRate` zegarka przez to samo połączenie BLE. Nie wymaga nadawania tętna jako osobny czujnik 180D. Odczyt HR jest bieżącym tętnem aktywności; jeśli zegarek używa zewnętrznego czujnika HR, będzie to źródło wybrane przez zegarek.
+Pole Connect IQ **0.1.7** obsługuje ArduRower CYD 0.09.38 oraz starsze ramki 0.09.23–0.09.37. Komputerek nadaje jako „WR S4BL3”. Pole odsyła aktualne tętno aktywności wybrane przez Garmina przez to samo połączenie BLE.
 
 ## Instalacja przez USB
 
-1. Zbuduj `AROWERHR.PRG` dla `fenix6xpro`.
-2. Podłącz zegarek w trybie MTP. Skopiuj plik do `Primary/Garmin/Apps`. Zweryfikuj odczyt zwrotny pliku przed odłączeniem.
-3. Odłącz USB. W aktywności wioślarskiej usuń wcześniejsze pole BLE z ekranów tej aktywności; może pozostać zainstalowane na zegarku.
-4. Dodaj **ArduRower HR 015**. Można użyć małego pola: układ dopasowuje liczbę wierszy do jego wymiarów. Dwa różne pola zarządzające tym samym BLE mogą zajmować zasoby zegarka; usuń wcześniejsze pole BLE z ekranów tej aktywności.
-5. Otwórz ten ekran przy włączonym komputerku. Przy braku pomiaru HR wysyłany jest jawny brak wartości, nie poprzednie BPM.
+1. [Pobierz AROWERHR.PRG dla fenix6xpro](https://github.com/mpuchara/ArduRower/releases/download/v0.09.38/AROWERHR.PRG).
+2. Podłącz zegarek w trybie MTP. Skopiuj PRG do **Primary/Garmin/Apps**, zastępując poprzedni plik o tej samej nazwie. Jeśli system udostępnia zegarek jako dysk, użyj folderu **GARMIN/APPS**.
+3. Odłącz zegarek. W aktywności **Wioślarstwo w pomieszczeniu** sprawdź, czy na ekranie danych znajduje się **ArduRower HR 017**. Usuń z ekranów tej aktywności inne pola łączące się z tym samym komputerkiem.
+4. Włącz CYD, wybierz użytkownika i tryb. Otwórz ekran pola i rozpocznij zapis na zegarku. Po zapisaniu aktywności zsynchronizuj ją z Garmin Connect.
 
-Tło jest pobierane z `DataField.getBackgroundColor()` przy każdym rysowaniu, a kolor tekstu jest kontrastowy. Wszystkie liczby i jednostki używają `FONT_XTINY`. Zniknęły nagłówek wersji i długie statusy techniczne. Wysokie pole ma trzy wiersze, niskie dwa, a najniższe jeden z priorytetem dystansu i tempa. Szerokość tekstu jest mierzona przed rysowaniem; gdy brakuje miejsca, pomijane są dodatkowe etykiety lub metryki zamiast nakładania wierszy. Przy rozłączeniu widoczne są kreski i krótki komunikat.
+Układ dopasowuje się do miejsca dostępnego na zegarku. Dystans, tempo i moc mają priorytet. Większe pole mieści też prędkość, kadencję, puls, liczbę ruchów i czas aktywny.
 
-Pole pokazuje dystans, tempo /500m, kadencję i tętno. Zapisuje własne pola FIT: dystans, prędkość, kadencję, opcjonalną moc równoważną i ważność połączenia. Metadane `nativeNum` wskazują odpowiedniki FIT; nie oznacza to zastąpienia wszystkich natywnych podsumowań aktywności przez system Garmina. Moc jest zapisywana wyłącznie wtedy, gdy firmware rzeczywiście dołącza ją do FTMS; obecnie jest domyślnie wyłączona.
+## Dane w FIT i Garmin Connect
 
-## Protokół i ważność
+| Pole deweloperskie w rekordzie FIT | Jednostka | Źródło |
+| --- | --- | --- |
+| Dystans | m | FTMS |
+| Prędkość | m/s | Wyliczenie z tempa FTMS. Na ekranie zegarka km/h |
+| Tempo i średnie tempo | s/500 m | FTMS |
+| Moc i średnia moc szacunkowa | W | Dotychczasowy model Concept2 używany na CYD |
+| Kadencja i średnia kadencja | SPM | FTMS, co 0,5 SPM |
+| Liczba ruchów | szt. | FTMS |
+| Czas aktywny | s | FTMS, według zegara CYD |
+| Ważność telemetrii BLE | 0/1 | Pole Connect IQ |
 
-- Jedna rejestracja profilu BLE: standardowa usługa FTMS `1826`, Rowing Data `2AD1` + CCCD `2902` oraz prywatna charakterystyka zapisu `c9f10002-6f50-4fca-9b8d-3f8d90ae1b65`.
-- Zapis HR z potwierdzeniem jest uruchamiany także przez odebrany pakiet FTMS, z ograniczeniem do około 1 Hz. Nie zależy więc od tego, czy zegarek już wywołuje `compute()` w danym stanie aktywności. Tylko jedno żądanie oczekuje naraz. Pakiet ma 6 bajtów: wersja `1`, flaga ważności `0/1`, licznik LE16, BPM LE16. Przy nieważnym HR: flaga=0, BPM=0.
-- ESP32 sprawdza ACL aktywnego FTMS, format i zakres oraz rosnący licznik z obsługą przepełnienia. Powtórzony albo stary pakiet nie odświeża wskazania. Przy braku nowych pomiarów HR wygasa po 6,5 s. Rozłączenie usuwa HR od razu i resetuje sekwencję.
-- W normalnym starcie firmware nie uruchamia już osobnego klienta/skanera HR. Starsze eksperymenty pozostały wyłącznie jako jawne diagnostyki.
-- Dekoder jest przeznaczony dla WR S4BL3. Historyczny format ArduRower przesyła tempo jako **całe sekundy /500m**, podczas gdy ogólny FTMS definiuje jednostkę 0,1 s. Zachowano działający format ESP32 i uwzględniono go w polu. Nie używać tego dekodera do dowolnych maszyn FTMS.
-- Nieprawidłowy lub ucięty pakiet Rowing Data nie zastępuje poprzedniego poprawnego stanu. Po 6,5 s brak danych jest widoczny na ekranie i w polu ważności FIT.
+Pole rejestruje 11 metryk, 31 bajtów na komunikat FIT Record przy limicie 32 bajtów na pole danych. Metadane wykresów są dołączone do aplikacji. Zegarek nadaje znaczniki czasu i decyduje o zapisie co sekundę albo w trybie Smart Recording. Pole przekazuje jedynie nową, świeżą próbkę. Rozłączenie od razu usuwa poprzednią próbkę z pola. Brak mocy jest pomijany, a prawidłowa wartość 0 W może być zapisana. Prędkość jest dostępna, gdy ramka zawiera tempo. Auto pauza zamraża czas CYD i nie ma osobnej flagi w ramce. Tętno zachowuje natywną ścieżkę zapisu Garmina.
 
-## Budowanie
+Dane ArduRower w tym trybie pozostają Developer Fields. Metadane wykresów nie gwarantują, że Garmin Connect wyświetli wszystkie serie po instalacji USB. Potwierdzenie wymaga zapisania aktywności na fizycznym zegarku i jej synchronizacji. Garmin opisuje prezentację wykresów dla pól Connect IQ i dystrybucję aplikacji przez Connect IQ Store. [Wytyczne Garmin dla pól danych](https://developer.garmin.com/connect-iq/articles/user-experience-guidelines/Data_Fields.html) · [Publikacja aplikacji](https://developer.garmin.com/connect-iq/submit-an-app/)
 
-Wymagane: oficjalny Connect IQ SDK, pobrany profil `fenix6xpro`, Java i własny klucz deweloperski DER. Zastosowano SDK 9.3.0 oraz Java 21.
+### Natywne podsumowania
 
-```powershell
+- **BLE FTMS**. fēnix 6X Pro Solar odbiera dane w naszym polu Connect IQ. Garmin dokumentuje natywne parowanie z wybranymi wioślarzami ANT+. Natywnego importu z BLE FTMS dla tego modelu nie potwierdzono. Skojarzenie nativeNum opisuje ekwiwalent pola, lecz system Garmina nadal zarządza standardowymi metrykami aktywności. [Pomoc Garmin](https://support.garmin.com/en-US/?faq=rlynVxyyoq9dcSZGw5YFo8) · [Specyfikacja FIT](https://developer.garmin.com/fit/protocol/)
+- **ANT+**. Profil Fitness Equipment obsługuje dane wioślarza, takie jak liczba ruchów, kadencja i moc. ESP32 na CYD ma radio Wi‑Fi i Bluetooth, więc taka integracja wymaga osobnego sprzętu ANT+ i sprawdzenia zgodności z zegarkiem. [Profil ANT+](https://thisisant.developer.garmin.com/pages/developer/ant-plus/device-profiles/index.html) · [Dane ESP32](https://documentation.espressif.com/esp32_datasheet_en.html)
+- **Eksport FIT po treningu**. Narzędzie zapisuje nową kopię pliku z uzupełnionymi standardowymi polami dystansu, prędkości, mocy, kadencji i liczby ruchów, jeśli odpowiednie dane istnieją. Zachowuje wartości zapisane przez Garmin, w tym tętno i czas zegarka. Opcja poniżej pozwala uzupełnić również zerowy dystans natywny. Eksport obsługuje pojedynczą sesję wioślarską i zachowuje pola deweloperskie rozpoznawane przez SDK. Sprawdzono poprawność pliku narzędziami FIT. Akceptację kopii przez Garmin Connect i sposób wyświetlenia podsumowania trzeba potwierdzić osobno.
+
+~~~powershell
+python -m pip install -r connect_iq/tools/requirements.txt
+python connect_iq/tools/export_fit.py trening.fit trening-ardurower.fit --replace-zero-distance
+~~~
+
+## Protokół i budowanie
+
+- FTMS 1826, Rowing Data 2AD1. Dotychczasowa ramka bez mocy ma 15 bajtów. Z oboma polami mocy ma 19 bajtów i flagi 0x087E. Przy braku jednego pola mocy ramka ma 17 bajtów. Tempo jest kodowane w całych sekundach na 500 m, a moc w całych watach SINT16 little endian. [FTMS i GATT](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0-1/)
+- Charakterystyka zwrotna c9f10002-6f50-4fca-9b8d-3f8d90ae1b65 ma ten sam format z wersją, flagą ważności, licznikiem LE16 i BPM LE16. Około 1 Hz, z potwierdzeniem zapisu. Przy braku pomiaru zegarek wysyła jawny brak tętna.
+- Użyj oficjalnego SDK Connect IQ, profilu fenix6xpro, Javy i dotychczasowego prywatnego klucza. Budowanie i testy symulatora nie zastępują próby na zegarku.
+
+~~~powershell
 ./build.ps1 -SdkPath C:/narzedzia/connectiq-sdk -JavaPath C:/narzedzia/java/bin/java.exe -SigningKey C:/prywatne/developer.der
-```
+~~~
 
-Klucz podpisujący jest prywatny: nie umieszczaj go w repozytorium ani publicznej paczce źródeł. Dla dalszych aktualizacji zachowaj ten sam klucz i identyfikator aplikacji.
-
-Testy dekodera kompiluje opcja `-RunTests`. Do wykonania testów musi działać symulator SDK. Testy obejmują rzeczywisty format 15-bajtowy, wariant z mocą, brak tempa i ucięte/niepoprawne ramki. Testy C++ `watch_hr_bridge_test.cpp` sprawdzają odbiornik pakietów HR, duplikaty i przepełnienie licznika. Testy symulatora nie zastępują próby na zegarku.
-
-Źródła API: [BluetoothLowEnergy](https://developer.garmin.com/connect-iq/api-docs/Toybox/BluetoothLowEnergy.html), [Characteristic.requestWrite](https://developer.garmin.com/connect-iq/api-docs/Toybox/BluetoothLowEnergy/Characteristic.html), [Activity.Info](https://developer.garmin.com/connect-iq/api-docs/Toybox/Activity/Info.html).
+Uruchom symulator SDK i dodaj opcję -RunTests. Testy sprawdzają ramki bez mocy i z mocą, brakujące wartości, wygaszanie danych przy rozłączeniu oraz zapis wartości i schemat FIT. Plik do instalacji powstaje w bin/AROWERHR.PRG.

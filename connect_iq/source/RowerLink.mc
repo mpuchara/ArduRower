@@ -12,7 +12,7 @@ class RowerLink extends Ble.BleDelegate {
     var device=null, rowChar=null, hrChar=null;
     var state="Start", profiles=0, running=false, pairing=false, scanning=false;
     var subscribed=false, pending=false, pendingAt=0, retryAt=0, sequence=0;
-    var lastRx=0, lastAck=0, packets=0, revision=0;
+    var lastRx=null, lastAck=0, packets=0, revision=0;
     var latestHr=null,hrStatus="HR czeka",lastWrite=0;
     var data as Dictionary={}, decoder;
 
@@ -27,7 +27,7 @@ class RowerLink extends Ble.BleDelegate {
     }
     function start() {
         running=true;Ble.setDelegate(self);
-        System.println("AROWER 0.1.4: start clock="+System.getTimer());
+        System.println("AROWER 0.1.7: start clock="+System.getTimer());
         try {
             Ble.registerProfile({:uuid=>ftms,:characteristics=>[
                 {:uuid=>rowing,:descriptors=>[cccd]}, {:uuid=>hrValue}]});
@@ -40,6 +40,7 @@ class RowerLink extends Ble.BleDelegate {
         running=false;Ble.setScanState(Ble.SCAN_STATE_OFF);
         if (device!=null) { Ble.unpairDevice(device); }
         device=null;hrChar=null;rowChar=null;pending=false;subscribed=false;
+        clearSample();
     }
     function onProfileRegister(uuid,status) {
         if (status!=Ble.STATUS_SUCCESS) { state="Blad profilu";return; }
@@ -73,12 +74,13 @@ class RowerLink extends Ble.BleDelegate {
     function onConnectedStateChanged(peer,connectionState) {
         System.println("AROWER: connection state="+connectionState);
         if (!running) { return; }
+        clearSample();
         if (!peer.isConnected()) {
             state="Rozlaczono";subscribed=false;pending=false;hrChar=null;rowChar=null;
             // pairDevice keeps this device in the system reconnect list.
-            device=peer;pairing=false;lastAck=0;lastRx=0;return;
+            device=peer;pairing=false;lastAck=0;WatchUi.requestUpdate();return;
         }
-        device=peer;pairing=false;sequence=0;pending=false;lastAck=0;lastRx=0;
+        device=peer;pairing=false;sequence=0;pending=false;lastAck=0;
         var service=peer.getService(ftms);
         if(service==null){state="Wgraj ESP 0.09.23";return;}
         rowChar=service.getCharacteristic(rowing);hrChar=service.getCharacteristic(hrValue);
@@ -96,10 +98,11 @@ class RowerLink extends Ble.BleDelegate {
         else{state="CCCD blad "+status;subscribed=false;}
     }
     function onCharacteristicChanged(characteristic,value) {
-        if(!characteristic.getUuid().equals(rowing)){return;}
-        var next=decoder.decode(value);
-        if(next==null){System.println("AROWER: rejected FTMS bytes="+value.size());return;}
-        data=next;lastRx=System.getTimer();packets+=1;revision+=1;
+        if(!running || rowChar==null || device==null || !device.isConnected() ||
+            !characteristic.getUuid().equals(rowing)){return;}
+        if(!acceptSample(value,System.getTimer())){
+            System.println("AROWER: rejected FTMS bytes="+value.size());return;
+        }
         // A real notification proves the CCCD is enabled even on firmware
         // that omits the descriptor completion callback.
         subscribed=true;state="BLE OK";
@@ -107,7 +110,22 @@ class RowerLink extends Ble.BleDelegate {
         tick(info==null?null:info.currentHeartRate);
         WatchUi.requestUpdate();
     }
-    function fresh() { return lastRx!=0 && System.getTimer()-lastRx<6500; }
+    function acceptSample(value,now) {
+        var next=decoder.decode(value);
+        if(next==null){return false;}
+        data=next;lastRx=now;packets+=1;revision+=1;
+        return true;
+    }
+    function clearSample() {data={};lastRx=null;}
+    function freshAt(now,limit) {
+        if(lastRx==null){return false;}
+        var age=now-lastRx;
+        return age>=0 && age<limit;
+    }
+    function fresh() { return freshAt(System.getTimer(),6500); }
+    function fitSample(now,recorded) {
+        return revision!=recorded && freshAt(now,2500)?data:null;
+    }
     function hrFresh() { return lastAck!=0 && System.getTimer()-lastAck<6500; }
     function tick(bpm) {
         latestHr=bpm;

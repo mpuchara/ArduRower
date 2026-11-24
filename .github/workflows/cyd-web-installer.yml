@@ -37,6 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/cyd_ble_contract_test.py
+          python3 tests/garmin_telemetry_test.py
           python3 tests/cyd_display_refresh_test.py
           python3 tests/cyd_text_cache_test.py
           python3 tests/cyd_installer_integrity_test.py
@@ -86,7 +87,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.37-user-profiles-")
+          assert version["version"].startswith("0.09.38-garmin-telemetry-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]
