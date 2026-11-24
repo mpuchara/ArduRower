@@ -1,0 +1,8 @@
+# ArduRower HR — Garett Essa 2 AI 4G (0.1.0)
+Pierwsza wersja diagnostyczna, tylko fizyczny pomiar HR i wysyłanie do CYD 0.09.38 przez istniejący WatchHrBridge. Nie modyfikuje firmware ani Garmin IQ.
+
+Android 8.1: min API 26, target 27, compile 35, pojedynczy DEX, Java, bez JNI i Internetu, podpis APK v1. Wzorzec: Espen/android/ala-robot/watch. Budowa: Android SDK platform 35, build-tools 35.0.0, JDK 17, bash android/garett-hr/build.sh. Domyślny klucz testowy generowany lokalnie; kolejne aktualizacje wymagają tego samego klucza (ustaw HR_KEYSTORE i HR_KEYSTORE_PASSWORD). Klucza nie publikujemy.
+
+Instalacja: pobierz ZIP artefaktu Actions, wypakuj APK i prześlij na zegarek zwykłą metodą używaną z Alą. Nie potrzebujesz ADB. Włącz Bluetooth i lokalizację systemową (wymóg skanowania Android 8.1; aplikacja nie odczytuje lokalizacji), przyznaj uprawnienia. Załóż zegarek, otwórz aplikację, sprawdź BPM i listę czujników. Włącz CYD, wybierz użytkownika i trening, wyłącz pole Garmin na czas próby. Naciśnij Połącz. FTMS i HR ACK powinny rosnąć. Potwierdź BPM na ekranie CYD; ACK oznacza potwierdzony zapis GATT, nie niezależny dowód przyjęcia przez aplikację CYD. Przy braku ważnej próbki wysyłany jest jawny brak HR. Zegarek ma pozostać na ekranie aplikacji; opuszczenie ekranu zamyka BLE, a CYD wygasza HR po ok. 6,5 s.
+
+Brak TYPE_HEART_RATE lub brak świeżych próbek: otwórz Czujniki / diagnostyka i sfotografuj listę. Nie ma obejścia uprawnień ani sztucznego BPM. Dostęp do fizycznego czujnika nie został potwierdzony. Brak zapisu historii, serwera i aplikacji treningowej — zakres celowo ograniczony. 
