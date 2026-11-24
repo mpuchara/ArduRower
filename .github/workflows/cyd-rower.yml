@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           for source in tests/*_test.cpp; do
             executable="/tmp/$(basename "$source" .cpp)"
-            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I ArduRower "$source" -o "$executable"
+            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I tests/nvs_stubs -I ArduRower "$source" -o "$executable"
             "$executable"
           done
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/replay_reed.cpp -o /tmp/replay_reed

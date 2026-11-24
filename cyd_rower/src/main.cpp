@@ -31,10 +31,11 @@ extern "C" bool bleInUse(void) { return true; }
 #include <esp_system.h> // ESP32 reset diagnostics
 #include "GhostRace.h"
 #include "GhostHeart.h"
+#include "UserRecordStorage.h"
 #include "WatchHrBridge.h"
 #include "../../ArduRower/RowerMetrics.h"
 
-static constexpr const char *FIRMWARE_VERSION = "0.09.36";
+static constexpr const char *FIRMWARE_VERSION = "0.09.37";
 static constexpr int ROWERINPUT = 22; // P3: GPIO22 + GND, reed contact; NOT GPIO2 (TFT_DC)
 static constexpr int BUTTONSPIN = 0;  // onboard BOOT, press AFTER the ESP32 starts
 static constexpr int BACKLIGHT_PIN = TFT_BL;
@@ -212,11 +213,15 @@ static_assert(sizeof(previousField) / sizeof(previousField[0]) ==
 // Record all milestones on the training clock; Race mode is only a view.
 enum class Mode : uint8_t { Dashboard, Race };
 Mode activeMode = Mode::Dashboard;
+startup::Navigation navigation;
+UserRecordStorage userRecords;
+bool recordReadFailed[ghostrace::kDistanceCount]={};
+bool profileReadFailed=false,profileSaveFailed=false;
+uint32_t welcomeStartedMs=0;
+void renderStartup(uint32_t now);
 ghostrace::Race trainingRaces[ghostrace::kDistanceCount];
 ghostrace::Record storedGhost;
 ghostrace::HeartRecord bestHeart={},trainingHearts[ghostrace::kDistanceCount];
-// Compact NVS blobs avoid retaining hundreds of unused zero samples.
-uint8_t raceStorage[sizeof(ghostrace::Record)];
 bool hasBestHeart=false;
 uint32_t personalBestMs[3] = {};
 uint8_t selectedDistance=0;
@@ -231,6 +236,8 @@ ghostrace::Phase ghostPhase(){return ghostSelected?selectedRace().phase:ghostrac
 bool reportedAutoPause=false;
 uint32_t ghostWins[3]={};
 uint8_t lastRaceSelection=255;
+uint8_t raceMenuFocus=0;
+bool displayedProfileAction=false;
 uint32_t raceClockMs(){return static_cast<uint32_t>(metrics.activeUs/1000ULL);}
 
 class MyServerCallbacks : public NimBLEServerCallbacks {
@@ -478,7 +485,7 @@ void IRAM_ATTR rowerdebounceinterrupt() {
 }
 
 void resetRaceTracking();
-void resetWorkout() {
+void resetWorkoutClock() {
   pauseResume.reset();
   portENTER_CRITICAL(&pulseMux);
   reedEdges.reset();
@@ -494,9 +501,12 @@ void resetWorkout() {
   historyHead = 0;
   historyCount = 0;
   memset(history, 0, sizeof(history));
-  lastHistoryMs = millis();
+  lastHistoryMs=millis();
   reportedAutoPause=false;
   ++historyRevision;
+}
+void resetWorkout() {
+  resetWorkoutClock();
   resetRaceTracking();
 }
 
@@ -505,102 +515,51 @@ void resetWorkout() {
 void resetRenderCache();
 void renderRaceUI();
 const uint16_t (&raceDistances)[ghostrace::kDistanceCount] = ghostrace::kDistances;
-// Keep the existing 1 km NVS key and v3 blob support. Old 500/2000 m
-// records remain untouched; only the new distances are offered in the UI.
-const char *raceKeys[3] = {"g7_1000", "g7_3000", "g7_10000"};
-const char *heartKeys[3] = {"h7_1000", "h7_3000", "h7_10000"};
-const char *winKeys[3] = {"w7_1000", "w7_3000", "w7_10000"};
-bool loadBest(uint8_t index, ghostrace::Record &out) {
-  Preferences p;
-  if (!p.begin("rower-races", true)) return false;
-  const size_t n=p.getBytesLength(raceKeys[index]);
-  const size_t read=n<=sizeof(raceStorage) && n>0 ?
-      p.getBytes(raceKeys[index],raceStorage,n):0;
-  p.end();
-  if(read!=n || !read)return false;
-  memset(&out,0,sizeof(out));
-  if(n==sizeof(out))memcpy(&out,raceStorage,n); // legacy or full v4
-  else {
-    const size_t header=offsetof(ghostrace::Record,decimeters);
-    if(n<header+sizeof(out.intervalSeconds)+sizeof(out.checksum))return false;
-    memcpy(&out,raceStorage,header);
-    if(out.version!=ghostrace::kVersion || !out.count || out.count>ghostrace::kSamples)return false;
-    const size_t samples=out.count*sizeof(uint16_t);
-    if(n!=header+samples+sizeof(out.intervalSeconds)+sizeof(out.checksum))return false;
-    memcpy(out.decimeters,raceStorage+header,samples);
-    memcpy(&out.intervalSeconds,raceStorage+header+samples,sizeof(out.intervalSeconds));
-    memcpy(&out.checksum,raceStorage+header+samples+sizeof(out.intervalSeconds),sizeof(out.checksum));
-  }
-  return ghostrace::valid(out,raceDistances[index],motion.calibrationMilli());
-}
-bool saveBest(uint8_t index, const ghostrace::Record &record) {
-  if (!ghostrace::valid(record,raceDistances[index],motion.calibrationMilli())) return false;
-  const size_t prefix=offsetof(ghostrace::Record,decimeters)+record.count*sizeof(uint16_t);
-  memcpy(raceStorage,&record,prefix);
-  memcpy(raceStorage+prefix,&record.intervalSeconds,sizeof(record.intervalSeconds));
-  memcpy(raceStorage+prefix+sizeof(record.intervalSeconds),&record.checksum,sizeof(record.checksum));
-  const size_t n=prefix+sizeof(record.intervalSeconds)+sizeof(record.checksum);
-  Preferences p;
-  if(!p.begin("rower-races",false))return false;
-  const bool ok=p.putBytes(raceKeys[index],raceStorage,n)==n;
-  p.end();
-  return ok;
-}
-bool loadHeart(uint8_t index,ghostrace::HeartRecord &out,const ghostrace::Record &record) {
-  Preferences p;
-  if(!p.begin("rower-races",true))return false;
-  const size_t n=p.getBytesLength(heartKeys[index]);
-  const size_t read=n<=sizeof(raceStorage) && n>0?p.getBytes(heartKeys[index],raceStorage,n):0;
-  p.end();
-  if(read!=n || !read)return false;
-  out={};
-  if(n==sizeof(out))memcpy(reinterpret_cast<uint8_t*>(&out),raceStorage,n);
-  else {
-    const size_t header=offsetof(ghostrace::HeartRecord,bpm);
-    if(n<header+sizeof(out.checksum))return false;
-    // Copy only the header fields, leaving the unused samples zeroed.
-    memcpy(reinterpret_cast<uint8_t*>(&out),raceStorage,header);
-    if(!out.count || out.count>ghostrace::kSamples ||
-       n!=header+out.count+sizeof(out.checksum))return false;
-    memcpy(out.bpm,raceStorage+header,out.count);
-    memcpy(&out.checksum,raceStorage+header+out.count,sizeof(out.checksum));
-  }
-  return ghostrace::validHeart(out,record);
-}
-bool saveHeart(uint8_t index,const ghostrace::HeartRecord &heart) {
-  const size_t prefix=offsetof(ghostrace::HeartRecord,bpm)+heart.count;
-  memcpy(raceStorage,&heart,prefix);
-  memcpy(raceStorage+prefix,&heart.checksum,sizeof(heart.checksum));
-  const size_t n=prefix+sizeof(heart.checksum);
-  Preferences p;
-  if(!p.begin("rower-races",false))return false;
-  const bool ok=p.putBytes(heartKeys[index],raceStorage,n)==n;
-  p.end();
-  return ok;
+bool saveBest(uint8_t index,const ghostrace::Record &record) {
+  return !recordReadFailed[index] && userRecords.saveBest(index,record,motion.calibrationMilli());
 }
 void loadBestTimes() {
-  for(uint8_t i=0;i<ghostrace::kDistanceCount;++i)
-    personalBestMs[i]=loadBest(i,storedGhost)?storedGhost.finishMs:0;
-  Preferences p;
-  if(p.begin("rower-races",true)) {
-    for(int i=0;i<3;++i)ghostWins[i]=p.getUInt(winKeys[i],0);
-    p.end();
+  for(uint8_t i=0;i<ghostrace::kDistanceCount;++i) {
+    const auto status=userRecords.loadBest(i,storedGhost,motion.calibrationMilli());
+    personalBestMs[i]=status==UserRecordStorage::Read::Found?storedGhost.finishMs:0;
   }
 }
 void resetRaceTracking() {
-  ghostSelected=false;raceOptionsOpen=false;hasBestHeart=false;
+  ghostSelected=false;raceOptionsOpen=false;hasBestHeart=false;bestHeart={};
+  profileReadFailed=false;
   for(uint8_t i=0;i<ghostrace::kDistanceCount;++i) {
-    const bool found=loadBest(i,storedGhost);
-    trainingRaces[i].arm(raceDistances[i],found?&storedGhost:nullptr,motion.calibrationMilli());
-    personalBestMs[i]=found?storedGhost.finishMs:0;
+    auto &race=trainingRaces[i];
+    if(!navigation.user) {
+      race.arm(0,nullptr,motion.calibrationMilli());
+      race.phase=ghostrace::Phase::Idle;
+      personalBestMs[i]=ghostWins[i]=0;
+      recordReadFailed[i]=false;
+    } else {
+      const auto status=userRecords.loadBest(i,storedGhost,motion.calibrationMilli());
+      const bool found=status==UserRecordStorage::Read::Found;
+      recordReadFailed[i]=status==UserRecordStorage::Read::Error;
+      race.arm(raceDistances[i],found?&storedGhost:nullptr,motion.calibrationMilli());
+      personalBestMs[i]=found?storedGhost.finishMs:0;
+      const auto winsStatus=userRecords.loadWins(i,ghostWins[i]);
+      profileReadFailed|=recordReadFailed[i] || winsStatus==UserRecordStorage::Read::Error;
+    }
     trainingHearts[i]={};raceResults[i]={};
   }
+  storedGhost={};
+  if(profileReadFailed)Serial.printf("PROFILE: NVS read failure for user=%u\n",navigation.user);
 }
 void startRace(uint8_t index) {
   if(index>=ghostrace::kDistanceCount)return;
-  selectedDistance=index;ghostSelected=true;
+  selectedDistance=raceMenuFocus=index;ghostSelected=true;
   bestHeart={};
-  hasBestHeart=selectedRace().hasBest && loadHeart(index,bestHeart,selectedRace().best);
+  hasBestHeart=false;
+  if(selectedRace().hasBest) {
+    const auto status=userRecords.loadHeart(index,bestHeart,selectedRace().best);
+    hasBestHeart=status==UserRecordStorage::Read::Found;
+    if(status==UserRecordStorage::Read::Error)
+      Serial.printf("PROFILE: NVS heart read failure for user=%u distance=%u\n",
+                    navigation.user,raceDistances[index]);
+  }
   // Selection is just a view; do not reset a workout or its milestone timers.
   activeMode=Mode::Race;detailPage=false;pageRendered=false;
   Serial.println("GHOST: DASHBOARD enabled after distance choice");
@@ -610,7 +569,7 @@ void startRace(uint8_t index) {
   raceLayoutReady=false;lastRacePaintMs=0;raceOptionsOpen=false;
 }
 void openRaceMenu() {
-  ghostSelected=false;raceOptionsOpen=false;
+  ghostSelected=false;raceOptionsOpen=false;raceMenuFocus=selectedDistance;
   loadBestTimes();raceLayoutReady=false;
 }
 void exitGhostTraining() {
@@ -621,7 +580,7 @@ void exitGhostTraining() {
   Serial.println("GHOST: EXIT to ordinary training; current workout retained");
 }
 void updateRaceTracking(uint32_t now) {
-  if(!metrics.started)return;
+  if(!navigation.measuring() || !metrics.started)return;
   for(uint8_t i=0;i<ghostrace::kDistanceCount;++i) {
     auto &race=trainingRaces[i];
     auto &heart=trainingHearts[i];
@@ -637,24 +596,21 @@ void updateRaceTracking(uint32_t now) {
     ghostrace::captureHeart(heart,race.attempt,(uint8_t)liveHr(now));
     if(improved) {
       result.saveFailed=!saveBest(i,race.attempt);
+      profileSaveFailed|=result.saveFailed;
       if(!result.saveFailed) {
         personalBestMs[i]=race.endMs;
         heart.raceChecksum=race.attempt.checksum;
         heart.checksum=ghostrace::hashHeart(heart);
-        const bool ok=saveHeart(i,heart);
+        const bool ok=userRecords.saveHeart(i,heart,race.attempt);
+        profileSaveFailed|=!ok;
         Serial.printf("GHOST: optional best HR trace saved=%d\n",ok?1:0);
       }
     }
     if(race.phase==ghostrace::Phase::Finished) {
       if(race.beatGhost() && !result.saveFailed) {
         result.medalAwarded=true;
-        Preferences p;
-        if(p.begin("rower-races",false)) {
-          const uint32_t next=ghostWins[i]==UINT32_MAX?UINT32_MAX:ghostWins[i]+1;
-          result.medalSaved=p.putUInt(winKeys[i],next)==sizeof(uint32_t);
-          if(result.medalSaved)ghostWins[i]=next;
-          p.end();
-        }
+        result.medalSaved=userRecords.awardWin(i,ghostWins[i]);
+        profileSaveFailed|=!result.medalSaved;
       }
       if(ghostSelected && i==selectedDistance)raceOptionsOpen=false;
       if(!ghostSelected || i==selectedDistance)raceLayoutReady=false;
@@ -670,10 +626,9 @@ void toggleMode() {
     Serial.println("GHOST: ENTER");
     activeMode=Mode::Race;
     if (ghostPhase() == ghostrace::Phase::Finished ||
-        ghostPhase() == ghostrace::Phase::Cancelled)
+        ghostPhase() == ghostrace::Phase::Cancelled ||
+        ghostPhase() == ghostrace::Phase::Idle)
       openRaceMenu();
-    else if (ghostPhase() == ghostrace::Phase::Idle)
-      loadBestTimes();
     raceLayoutReady=false;
     // Never launch a blocking touch-calibration wizard automatically when
     // entering the menu. BOOT can operate Ghost Race without touch setup.
@@ -682,6 +637,58 @@ void toggleMode() {
   }
   resetRenderCache();
 }
+void clearActiveProfile() {
+  userRecords.select(0);
+  activeMode=Mode::Dashboard;
+  selectedDistance=raceMenuFocus=0;
+  detailPage=calibrationScreen=false;
+  pageRendered=raceLayoutReady=false;
+  profileSaveFailed=false;
+  resetRenderCache();
+  resetWorkout();
+  Serial.println("PROFILE: users");
+}
+
+void requestProfileSwitch() {
+  if(!navigation.requestSwitch(metrics.started,metrics.paused))return;
+  if(navigation.page==startup::Page::Users)clearActiveProfile();
+  else Serial.println("PROFILE: confirm switch");
+}
+
+bool profileSwitchAvailable() {return !metrics.started || metrics.paused;}
+
+void selectStartupOption(uint8_t index) {
+  using startup::Page;
+  if(navigation.page==Page::Users && navigation.selectUser(index)) {
+    userRecords.select(navigation.user);
+    resetWorkout();
+    Serial.printf("PROFILE: user=%u best=%lu/%lu/%lu wins=%lu/%lu/%lu\n",
+                  navigation.user,(unsigned long)personalBestMs[0],
+                  (unsigned long)personalBestMs[1],(unsigned long)personalBestMs[2],
+                  (unsigned long)ghostWins[0],(unsigned long)ghostWins[1],
+                  (unsigned long)ghostWins[2]);
+  } else if(navigation.page==Page::Modes) {
+    const auto choice=static_cast<startup::Choice>(index);
+    if(choice==startup::Choice::Back) {
+      navigation.showUsers();
+      clearActiveProfile();
+    } else if(navigation.begin(choice)) {
+      resetWorkoutClock();
+      trendLastMs=millis();
+      if(choice==startup::Choice::Ghost) {
+        activeMode=Mode::Race;
+        openRaceMenu();
+      }
+      Serial.printf("PROFILE: workout user=%u mode=%s\n",navigation.user,
+                    choice==startup::Choice::Ghost?"ghost":"training");
+    }
+  } else if(navigation.page==Page::ConfirmSwitch) {
+    navigation.finishSwitch(index==1,metrics.paused);
+    if(navigation.page==Page::Users)clearActiveProfile();
+    else raceLayoutReady=false;
+  }
+}
+
 void updateButton(uint32_t now) {
   const bool down = digitalRead(BUTTONSPIN) == LOW;
   if (down != rawButtonDown) { rawButtonDown=down; buttonChangedMs=now; }
@@ -689,11 +696,16 @@ void updateButton(uint32_t now) {
     buttonDown=down;
     if (down) { buttonPressedMs=now; longPressDone=false; }
     else if (!longPressDone) {
-      if (activeMode == Mode::Dashboard) {
+      if(navigation.page!=startup::Page::Workout) {
+        navigation.next();
+      } else if (activeMode == Mode::Dashboard) {
         toggleMode();
         Serial.println("GHOST: entered menu using single BOOT click");
-      } else if (ghostPhase() == ghostrace::Phase::Idle)
-        selectedDistance=(selectedDistance+1)%3;
+      } else if (ghostPhase() == ghostrace::Phase::Idle) {
+        const uint8_t count=ghostrace::kDistanceCount+(profileSwitchAvailable()?1:0);
+        raceMenuFocus=(raceMenuFocus+1)%count;
+        if(raceMenuFocus<ghostrace::kDistanceCount)selectedDistance=raceMenuFocus;
+      }
       else if (ghostPhase() == ghostrace::Phase::Finished ||
                ghostPhase() == ghostrace::Phase::Cancelled) openRaceMenu();
       else openRaceMenu();
@@ -701,10 +713,16 @@ void updateButton(uint32_t now) {
   }
   if (buttonDown && !longPressDone && now-buttonPressedMs>=1500) {
     longPressDone=true;
-    if (activeMode == Mode::Dashboard) {
+    if(navigation.page!=startup::Page::Workout) {
+      if(navigation.options())selectStartupOption(navigation.focus);
+    } else if (activeMode == Mode::Dashboard) {
       resetWorkout();
     }
     else if (ghostPhase() == ghostrace::Phase::Idle) {
+      if(raceMenuFocus==ghostrace::kDistanceCount) {
+        requestProfileSwitch();
+        return;
+      }
       Serial.printf("GHOST: BOOT long start %u m\n",
                     (unsigned)raceDistances[selectedDistance]);
       startRace(selectedDistance);
@@ -815,6 +833,18 @@ bool calibrateRaceTouch() {
   return true;
 }
 void touchTap(int16_t rx,int16_t ry) {
+  if(navigation.page!=startup::Page::Workout) {
+    int16_t x,y;
+    if(!mappedTouch(rx,ry,x,y))return;
+    for(uint8_t i=0;i<navigation.options();++i) {
+      if(startup::tile(navigation.page,i).contains(x,y)) {
+        if(buttonDown || rawButtonDown)longPressDone=true;
+        selectStartupOption(i);
+        return;
+      }
+    }
+    return;
+  }
   if(calibrationScreen) {
     int16_t x,y;
     if(!mappedTouch(rx,ry,x,y)) return;
@@ -877,6 +907,11 @@ void touchTap(int16_t rx,int16_t ry) {
     return;
   }
   if(ghostPhase()!=ghostrace::Phase::Idle)return;
+  if(y>=191 && y<234 && x>=202 && x<310 && calibrated && displayedProfileAction) {
+    if(buttonDown || rawButtonDown)longPressDone=true;
+    requestProfileSwitch();
+    return;
+  }
   if(y<25 || y>=190) {exitGhostTraining();return;}
   // Touch-only recalibration control in the Ghost menu. Restart safely so
   // the three-point wizard runs before starting BLE/FTMS, as in UBox.
@@ -899,6 +934,7 @@ void touchTap(int16_t rx,int16_t ry) {
   else if(y>=140 && y<185) {Serial.println("GHOST: SELECT 10000");startRace(2);}
 }
 void updateTouch(uint32_t now) {
+  static startup::Page pressedPage=startup::Page::Welcome;
   if(!touchReady || (uint32_t)(now-touchLastPollMs)<20)return;
   touchLastPollMs=now;
   // Read fresh ADC pressure; the IRQ is diagnostic, not a contact latch.
@@ -924,6 +960,12 @@ void updateTouch(uint32_t now) {
     // Exactly one command per complete physical contact and a release
     // rearm barrier. The next contact cannot be born from the swipe tail.
     touchLastCompletedMs=now;
+    if(pressedPage!=navigation.page)return;
+    if(navigation.page!=startup::Page::Workout) {
+      if(!swipe && duration<=1100 && max(abs(dx),abs(dy))<490)
+        touchTap(rawEndX,rawEndY);
+      return;
+    }
     if(swipe && !calibrationScreen) {
       ++touchSwipeEvents;
       Serial.printf("GHOST: RELEASE SWIPE #%lu raw=%d,%d mode=%d\n",
@@ -947,6 +989,7 @@ void updateTouch(uint32_t now) {
        (uint32_t)(now-touchLastCompletedMs)<TOUCH_REARM_MS)return;
     touchedLast=true;touchReleasedSamples=0;
     touchPressedAt=now;
+    pressedPage=navigation.page;
     rawStartX=rawEndX=pt.x;rawStartY=rawEndY=pt.y;
     ++touchEvents;
     Serial.printf("TOUCH: DOWN #%lu raw=%d,%d z=%d irq=%d\n",
@@ -1336,6 +1379,109 @@ void raceActionButton(int x,int y,int w,int h,const char *label) {
   tft.setTextColor(whiteColor,panelColor);
   tft.drawCentreString(label,x+w/2,y+(h-16)/2,2);
 }
+
+// The built-in fonts are ASCII. Add the Polish marks to the new labels
+// using the same font metrics, without loading glyph tables into flash.
+struct PolishMark { uint8_t at; char form; };
+void startupLabel(const char *ascii,int x,int y,uint16_t ink,uint16_t paper,
+                  std::initializer_list<PolishMark> marks={}) {
+  tft.setTextColor(ink,paper);
+  tft.drawCentreString(ascii,x,y,2);
+  const int left=x-tft.textWidth(ascii,2)/2;
+  for(const auto &mark:marks) {
+    char prefix[32];
+    memcpy(prefix,ascii,mark.at);
+    prefix[mark.at]='\0';
+    const int gx=left+tft.textWidth(prefix,2);
+    if(mark.form=='/')tft.drawLine(gx,y+12,gx+7,y+6,ink);
+    else if(mark.form==',') {
+      tft.drawLine(gx+6,y+13,gx+4,y+15,ink);
+      tft.drawFastHLine(gx+4,y+15,2,ink);
+    } else if(mark.form=='.')tft.fillRect(gx+3,y,2,2,ink);
+    else tft.drawLine(gx+3,y+2,gx+5,y,ink);
+  }
+}
+
+void renderStartup(uint32_t now) {
+  using startup::Page;
+  static Page painted=Page::Workout;
+  static uint8_t focusPainted=255,fadePainted=255;
+  const Page page=navigation.page;
+  const bool changed=painted!=page;
+  painted=page;
+  if(page==Page::Workout)return;
+  if(changed) {
+    tft.fillScreen(backgroundColor);
+    tft.setTextDatum(TL_DATUM);
+    focusPainted=fadePainted=255;
+    if(page==Page::Welcome) {
+      // Hull, wake and a diagonal oar, drawn once in the app palette.
+      tft.fillTriangle(107,89,213,89,182,100,speedColor);
+      tft.fillTriangle(107,89,153,100,182,100,speedColor);
+      tft.drawFastHLine(111,108,67,gridColor);
+      tft.drawFastHLine(146,113,62,gridColor);
+      tft.drawLine(147,58,175,94,whiteColor);
+      tft.drawLine(148,58,176,94,whiteColor);
+      tft.fillTriangle(171,87,183,92,185,101,whiteColor);
+      tft.setTextColor(labelColor,backgroundColor);
+      tft.drawCentreString(FIRMWARE_VERSION,160,211,2);
+      Serial.println("PROFILE: welcome");
+    } else if(page==Page::Users) {
+      startupLabel("KTO DZIS WIOSLUJE?",160,18,whiteColor,backgroundColor,{{7,'\''},{13,'/'}});
+      Serial.println("PROFILE: choose user");
+    } else if(page==Page::Modes) {
+      char userLabel[]="UZYTKOWNIK 1";
+      userLabel[11]='0'+navigation.user;
+      startupLabel(userLabel,160,10,speedColor,backgroundColor,{{1,'.'}});
+      startupLabel("WYBIERZ TRYB",160,31,whiteColor,backgroundColor);
+    } else {
+      startupLabel("ZAKONCZ TRENING?",160,13,whiteColor,backgroundColor,{{4,'\''}});
+      startupLabel(profileSaveFailed?"BLAD ZAPISU REKORDU":"ZAPISANE REKORDY POZOSTANA",
+                   160,31,profileSaveFailed?heartColor:labelColor,backgroundColor,
+                   profileSaveFailed?std::initializer_list<PolishMark>{{1,'/'},{2,','}}:
+                                     std::initializer_list<PolishMark>{{25,','}});
+    }
+    if(page!=Page::Welcome) {
+      startupLabel(page==Page::Modes && profileReadFailed?"BLAD ODCZYTU REKORDOW":
+                   "BOOT: KROTKO / PRZYTRZYMAJ",160,221,labelColor,backgroundColor);
+    }
+  }
+  if(page==Page::Welcome) {
+    const uint8_t fade=min(10UL,(unsigned long)(now-welcomeStartedMs)/44UL);
+    if(fade==fadePainted)return;
+    fadePainted=fade;
+    tft.setTextSize(2);
+    tft.setTextColor(tft.color565(7+24*fade,13+24*fade,23+23*fade),backgroundColor);
+    tft.drawCentreString("ArduRower",160,121,4);
+    tft.setTextSize(1);
+    return;
+  }
+  if(focusPainted==navigation.focus)return;
+  for(uint8_t i=0;i<navigation.options();++i) {
+    const auto box=startup::tile(page,i);
+    const bool focused=i==navigation.focus;
+    if(!changed && !focused && i!=focusPainted)continue;
+    const uint16_t fill=focused?tft.color565(19,48,54):panelColor;
+    tft.fillRoundRect(box.x,box.y,box.w,box.h,9,fill);
+    tft.drawRoundRect(box.x,box.y,box.w,box.h,9,focused?speedColor:gridColor);
+    const int x=box.x+box.w/2,y=box.y+(box.h-16)/2;
+    if(page==Page::Users) {
+      char number[]={static_cast<char>('1'+i),0};
+      tft.setTextSize(2);
+      tft.setTextColor(focused?speedColor:whiteColor,fill);
+      tft.drawCentreString(number,x,box.y+11,4);
+      tft.setTextSize(1);
+    } else if(page==Page::Modes) {
+      if(i==0)startupLabel("TRENING",x,y,whiteColor,fill);
+      if(i==1)startupLabel("WYSCIG Z DUCHEM",x,y,whiteColor,fill,{{2,'\''}});
+      if(i==2)startupLabel("< WROC",x,y,labelColor,fill,{{4,'\''},{5,'\''}});
+    } else {
+      if(i==0)startupLabel("WROC DO TRENINGU",x,y,whiteColor,fill,{{2,'\''},{3,'\''}});
+      if(i==1)startupLabel("ZMIEN UZYTKOWNIKA",x,y,whiteColor,fill,{{4,'\''},{7,'.'}});
+    }
+  }
+  focusPainted=navigation.focus;
+}
 void drawVictoryCup() {
   const uint16_t gold=tft.color565(255,194,45);
   const int x=54,y=63;
@@ -1372,7 +1518,13 @@ void paintRaceLayout(uint8_t screen) {
                              "BRAK REKORDU";
       tft.drawRightString(pb,297,yy+12,2);
     }
-    raceActionButton(10,191,300,43,"ZWYKLY TRENING - WYJDZ");
+    displayedProfileAction=profileSwitchAvailable();
+    if(displayedProfileAction) {
+      raceActionButton(10,191,188,43,"ZWYKLY TRENING");
+      raceActionButton(202,191,108,43,"ZMIEN UZYTK.");
+    } else {
+      raceActionButton(10,191,300,43,"ZWYKLY TRENING - WYJDZ");
+    }
   } else if(screen==3) {
     raceActionButton(10,40,300,53,"KONTYNUUJ Z DUCHEM");
     raceActionButton(10,105,300,53,"ZMIEN DYSTANS");
@@ -1443,13 +1595,19 @@ void paintRaceLayout(uint8_t screen) {
 }
 void drawRaceSelection() {
   // BOOT short press can select without a calibrated touch screen.
-  if(lastRaceSelection==selectedDistance)return;
+  if(!profileSwitchAvailable() && raceMenuFocus==ghostrace::kDistanceCount)raceMenuFocus=selectedDistance;
+  if(lastRaceSelection==raceMenuFocus)return;
   for(int i=0;i<3;i++){
     const int yy=50+i*45;
-    tft.drawRoundRect(10,yy,300,41,8,i==selectedDistance?speedColor:gridColor);
-    tft.drawRoundRect(11,yy+1,298,39,7,i==selectedDistance?speedColor:panelColor);
+    tft.drawRoundRect(10,yy,300,41,8,i==raceMenuFocus?speedColor:gridColor);
+    tft.drawRoundRect(11,yy+1,298,39,7,i==raceMenuFocus?speedColor:panelColor);
   }
-  lastRaceSelection=selectedDistance;
+  if(displayedProfileAction) {
+    const bool focused=raceMenuFocus==ghostrace::kDistanceCount;
+    tft.drawRoundRect(202,191,108,43,6,focused?speedColor:gridColor);
+    tft.drawRoundRect(203,192,106,41,5,focused?speedColor:panelColor);
+  }
+  lastRaceSelection=raceMenuFocus;
 }
 void paintProgress(int y, float value, uint16_t fillInk) {
   const int x=16,w=288,h=13;
@@ -1471,7 +1629,8 @@ void paintProgress(int y, float value, uint16_t fillInk) {
 }
 void renderRaceUI() {
   const uint8_t screen=desiredRaceScreen();
-  if(!raceLayoutReady||displayedRaceScreen!=screen)
+  if(!raceLayoutReady || displayedRaceScreen!=screen ||
+     (screen==0 && displayedProfileAction!=profileSwitchAvailable()))
     paintRaceLayout(screen);
   if(screen==0) {
     drawRaceSelection();
@@ -1547,24 +1706,13 @@ void initDisplay() {
   heartColor = tft.color565(250, 91, 108);
   labelColor = tft.color565(145, 160, 175);
   whiteColor = TFT_WHITE;
-  tft.fillScreen(backgroundColor);
-  tft.setTextColor(whiteColor, backgroundColor);
-  tft.drawString("ArduRower CYD", 16, 20, 4);
-  tft.drawString("TFT " + String(tft.width()) + "x" + String(tft.height()), 16, 70, 2);
-  tft.drawString("BL GPIO " + String(BACKLIGHT_PIN), 16, 93, 2);
-#if defined(ST7789_DRIVER)
-  tft.drawString("LCD: ST7789", 16, 116, 2);
-#else
-  tft.drawString("LCD: ILI9341", 16, 116, 2);
-#endif
-  tft.drawString(String("FW ") + FIRMWARE_VERSION, 16, 146, 4);
   Serial.printf("CYD LCD: %ux%u, backlight GPIO%d\n",
                 (unsigned)tft.width(), (unsigned)tft.height(), BACKLIGHT_PIN);
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nArduRower CYD v0.09.36 | reset reason=%d | heap=%u\n",
+  Serial.printf("\nArduRower CYD v0.09.37 | reset reason=%d | heap=%u\n",
                 (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
   pinMode(ROWERINPUT, INPUT_PULLUP);
   pinMode(BUTTONSPIN, INPUT_PULLUP);
@@ -1602,8 +1750,7 @@ void setup() {
   }
   Serial.printf("UI sprite: %s, depth %d, heap %u\n", scratchReady?"OK":"fallback",
                 scratch.getColorDepth(), (unsigned)ESP.getFreeHeap());
-  resetWorkout();
-  loadBestTimes();
+  resetWorkoutClock();
   diagnosticReed.reset(micros(),digitalRead(ROWERINPUT)!=LOW);
   attachInterrupt(digitalPinToInterrupt(ROWERINPUT), rowerdebounceinterrupt, CHANGE);
   // Experimental second BLE identity. Keep PUBLIC FTMS unaffected on low heap.
@@ -1617,7 +1764,8 @@ void setup() {
   Serial.printf("HR client %s; heap %u, state=%s\n",
                 hrTaskCreated?"enabled":"not started",
                 (unsigned)beforeHr,hrStatus(hrState));
-  updateUI();
+  welcomeStartedMs=millis();
+  renderStartup(welcomeStartedMs);
 }
 void processReedPulse(const cydreed::Pulse &pulse,bool pulseTrace) {
   if(reedTracing && reedTraceWaiting) {
@@ -1631,6 +1779,7 @@ void processReedPulse(const cydreed::Pulse &pulse,bool pulseTrace) {
         (unsigned long)pulse.highUs,(unsigned long)pulse.gapUs);
     reedTrace.line(line,n);
   }
+  if(!navigation.measuring())return;
   if(!metrics.paused)metrics.tick(pulse.timeUs);
   if(metrics.paused) {
     const uint32_t *confirmed=pauseResume.confirm(pulse.timeUs);
@@ -1696,7 +1845,7 @@ void loop() {
         reedTracing=true;
         reedTraceWaiting=true;
         reedTraceStarted=millis();
-        static const char heading[]="REEDTRACE unified contact filter; version=0.09.36\n";
+        static const char heading[]="REEDTRACE unified contact filter; version=0.09.37\n";
         reedTrace.line(heading,sizeof(heading)-1);
       } else if(strcmp(usbCommand,"hrfirst")==0) {
         Preferences p;
@@ -1835,6 +1984,11 @@ void loop() {
   updateRaceTracking(now); // always, before any UI action can reset the session
   updateButton(now);
   updateTouch(now);
+  if(navigation.page==startup::Page::ConfirmSwitch && !metrics.paused) {
+    navigation.finishSwitch(false,false);
+    raceLayoutReady=false;
+  }
+  navigation.tick(now-welcomeStartedMs);
   // Calibration always runs before BLE on boot; never block FTMS here.
   if(pendingCalibration)pendingCalibration=false;
   if(activeMode==Mode::Race &&
@@ -1872,15 +2026,16 @@ void loop() {
     setCxRowerData();
     ++ftmsNotifications;
   }
-  if(!metrics.paused && now-trendLastMs>=TREND_SAMPLE_MS) {
+  if(navigation.measuring() && !metrics.paused && now-trendLastMs>=TREND_SAMPLE_MS) {
     trendLastMs=now;
     recordTrend(now);
   }
-  if (!metrics.paused && now - lastHistoryMs >= HISTORY_INTERVAL_MS) {
+  if (navigation.measuring() && !metrics.paused && now - lastHistoryMs >= HISTORY_INTERVAL_MS) {
     lastHistoryMs = now;
     recordHistory();
   }
-  if (now - lastDisplayMs >= DISPLAY_INTERVAL_MS) {
+  renderStartup(now);
+  if (navigation.page==startup::Page::Workout && now - lastDisplayMs >= DISPLAY_INTERVAL_MS) {
     lastDisplayMs = now;
     updateUI();
   }

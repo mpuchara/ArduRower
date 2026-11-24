@@ -44,7 +44,7 @@ jobs:
           python3 tests/cyd_ghost_navigation_test.py
           for source in tests/*_test.cpp; do
             executable="/tmp/$(basename "$source" .cpp)"
-            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I ArduRower "$source" -o "$executable"
+            g++ -std=c++11 -Wall -Wextra -Werror -I tests/touch_stubs -I tests/nvs_stubs -I ArduRower "$source" -o "$executable"
             "$executable"
           done
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/replay_reed.cpp -o /tmp/replay_reed
@@ -86,7 +86,7 @@ jobs:
           assert build["chipFamily"] == "ESP32"
           assert manifest["new_install_prompt_erase"] is False
           version = json.loads((base / "version.json").read_text())
-          assert version["version"].startswith("0.09.36-ghost-milestones-")
+          assert version["version"].startswith("0.09.37-user-profiles-")
           assert len(version["revision"]) == 12
           assert manifest["version"] == version["version"]
           parts = build["parts"]
@@ -103,6 +103,9 @@ jobs:
               if begin in (0x1000, 0x10000):
                   with bin_file.open("rb") as f:
                       assert f.read(1) == b'\xe9', "Invalid ESP32 image magic"
+              if begin == 0x10000:
+                  firmware_version = version["version"].split("-", 1)[0]
+                  assert f"ArduRower CYD v{firmware_version} |".encode() in bin_file.read_bytes()
           print("PASS: ESP Web Tools segments preserve NVS/ghost best records")
           PY
 
