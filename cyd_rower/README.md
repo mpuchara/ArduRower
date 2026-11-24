@@ -14,7 +14,7 @@ Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO t
 1. Po ekranie powitalnym wybierz profil od **1** do **4**. Urządzenie pyta o profil przy każdym uruchomieniu.
 2. Wybierz **Trening** albo **Wyścig z duchem**. Z menu trybu można wrócić do wyboru profilu.
 3. Aby zmienić profil po rozpoczęciu sesji, odczekaj do auto pauzy, otwórz wybór dystansu i dotknij **Zmień użytk.**. Potwierdź zakończenie sesji. Wznowienie wiosłowania w oknie potwierdzenia przywraca sesję.
-4. Bez dotyku krótkie naciśnięcie **BOOT** przesuwa zaznaczenie, a przytrzymanie **1,5 s** wybiera pozycję. Aby zakończyć sesję przyciskiem, wróć do zwykłego treningu i użyj dotychczasowego przytrzymania BOOT zerującego trening. Z pustego pulpitu krótko naciśnij BOOT, przejdź w menu dystansów na **Zmień użytk.** i przytrzymaj BOOT.
+4. Bez dotyku krótkie naciśnięcie **BOOT** przesuwa zaznaczenie, a przytrzymanie **1,5 s** wybiera pozycję. Na pauzie otwórz menu dystansów krótkim naciśnięciem BOOT, przejdź na **Zmień użytk.** i przytrzymaj BOOT. W oknie potwierdzenia użyj tej samej obsługi do wyboru i zatwierdzenia zakończenia sesji.
 
 Profil 1 używa istniejącej przestrzeni NVS `rower-races`. Profile 2–4 używają osobnych przestrzeni `rower-u2`, `rower-u3` i `rower-u4`. Dotychczasowe klucze i dane zachowują swój format. Gdy NVS zgłasza błąd lub brakuje miejsca, nieudany zapis jest widoczny w diagnostyce USB, wyniku wyścigu lub potwierdzeniu zmiany profilu. Próbki tętna są powiązane z sumą kontrolną odpowiadającego im przejazdu.
 

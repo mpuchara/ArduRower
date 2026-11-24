@@ -655,6 +655,8 @@ void requestProfileSwitch() {
   else Serial.println("PROFILE: confirm switch");
 }
 
+bool profileSwitchAvailable() {return !metrics.started || metrics.paused;}
+
 void selectStartupOption(uint8_t index) {
   using startup::Page;
   if(navigation.page==Page::Users && navigation.selectUser(index)) {
@@ -700,7 +702,7 @@ void updateButton(uint32_t now) {
         toggleMode();
         Serial.println("GHOST: entered menu using single BOOT click");
       } else if (ghostPhase() == ghostrace::Phase::Idle) {
-        const uint8_t count=metrics.started?ghostrace::kDistanceCount:ghostrace::kDistanceCount+1;
+        const uint8_t count=ghostrace::kDistanceCount+(profileSwitchAvailable()?1:0);
         raceMenuFocus=(raceMenuFocus+1)%count;
         if(raceMenuFocus<ghostrace::kDistanceCount)selectedDistance=raceMenuFocus;
       }
@@ -717,7 +719,7 @@ void updateButton(uint32_t now) {
       resetWorkout();
     }
     else if (ghostPhase() == ghostrace::Phase::Idle) {
-      if(!metrics.started && raceMenuFocus==ghostrace::kDistanceCount) {
+      if(raceMenuFocus==ghostrace::kDistanceCount) {
         requestProfileSwitch();
         return;
       }
@@ -1516,7 +1518,7 @@ void paintRaceLayout(uint8_t screen) {
                              "BRAK REKORDU";
       tft.drawRightString(pb,297,yy+12,2);
     }
-    displayedProfileAction=!metrics.started || metrics.paused;
+    displayedProfileAction=profileSwitchAvailable();
     if(displayedProfileAction) {
       raceActionButton(10,191,188,43,"ZWYKLY TRENING");
       raceActionButton(202,191,108,43,"ZMIEN UZYTK.");
@@ -1593,7 +1595,7 @@ void paintRaceLayout(uint8_t screen) {
 }
 void drawRaceSelection() {
   // BOOT short press can select without a calibrated touch screen.
-  if(metrics.started && raceMenuFocus==ghostrace::kDistanceCount)raceMenuFocus=selectedDistance;
+  if(!profileSwitchAvailable() && raceMenuFocus==ghostrace::kDistanceCount)raceMenuFocus=selectedDistance;
   if(lastRaceSelection==raceMenuFocus)return;
   for(int i=0;i<3;i++){
     const int yy=50+i*45;
@@ -1628,7 +1630,7 @@ void paintProgress(int y, float value, uint16_t fillInk) {
 void renderRaceUI() {
   const uint8_t screen=desiredRaceScreen();
   if(!raceLayoutReady || displayedRaceScreen!=screen ||
-     (screen==0 && displayedProfileAction!=(!metrics.started || metrics.paused)))
+     (screen==0 && displayedProfileAction!=profileSwitchAvailable()))
     paintRaceLayout(screen);
   if(screen==0) {
     drawRaceSelection();
