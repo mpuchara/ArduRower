@@ -39,6 +39,8 @@ python -m pip install -r connect_iq/tools/requirements.txt
 python connect_iq/tools/export_fit.py trening.fit trening-ardurower.fit --replace-zero-distance
 ~~~
 
+Kopia może pomijać komunikaty i pola spoza publicznego profilu Garmin FIT SDK. Narzędzie podaje liczbę pominiętych komunikatów. Zachowaj oryginalny FIT. Przy instalacji pola przez USB fēnix 6X może wpisać zerowy identyfikator aplikacji. Eksporter rozpoznaje wtedy kompletny zestaw 11 pól ArduRower według ich nazw, jednostek i typów.
+
 ## Protokół i budowanie
 
 - FTMS 1826, Rowing Data 2AD1. Dotychczasowa ramka bez mocy ma 15 bajtów. Z oboma polami mocy ma 19 bajtów i flagi 0x087E. Przy braku jednego pola mocy ramka ma 17 bajtów. Tempo jest kodowane w całych sekundach na 500 m, a moc w całych watach SINT16 little endian. [FTMS i GATT](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0-1/)

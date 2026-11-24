@@ -16,8 +16,40 @@ ROWER_FIELDS = {
     2: ("Rower cadence", "spm"), 3: ("Rower equiv power", "W"),
     4: ("Rower BLE valid", ""), 5: ("Rower strokes", "strokes"),
     6: ("Rower active time", "s"), 7: ("Rower average 500m pace", "s/500m"),
-    8: ("Rower average cadence", "spm"), 10: ("Rower avg equiv power", "W"),
+    8: ("Rower average cadence", "spm"), 9: ("Rower 500m pace", "s/500m"),
+    10: ("Rower avg equiv power", "W"),
 }
+ROWER_TYPES = {0: 0x88, 1: 0x88, 2: 0x88, 3: 0x88, 4: 2, 5: 0x84,
+               6: 0x84, 7: 0x84, 8: 0x88, 9: 0x84, 10: 0x84}
+
+
+def rower_field_keys(descriptions):
+    recognized = {}
+    anonymous = {}
+    for key, developer, description in descriptions:
+        field_id = description.get("field_definition_number")
+        signature = description.get("field_name"), description.get("units") or ""
+        if (ROWER_FIELDS.get(field_id) != signature or
+                ROWER_TYPES.get(field_id) != description.get("fit_base_type_id")):
+            continue
+        app_id = developer.get("application_id")
+        if app_id == list(APP_ID):
+            recognized[key] = field_id
+        elif app_id == [0] * len(APP_ID):
+            anonymous.setdefault(description["developer_data_index"], {})[key] = field_id
+    if recognized:
+        return recognized
+    # The USB-installed field on fēnix 6X can write an all-zero application ID.
+    # Accept only a single developer with the complete typed 0.1.7 schema.
+    complete = [fields for fields in anonymous.values()
+                if len(fields) == len(ROWER_FIELDS) and set(fields.values()) == set(ROWER_FIELDS)]
+    return complete[0] if len(complete) == 1 else {}
+
+
+def rower_values(record, keys):
+    return {keys[key]: value for key, value in record.get("developer_fields", {}).items()
+            if key in keys and isinstance(value, (int, float)) and math.isfinite(value)
+            and value >= 0 and not (ROWER_TYPES[keys[key]] == 0x84 and value == 0xffff)}
 
 
 def export_fit(source, replace_zero_distance=False):
@@ -26,16 +58,12 @@ def export_fit(source, replace_zero_distance=False):
     decoder = Decoder(Stream.from_byte_array(source))
 
     messages = []
-    rower_keys = {}
+    descriptions = []
     encoder = Encoder()
 
     def register(key, developer, description):
         encoder.add_developer_field(key, developer, description)
-        field_id = description.get("field_definition_number")
-        if (developer.get("application_id") == list(APP_ID) and
-                ROWER_FIELDS.get(field_id) ==
-                (description.get("field_name"), description.get("units") or "")):
-            rower_keys[key] = field_id
+        descriptions.append((key, developer, description))
 
     _, errors = decoder.read(
         convert_datetimes_to_dates=False, expand_components=False,
@@ -45,6 +73,7 @@ def export_fit(source, replace_zero_distance=False):
     )
     if errors:
         raise ValueError(f"Input could not be decoded: {errors[0]}")
+    rower_keys = rower_field_keys(descriptions)
     sessions = [msg for number, msg in messages if number == MESSAGE["SESSION"]]
     if len(sessions) != 1 or (
         sessions[0].get("sport") != "rowing" and sessions[0].get("sub_sport") != "indoor_rowing"
@@ -54,6 +83,10 @@ def export_fit(source, replace_zero_distance=False):
     start, end = session.get("start_time"), session.get("timestamp")
     if start is None or end is None or start > end:
         raise ValueError("Session timestamps are missing or invalid")
+    elapsed = session.get("total_elapsed_time")
+    if isinstance(elapsed, (int, float)) and math.isfinite(elapsed) and elapsed > 0:
+        # Some watches use save time as the summary timestamp.
+        end = min(end, start + math.ceil(elapsed))
 
     updates = Counter()
 
@@ -77,11 +110,8 @@ def export_fit(source, replace_zero_distance=False):
         timestamp = message.get("timestamp")
         if number != MESSAGE["RECORD"] or timestamp is None or not start <= timestamp <= end:
             continue
-        fields = {rower_keys[key]: value for key, value in
-                  message.get("developer_fields", {}).items()
-                  if key in rower_keys and isinstance(value, (int, float))
-                  and math.isfinite(value) and value >= 0}
-        if not fields or fields.get(4) == 0:
+        fields = rower_values(message, rower_keys)
+        if not fields or fields.get(4, 1) != 1:
             continue
         for counter in (0, 5, 6):
             if counter in fields:
@@ -101,14 +131,35 @@ def export_fit(source, replace_zero_distance=False):
     # A missing tail cannot establish the full workout totals. Keep the
     # watch's timer and HR summaries even when the ergometer supplies time.
     if end - last_time <= 10:
-        add(session, "total_distance", last.get(0), replace_zero_distance)
-        add(session, "total_cycles", last.get(5))
-        if last.get(7, 0) and session.get("enhanced_avg_speed") is None:
-            add(session, "avg_speed", 500 / last[7])
-        add_cadence(session, "avg_cadence", "avg_fractional_cadence", last.get(8))
-        add(session, "avg_power", last.get(10))
+        laps = [msg for number, msg in messages if number == MESSAGE["LAP"]]
+        summaries = [session]
+        if len(laps) == 1 and laps[0].get("start_time") == start:
+            summaries.append(laps[0])
+        for summary in summaries:
+            zero_distance = (replace_zero_distance and summary.get("total_distance") == 0
+                             and last.get(0, 0) > 0)
+            add(summary, "total_distance", last.get(0), replace_zero_distance)
+            add(summary, "total_cycles", last.get(5))
+            if last.get(7, 0):
+                speed = 500 / last[7]
+                if summary.get("enhanced_avg_speed") is None:
+                    add(summary, "avg_speed", speed, zero_distance)
+                elif zero_distance and not summary.get("avg_speed"):
+                    add(summary, "enhanced_avg_speed", speed, True)
+            add_cadence(summary, "avg_cadence", "avg_fractional_cadence", last.get(8))
+            add(summary, "avg_power", last.get(10))
 
     for number, message in messages:
+        if number not in Profile["messages"]:
+            updates["unsupported_messages_skipped"] += 1
+            continue
+        if "developer_fields" in message:
+            # FIT float32 missing values decode to NaN. Omit them so the
+            # SDK can write the copy without treating them as samples.
+            message["developer_fields"] = {
+                key: value for key, value in message["developer_fields"].items()
+                if not (isinstance(value, float) and not math.isfinite(value))
+            }
         encoder.on_mesg(number, message)
     output = bytes(encoder.close())
     if not Decoder(Stream.from_byte_array(output)).check_integrity():
