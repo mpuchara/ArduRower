@@ -8,7 +8,7 @@ OUT="$PWD/out"
 mkdir -p "$OUT/classes" "$OUT/dex" "$OUT/test"
 javac -source 8 -target 8 -d "$OUT/test" src/pl/ardurower/garetthr/HrPacket.java test/pl/ardurower/garetthr/HrPacketTest.java
 java -cp "$OUT/test" pl.ardurower.garetthr.HrPacketTest
-javac -source 8 -target 8 -bootclasspath "$JAR" -d "$OUT/classes" $(find src -name '*.java')
+javac --release 8 -classpath "$JAR" -d "$OUT/classes" $(find src -name '*.java')
 "$TOOLS/d8" --min-api 26 --lib "$JAR" --output "$OUT/dex" $(find "$OUT/classes" -name '*.class')
 "$TOOLS/aapt" package -f -M AndroidManifest.xml -I "$JAR" -F "$OUT/unsigned.apk"
 (cd "$OUT/dex" && zip -q "$OUT/unsigned.apk" classes.dex)
