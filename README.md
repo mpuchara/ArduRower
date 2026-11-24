@@ -1,12 +1,12 @@
 # ArduRower
 
-## ArduRower CYD 0.09.37
+## ArduRower CYD 0.09.38
 
 Po uruchomieniu wybierz jeden z czterech profili, a potem **Trening** albo **Wyścig z duchem**. Każdy profil ma własne czasy, przebiegi ducha, próbki tętna i liczniki medali. Profil 1 korzysta bezpośrednio z rekordów i medali zapisanych przed aktualizacją. Firmware jest przeznaczony dla **ESP32-2432S028, ST7789, podświetlenie GPIO21**.
 
-- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.37`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
+- **Instalacja** — [otwórz instalator w Chrome lub Edge](https://mpuchara.github.io/ArduRower/) i sprawdź oznaczenie `0.09.38`. Segmenty instalatora omijają NVS z rekordami i ustawieniami. [Instrukcja](docs/WEB_INSTALL_CYD.md).
 - **Zmiana profilu** — użyj „Wróć” w wyborze trybu lub „Zmień użytk.” w menu dystansów po zatrzymaniu treningu. Gdy sesja trwała, potwierdź jej zakończenie w czasie auto pauzy. [Sterowanie dotykiem i przyciskiem BOOT](cyd_rower/README.md#profile-i-sterowanie).
-- **Garmin** — pole **ArduRower HR 015** odbiera dane z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
+- **Garmin** — pole **ArduRower HR 017** odbiera dane, w tym moc szacunkową, z `WR S4BL3` i odsyła aktualne tętno przez to samo połączenie BLE. Oba kierunki potwierdzono w próbie 0.09.26 na fēnix 6X Pro Solar. [Instalacja pola przez USB](connect_iq/README.md).
 - **Trening z duchem** — wybierz tryb „Wyścig z duchem” lub dotknij pulpitu treningu. Dostępne dystanse to 1000, 3000 i 10000 m. Wybór jest tylko widokiem bieżącej sesji, nie zeruje treningu. Wszystkie trzy rekordy są zapisywane automatycznie po osiągnięciu dystansu od początku sesji, również bez ducha. Różnica czasu do poprzedniego rekordu na tym samym dystansie jest zielona (przewaga), żółta (remis) lub czerwona (strata), z płynnym przejściem. Po 8 sekundach bez impulsów czas i postęp wyścigu zatrzymują się. Cztery kolejne impulsy w odstępach do 350 ms wznawiają trening. Menu pozwala wrócić do zwykłego treningu, a za poprawienie rekordu jest puchar i medal. Rekordy używają tej samej skali dystansu co 0.09.34. [Zasady Ghost Race](docs/GHOST_0.09.36.md).
 - **Ekran i dotyk** — zachowano poziomą orientację z 0.09.25, obróconą o 180° względem 0.09.24, wraz z przeliczeniem starszej kalibracji. [Sprzęt, sterowanie i diagnostyka](cyd_rower/README.md).
 
@@ -66,7 +66,7 @@ Kompilacja i testy logiki na komputerze zostały wykonane. Nowa wersja nie była
 
 Urządzenie udostępnia usługę Fitness Machine Service i dane Rower Data, pod zachowaną nazwą `WR S4BL3`. Docelowym zegarkiem użytkownika jest Garmin fēnix 6 Pro Solar; samo połączenie Garmin Connect na telefonie nie potwierdza połączenia zegarka z ergometrem. Oryginalny projekt wskazuje pole Connect IQ [ArduRower-IQ](https://apps.garmin.com/en-US/apps/0e10bae1-9753-4915-b856-040d0cbdd82a) jako integrację Garmin. Zgodność aktualnego firmware z konkretną wersją pola wymaga próby na zegarku.
 
-Przesyłane pola: kadencja, licznik ruchów, średnia kadencja, dystans, tempo bieżące i średnie oraz czas aktywny. Kadencja w FTMS jest kodowana w krokach 0.5 ruchu/min. Moc BLE jest domyślnie wyłączona; `SEND_EQUIVALENT_POWER = true` włącza wartości szacunkowe. Komendy FTMS Control Point nie są zaimplementowane.
+Przesyłane pola: kadencja, licznik ruchów, średnia kadencja, dystans, tempo bieżące i średnie oraz czas aktywny. Kadencja w FTMS jest kodowana w krokach 0.5 ruchu/min. W CYD 0.09.38 FTMS wysyła też chwilową i średnią moc szacunkową. Historyczny wariant Heltec zachowuje dotychczasowe ustawienie mocy. Komendy FTMS Control Point nie są zaimplementowane.
 
 ## Kalibracja i granice pomiaru
 

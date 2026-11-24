@@ -1,4 +1,4 @@
-# ArduRower CYD 0.09.37
+# ArduRower CYD 0.09.38
 
 Firmware dla ESP32-2432S028 z dotykowym TFT 320×240. Jedyny profil PlatformIO to `esp32-2432s028-st7789-gpio21`. Wariant Heltec OLED jest w [ArduRower](../ArduRower).
 
@@ -24,7 +24,7 @@ Tryb **Trening** otwiera pulpit z tempem /500 m. Dotknij pulpitu lub przesuń pa
 
 Filtr potwierdza zamknięcie i otwarcie kontaktronu, a detektor wnioskuje o pełnym cyklu z obwiedni odstępów między przejściami czterech magnesów. [Diagnostyka reedtrace i testy 0.09.35](../docs/REED_CYCLE_0.09.35.md). Jeden kontaktron nie mierzy kierunku bezpośrednio. Prędkość zachowuje większą bezwładność między pociągnięciami. Dystans rośnie wraz z przyjętymi impulsami, a wygładzona częstotliwość tych samych impulsów wyznacza prędkość i chwilowe tempo FTMS. Moc i dystans są estymowane. [Model pomiaru i kalibracja](../docs/FAST_REED_0.09.28.md). Wspólny wykres pokazuje ostatnie 10 minut ze skalami dopasowanymi do widocznych próbek użytkownika i ducha. [Model, zmiany i testy](../docs/MOTION_TRENDS_0.09.26.md).
 
-Na Garminie dodaj pole **ArduRower HR 015**. Odbiera dystans, tempo i kadencję przez FTMS z `WR S4BL3`, a przez to samo połączenie odsyła tętno. [Instalacja pola](../connect_iq/README.md).
+Na Garminie dodaj pole **ArduRower HR 017**. Odbiera dystans, tempo, kadencję i moc szacunkową przez FTMS z `WR S4BL3`, a przez to samo połączenie odsyła tętno. [Instalacja pola](../connect_iq/README.md).
 
 ## Budowanie i instalacja
 

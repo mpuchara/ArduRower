@@ -5,3 +5,5 @@ build/
 *.map
 metrics_test
 metrics_test.exe
+connect_iq/bin/
+__pycache__/

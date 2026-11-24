@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "cyd_rower/**"
+      - "connect_iq/**"
       - "ArduRower/RowerMetrics.h"
       - "ArduRower/ArduRower.ino"
       - "tests/**"
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - "cyd_rower/**"
+      - "connect_iq/**"
       - "ArduRower/RowerMetrics.h"
       - "ArduRower/ArduRower.ino"
       - "tests/**"
@@ -25,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Assert Connect IQ / FTMS compatibility
-        run: python3 tests/cyd_ble_contract_test.py
+        run: |
+          python3 tests/cyd_ble_contract_test.py
+          python3 tests/garmin_telemetry_test.py
       - name: Assert flicker-free renderer and single LCD profile
         run: python3 tests/cyd_display_refresh_test.py
       - name: Check all Ghost Race text indices are within UI cache bounds
@@ -46,6 +50,20 @@ jobs:
           done
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/replay_reed.cpp -o /tmp/replay_reed
           python3 tests/reed_replay_regression.py /tmp/replay_reed
+
+  fit-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test FIT export round trip
+        env:
+          PYTHONPATH: connect_iq/tools
+        run: |
+          python -m pip install -r connect_iq/tools/requirements.txt
+          python connect_iq/tests/test_export_fit.py
 
   build-cyd:
     runs-on: ubuntu-latest

@@ -49,21 +49,23 @@ for symbol in (
     assert lhs and rhs and lhs.group(1).strip() == rhs.group(1).strip(), symbol
 
 assert "const bool SEND_EQUIVALENT_POWER = false" in OLD
-assert "SEND_EQUIVALENT_POWER = false" in CYD
+assert "SEND_EQUIVALENT_POWER = true" in CYD
 assert "../../ArduRower/RowerMetrics.h" in CYD
 
-# Preserve each wire field. Only the source of instantaneous pace changes.
-# Differences after setValue() are limited to the Battery Service (CYD has no
-# Heltec battery ADC; GPIO33 is touch CS).
-end_marker = "pDtCharacteristic->setValue(data, offset)"
-old_encoder = method(OLD, "setCxRowerData").split(end_marker)[0]
-new_encoder = method(CYD, "setCxRowerData").split(end_marker)[0]
-pace_field = "put16(data, offset, pace > 0 ? bounded16(pace) : 0xffff);"
-assert "const float pace=reportedPace();" in new_encoder and pace_field in new_encoder
-new_encoder = new_encoder.replace("const float pace=reportedPace();", "").replace(
-    pace_field, "put16(data, offset, metrics.pace() > 0 ? bounded16(metrics.pace()) : 0xffff);"
-)
-assert normalize(old_encoder) == normalize(new_encoder), "Rowing Data payload changed"
+# The C++ fixture validates the production encoder byte-for-byte. Verify that
+# the real GATT path still uses the same metrics, transport and model.
+old_encoder = method(OLD, "setCxRowerData")
+new_encoder = method(CYD, "setCxRowerData")
+assert "0x087e : 0x081e" in old_encoder
+assert "ftmsrower::encode(sample,SEND_EQUIVALENT_POWER,data)" in new_encoder
+assert "ftmsrower::featureByte1(SEND_EQUIVALENT_POWER)" in CYD
+for measure in ("metrics.strokeRate", "metrics.strokes", "metrics.averageStrokeRate()",
+                "metrics.distance()", "reportedPace()", "metrics.averagePace()",
+                "metrics.equivalentPower()", "metrics.averageEquivalentPower()", "metrics.seconds()"):
+    assert measure in new_encoder, measure
+assert "pDtCharacteristic->setValue(data, offset)" in new_encoder
+assert "ble_gatts_notify_custom(hrFtmsHandle,ftmsValueHandle,packet)" in new_encoder
+assert "pDtCharacteristic->notify()" in new_encoder
 assert "500.0f / motion.speed" in method(CYD, "reportedPace")
 assert "formatPace(reportedPace())" in CYD
 

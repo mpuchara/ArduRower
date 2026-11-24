@@ -1,1 +1,25 @@
-<resources><string id="AppName">ArduRower HR 015</string></resources>
+<resources>
+    <string id="AppName">ArduRower HR 017</string>
+    <string id="FitLabel0">Dystans ArduRower</string>
+    <string id="FitUnit0">m</string>
+    <string id="FitLabel1">Prędkość ArduRower</string>
+    <string id="FitUnit1">m/s</string>
+    <string id="FitLabel2">Kadencja ArduRower</string>
+    <string id="FitUnit2">spm</string>
+    <string id="FitLabel3">Moc szacunkowa ArduRower</string>
+    <string id="FitUnit3">W</string>
+    <string id="FitLabel4">Łącze ArduRower</string>
+    <string id="FitUnit4">0/1</string>
+    <string id="FitLabel5">Ruchy ArduRower</string>
+    <string id="FitUnit5">strokes</string>
+    <string id="FitLabel6">Czas aktywny ArduRower</string>
+    <string id="FitUnit6">s</string>
+    <string id="FitLabel7">Średnie tempo ArduRower</string>
+    <string id="FitUnit7">s/500m</string>
+    <string id="FitLabel8">Średnia kadencja ArduRower</string>
+    <string id="FitUnit8">spm</string>
+    <string id="FitLabel9">Tempo ArduRower</string>
+    <string id="FitUnit9">s/500m</string>
+    <string id="FitLabel10">Średnia moc szacunkowa ArduRower</string>
+    <string id="FitUnit10">W</string>
+</resources>
