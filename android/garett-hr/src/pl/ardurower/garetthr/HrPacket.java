@@ -6,6 +6,22 @@ final class HrPacket {
     static boolean fresh(int bpm, long sampleMs, long nowMs) {
         return validBpm(bpm) && sampleMs >= 0 && nowMs >= sampleMs && nowMs-sampleMs <= 6500;
     }
+    static String hex(float value){return String.format(java.util.Locale.US,"%08X",Float.floatToRawIntBits(value));}
+    static String bytes(float value){
+        int bits=Float.floatToRawIntBits(value);
+        return ((bits>>>24)&255)+" / "+((bits>>>16)&255)+" / "+((bits>>>8)&255)+" / "+(bits&255);
+    }
+    // Observed Garett layout hypothesis: [oxygen-like, HR-like, upper, lower].
+    // Only recognize the observed structured range, never reinterpret ordinary
+    // BPM, no-contact events or arbitrary invalid floats. User confirmation
+    // is required separately before any candidate is transmitted.
+    static int packedBpm(float value,int accuracy){
+        if(accuracy<=0||!Float.isFinite(value)||plausible(value)||value<1e12f)return 0;
+        int bits=Float.floatToRawIntBits(value);
+        int a=(bits>>>24)&255,b=(bits>>>16)&255,c=(bits>>>8)&255,d=bits&255;
+        if(a<70||a>100||!validBpm(b)||c<80||c>220||d<35||d>140||c<=d)return 0;
+        return b;
+    }
     static boolean plausible(float value){return Float.isFinite(value)&&value>=35&&value<=240;}
     static boolean usable(float value,int accuracy){return accuracy>0&&plausible(value);}
     static long sampleTimeWithUptime(long stamp,long elapsed,long uptime,long registeredAt){

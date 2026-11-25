@@ -12,6 +12,8 @@ public final class HrPacketTest {
         if(HrPacket.sampleTime(0,10000,9000)!=10000||HrPacket.sampleTime(50000,10000,9000)!=10000||HrPacket.sampleTime(1000,10000,9000)!=-1||HrPacket.sampleTime(9500,10000,9000)!=9500)throw new AssertionError("timestamp");
         if(HrPacket.sampleTimeWithUptime(99000,200000,100000,198000)!=199000||HrPacket.sampleTimeWithUptime(1000,200000,100000,198000)!=-1||HrPacket.sampleTimeWithUptime(199000,200000,100000,198000)!=199000)throw new AssertionError("uptime");
         if(!HrPacket.plausible(85)||HrPacket.usable(85,0)||HrPacket.usable(85,-1))throw new AssertionError("raw must not be transmitted as reliable");
+        if(HrPacket.packedBpm(9.753404e20f,2)!=83||HrPacket.packedBpm(2.4268218e20f,2)!=82||HrPacket.packedBpm(83f,2)!=0||HrPacket.packedBpm(9.753404e20f,0)!=0||HrPacket.packedBpm(Float.NaN,2)!=0||HrPacket.packedBpm(1e30f,2)!=0)throw new AssertionError("Garett packed samples");
+        if(!HrPacket.hex(9.753404e20f).equals("62537E45")||!HrPacket.bytes(2.4268218e20f).equals("97 / 82 / 126 / 69"))throw new AssertionError("Garett bit layout");
         System.out.println("PASS: HR encoding, ranges, wrap and freshness");
     }
     static void expect(byte[] a,byte[] b){if(!Arrays.equals(a,b))throw new AssertionError(Arrays.toString(a));}

@@ -38,6 +38,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private long lastAnyEvent=-1,lastPlausibleAt=-1;
     private final java.util.ArrayDeque<String> recent=new java.util.ArrayDeque<>();
     private boolean slowSampling=true;
+    private boolean packedConfirmed=false,packedReading=false;
+    private int packedCandidate=0;
+    private int packedCount=0;
+    private Button packedButton;
+    private void refreshPackedButton(){
+        packedButton.setText(packedConfirmed?"Tryb Garett: WYŁĄCZ":"Tryb Garett: potwierdź BPM");
+    }
     private void recordRaw(String reason,long now){
         rawNote=reason;
         if(recent.size()>=8)recent.removeFirst();
@@ -77,7 +84,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);root.setPadding(12,8,12,8);root.setBackgroundColor(0xff07111d);
         scroll.addView(root);setContentView(scroll);
-        add(root,"ArduRower HR 0.1.2",20,Color.WHITE);
+        add(root,"ArduRower HR 0.1.3",20,Color.WHITE);
         value=add(root,"--",58,0xffff627e);
         add(root,"BPM",16,0xffc0cbd9);
         sensorStatus=add(root,"",14,0xffc0cbd9);
@@ -87,6 +94,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
         connect=new Button(this);connect.setText("Połącz");root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
         connect.setOnClickListener(v->{if(wanted){wanted=false;stopScan();closeGatt();message="Rozłączono";}else{
             wanted=true;nextAttempt=0;askPermissions();}paint(SystemClock.elapsedRealtime());});
+        packedButton=new Button(this);root.addView(packedButton,new LinearLayout.LayoutParams(-1,-2));
+        refreshPackedButton();
+        packedButton.setOnClickListener(v->{
+            if(packedConfirmed){packedConfirmed=false;invalidateHeart();refreshPackedButton();return;}
+            new android.app.AlertDialog.Builder(this).setTitle("Eksperymentalny dekoder Garett")
+                .setMessage("Porównaj kandydat BPM z oficjalną aplikacją zegarka (najlepiej przy kilku różnych wartościach tętna). Potwierdź tylko jeśli wartości są zgodne. Format producenta nie jest jeszcze udokumentowany. Nie do zastosowań medycznych.")
+                .setNegativeButton("Anuluj",null)
+                .setPositiveButton("Potwierdzam",(d,w)->{packedConfirmed=true;invalidateHeart();refreshPackedButton();})
+                .show();
+        });
         Button restart=new Button(this);restart.setText("Uruchom pomiar ponownie");root.addView(restart,new LinearLayout.LayoutParams(-1,-2));
         restart.setOnClickListener(v->{if(!granted(Manifest.permission.BODY_SENSORS)){requestPermissions(new String[]{Manifest.permission.BODY_SENSORS},7);return;}restartHeart(false);});
         Button next=new Button(this);next.setText("Tryb pomiaru: 1 s");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
@@ -167,14 +184,23 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if(!registered&&!heartSensors.isEmpty()){heartIndex=(heartIndex+1)%heartSensors.size();heart=heartSensors.get(heartIndex);}
         }catch(RuntimeException e){registrationNote=e.getClass().getSimpleName();sensorMessage="Błąd czujnika: "+registrationNote;}
     }
-    private void invalidateHeart(){bpm=0;sampled=-1;}
+    private void invalidateHeart(){bpm=0;sampled=-1;packedReading=false;}
     @Override public void onSensorChanged(SensorEvent event){
         if(!active||!registered||event.sensor!=heart)return;
         long now=SystemClock.elapsedRealtime();
         samples++;rawEvents++;lastEventAt=now;lastAnyEvent=now;rawAccuracy=event.accuracy;
         rawBpm=event.values.length>0?event.values[0]:Float.NaN;
         rawTimestamp=event.timestamp/1000000L;
+        packedCandidate=HrPacket.packedBpm(rawBpm,rawAccuracy);
+        if(packedCandidate>0)packedCount++;
         if(HrPacket.plausible(rawBpm)){lastPlausible=rawBpm;lastPlausibleAt=now;}
+        if(packedCandidate>0 && packedConfirmed){
+            long stamp=HrPacket.sampleTimeWithUptime(rawTimestamp,now,SystemClock.uptimeMillis(),registeredAt);
+            if(stamp<0){invalidEvents++;badTime++;invalidateHeart();recordRaw("Garett: stara próbka",now);sensorMessage=rawNote;return;}
+            bpm=packedCandidate;sampled=stamp;lastGoodAt=now;validEvents++;packedReading=true;
+            recordRaw("Garett: dekodowany BPM (test)",now);sensorMessage="Garett: tryb eksperymentalny";return;
+        }
+        if(packedCandidate>0){invalidEvents++;invalidateHeart();recordRaw("Garett: kandydat "+packedCandidate+" BPM",now);sensorMessage="Potwierdź format po porównaniu";return;}
         if(!HrPacket.usable(rawBpm,rawAccuracy)){
             invalidEvents++;invalidateHeart();
             if(rawAccuracy<0){noContact++;recordRaw("Brak kontaktu",now);}
@@ -186,7 +212,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         long stamp=HrPacket.sampleTimeWithUptime(rawTimestamp,now,uptime,registeredAt);
         if(stamp<0){invalidEvents++;badTime++;invalidateHeart();recordRaw("Stara próbka (timestamp)",now);sensorMessage=rawNote;return;}
         if(stamp!=HrPacket.sampleTime(rawTimestamp,now,registeredAt))uptimeAdjusted++;
-        bpm=Math.round(rawBpm);sampled=stamp;lastGoodAt=now;validEvents++;
+        bpm=Math.round(rawBpm);sampled=stamp;lastGoodAt=now;validEvents++;packedReading=false;
         recordRaw(stamp!=rawTimestamp?"OK; korekta zegara HAL":"OK",now);
         sensorMessage="Czujnik: "+event.sensor.getName();
     }
@@ -205,6 +231,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if(heart!=null)b.append(heart.getName()).append(" / ").append(heart.getVendor()).append(" / tryb ").append(heart.getReportingMode()).append(" / wake=").append(heart.isWakeUpSensor()).append("\n");
         b.append("Surowy BPM: ").append(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm)).append(" / accuracy: ").append(rawAccuracy==-999?"--":Integer.toString(rawAccuracy)).append("\n");
         b.append("Zdarzenia: ").append(rawEvents).append(" / ważne: ").append(validEvents).append(" / odrzucone: ").append(invalidEvents).append("\n");
+        b.append("HEX: ").append(HrPacket.hex(rawBpm)).append(" / bajty: ").append(HrPacket.bytes(rawBpm)).append("\n");
+        b.append("Garett kandydat BPM: ").append(packedCandidate).append(" / pakiety: ").append(packedCount).append(" / tryb: ").append(packedConfirmed).append("\n");
         b.append("Ostatnie: ").append(rawNote).append("\n");
         b.append("Odrzucone: kontakt ").append(noContact).append(", a0 ").append(unreliable).append(", BPM ").append(badValue).append(", czas ").append(badTime).append("\n");
         b.append("Accuracy callback: ").append(accuracyCallback).append(" / korekty uptime: ").append(uptimeAdjusted).append("\n");
@@ -220,9 +248,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void paint(long now){
         boolean fresh=heartFresh(now);
         value.setText(fresh?String.valueOf(bpm):"--");
-        rawView.setText("Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+(rawAccuracy==-999?"--":Integer.toString(rawAccuracy))+"\n"+rawNote);
+        rawView.setText(packedCandidate>0?"Kandydat BPM: "+packedCandidate+" (Garett)\n"+HrPacket.bytes(rawBpm)+" | a="+rawAccuracy+"\n"+(packedConfirmed?"Tryb testowy włączony":"Porównaj z fabryczną apką"):"Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+(rawAccuracy==-999?"--":Integer.toString(rawAccuracy))+"\n"+rawNote);
         sensorStatus.setText(sensorMessage+(registered&&!fresh?" • brak świeżej próbki":""));
-        status.setText(ready?(fresh?"Połączono • wysyłam puls":"Połączono • brak ważnego BPM"):message);
+        status.setText(ready?(fresh?(packedReading?"Połączono • HR test Garett":"Połączono • wysyłam puls"):"Połączono • brak ważnego BPM"):message);
         counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\nHR ACK: "+acked+" (BPM: "+validAck+")"+(ready?"\nOstatni ACK: "+(lastSent==0?"brak":lastSent+" BPM"):""));
         connect.setText(wanted?"Rozłącz":"Połącz");
         if(details.getVisibility()==android.view.View.VISIBLE)listSensors();
