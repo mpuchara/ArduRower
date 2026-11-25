@@ -26,14 +26,23 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private static final UUID HR=UUID.fromString("c9f10002-6f50-4fca-9b8d-3f8d90ae1b65");
     private static final String NAME="WR S4BL3";
     private final Handler h=new Handler(Looper.getMainLooper());
-    private TextView value,status,counts,sensorStatus,details;
+    private TextView value,status,counts,sensorStatus,details,rawView;
     private Button connect;
     private SensorManager sensors;
     private Sensor heart;
     private final java.util.ArrayList<Sensor> heartSensors=new java.util.ArrayList<>();
     private int heartIndex=0,rawAccuracy=-999,rawEvents=0,validEvents=0,invalidEvents=0,regAttempts=0;
     private long registeredAt=-1,lastEventAt=-1,lastGoodAt=-1,nextSensorAttempt=0,rawTimestamp=-1;
-    private float rawBpm=Float.NaN;
+    private float rawBpm=Float.NaN,lastPlausible=Float.NaN;
+    private int noContact=0,unreliable=0,badValue=0,badTime=0,uptimeAdjusted=0,accuracyCallback=-999;
+    private long lastAnyEvent=-1,lastPlausibleAt=-1;
+    private final java.util.ArrayDeque<String> recent=new java.util.ArrayDeque<>();
+    private boolean slowSampling=true;
+    private void recordRaw(String reason,long now){
+        rawNote=reason;
+        if(recent.size()>=8)recent.removeFirst();
+        recent.addLast("BPM "+rawBpm+" a="+rawAccuracy+" t="+rawTimestamp+" | "+reason);
+    }
     private boolean permissionAsked=false;
     private String registrationNote="",rawNote="Brak zdarzeń";
     private BluetoothAdapter adapter;
@@ -68,10 +77,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);root.setPadding(12,8,12,8);root.setBackgroundColor(0xff07111d);
         scroll.addView(root);setContentView(scroll);
-        add(root,"ArduRower HR 0.1.1",20,Color.WHITE);
+        add(root,"ArduRower HR 0.1.2",20,Color.WHITE);
         value=add(root,"--",58,0xffff627e);
         add(root,"BPM",16,0xffc0cbd9);
         sensorStatus=add(root,"",14,0xffc0cbd9);
+        rawView=add(root,"Surowy HR: --",14,0xffffc66d);
         status=add(root,message,16,0xff56dec5);
         counts=add(root,"",13,0xffc0cbd9);
         connect=new Button(this);connect.setText("Połącz");root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
@@ -79,8 +89,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             wanted=true;nextAttempt=0;askPermissions();}paint(SystemClock.elapsedRealtime());});
         Button restart=new Button(this);restart.setText("Uruchom pomiar ponownie");root.addView(restart,new LinearLayout.LayoutParams(-1,-2));
         restart.setOnClickListener(v->{if(!granted(Manifest.permission.BODY_SENSORS)){requestPermissions(new String[]{Manifest.permission.BODY_SENSORS},7);return;}restartHeart(false);});
-        Button next=new Button(this);next.setText("Zmień czujnik HR");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
-        next.setOnClickListener(v->restartHeart(true));
+        Button next=new Button(this);next.setText("Tryb pomiaru: 1 s");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
+        next.setOnClickListener(v->{slowSampling=!slowSampling;next.setText(slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki");restartHeart(false);});
         Button diag=new Button(this);diag.setText("Czujniki / diagnostyka");root.addView(diag,new LinearLayout.LayoutParams(-1,-2));
         details=add(root,"",12,0xffc0cbd9);details.setGravity(Gravity.START);details.setVisibility(android.view.View.GONE);
         diag.setOnClickListener(v->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);if(show)listSensors();});
@@ -129,8 +139,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         // a valid reading even after a full optical warm-up. Do not re-register
         // during the first 60 seconds. A valid on-change value does not require
         // new events every second.
-        long reference=lastGoodAt>=0?lastGoodAt:registeredAt;
-        if(reference>=0 && now-reference>=60000 && (lastGoodAt<0||!heartFresh(now))){
+        // Do not restart an optical measurement that is actively producing
+        // events: the vendor may need a longer warm-up. Only retry silence.
+        long reference=lastEventAt>=0?lastEventAt:registeredAt;
+        if(reference>=0 && now-reference>=120000 && !heartFresh(now)){
             restartHeart(heartSensors.size()>1);
         }
     }
@@ -146,9 +158,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         try {
             regAttempts++;
             // Explicit Handler, zero batching, request immediate events.
-            registered=sensors.registerListener(this,heart,SensorManager.SENSOR_DELAY_FASTEST,0,h);
+            registered=sensors.registerListener(this,heart,slowSampling?1000000:SensorManager.SENSOR_DELAY_FASTEST,0,h);
             registeredAt=registered?now:-1;
-            rawNote="Czekam na zdarzenia";rawBpm=Float.NaN;rawAccuracy=-999;rawTimestamp=-1;
+            // Preserve the previous raw event and rejection counters on restart.
+            if(rawEvents==0)rawNote="Czekam na zdarzenia";
             registrationNote=registered?"Rejestracja OK":"registerListener=false";
             sensorMessage=registered?"Pomiar: przyłóż zegarek do skóry":"Czujnik nie uruchomił się";
             if(!registered&&!heartSensors.isEmpty()){heartIndex=(heartIndex+1)%heartSensors.size();heart=heartSensors.get(heartIndex);}
@@ -158,24 +171,30 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override public void onSensorChanged(SensorEvent event){
         if(!active||!registered||event.sensor!=heart)return;
         long now=SystemClock.elapsedRealtime();
-        samples++;rawEvents++;lastEventAt=now;rawAccuracy=event.accuracy;
+        samples++;rawEvents++;lastEventAt=now;lastAnyEvent=now;rawAccuracy=event.accuracy;
         rawBpm=event.values.length>0?event.values[0]:Float.NaN;
         rawTimestamp=event.timestamp/1000000L;
+        if(HrPacket.plausible(rawBpm)){lastPlausible=rawBpm;lastPlausibleAt=now;}
         if(!HrPacket.usable(rawBpm,rawAccuracy)){
             invalidEvents++;invalidateHeart();
-            rawNote=rawAccuracy<0?"Brak kontaktu":rawAccuracy==0?"Niewiarygodna dokładność":"BPM poza zakresem";
+            if(rawAccuracy<0){noContact++;recordRaw("Brak kontaktu",now);}
+            else if(!HrPacket.plausible(rawBpm)){badValue++;recordRaw("BPM poza zakresem",now);}
+            else {unreliable++;recordRaw("Accuracy 0 - niewiarygodne",now);}
             sensorMessage=rawNote;return;
         }
-        long stamp=HrPacket.sampleTime(rawTimestamp,now,registeredAt);
-        if(stamp<0){invalidEvents++;invalidateHeart();rawNote="Stara próbka (timestamp)";sensorMessage=rawNote;return;}
+        long uptime=SystemClock.uptimeMillis();
+        long stamp=HrPacket.sampleTimeWithUptime(rawTimestamp,now,uptime,registeredAt);
+        if(stamp<0){invalidEvents++;badTime++;invalidateHeart();recordRaw("Stara próbka (timestamp)",now);sensorMessage=rawNote;return;}
+        if(stamp!=HrPacket.sampleTime(rawTimestamp,now,registeredAt))uptimeAdjusted++;
         bpm=Math.round(rawBpm);sampled=stamp;lastGoodAt=now;validEvents++;
-        rawNote=rawTimestamp<=0||rawTimestamp>now+1000?"OK; czas odbioru (zegar HAL)":"OK";
+        recordRaw(stamp!=rawTimestamp?"OK; korekta zegara HAL":"OK",now);
         sensorMessage="Czujnik: "+event.sensor.getName();
     }
     @Override public void onAccuracyChanged(Sensor sensor,int accuracy){
         if(!active||sensor!=heart)return;
-        rawAccuracy=accuracy;
-        if(accuracy<=0){invalidateHeart();rawNote=accuracy<0?"Brak kontaktu":"Niewiarygodna dokładność";sensorMessage=rawNote;}
+        accuracyCallback=accuracy;
+        // Do not overwrite the status of the last raw sample with a callback.
+        if(accuracy<=0){invalidateHeart();sensorMessage=accuracy<0?"Brak kontaktu":"Niewiarygodna dokładność";}
     }
     private void listSensors(){
         StringBuilder b=new StringBuilder("Android "+android.os.Build.VERSION.RELEASE+" / API "+android.os.Build.VERSION.SDK_INT+"\n"+android.os.Build.MODEL+"\nPuls: "+sensorMessage+"\n");
@@ -187,7 +206,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         b.append("Surowy BPM: ").append(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm)).append(" / accuracy: ").append(rawAccuracy==-999?"--":Integer.toString(rawAccuracy)).append("\n");
         b.append("Zdarzenia: ").append(rawEvents).append(" / ważne: ").append(validEvents).append(" / odrzucone: ").append(invalidEvents).append("\n");
         b.append("Ostatnie: ").append(rawNote).append("\n");
-        b.append("Wiek zdarzenia: ").append(lastEventAt<0?"--":Long.toString((now-lastEventAt)/1000)+" s").append("\n");
+        b.append("Odrzucone: kontakt ").append(noContact).append(", a0 ").append(unreliable).append(", BPM ").append(badValue).append(", czas ").append(badTime).append("\n");
+        b.append("Accuracy callback: ").append(accuracyCallback).append(" / korekty uptime: ").append(uptimeAdjusted).append("\n");
+        b.append("Ostatni BPM w zakresie: ").append(lastPlausible).append(" / wiek ").append(lastPlausibleAt<0?"--":Long.toString((now-lastPlausibleAt)/1000)+" s").append("\n");
+        b.append("Ostatnie zdarzenia (takze po restarcie):\n");
+        for(String line:recent)b.append(line).append("\n");
+        b.append("Wiek zdarzenia: ").append(lastAnyEvent<0?"--":Long.toString((now-lastAnyEvent)/1000)+" s").append("\n");
         b.append("Czas HAL: ").append(rawTimestamp).append(" / zegar: ").append(now).append("\n");
         b.append("Wszystkie czujniki:\n");
         if(sensors!=null)for(Sensor s:sensors.getSensorList(Sensor.TYPE_ALL))b.append(s.getName()).append(" / ").append(s.getVendor()).append(" / ").append(s.getType()).append(" / ").append(s.getStringType()).append(" / tryb ").append(s.getReportingMode()).append('\n');
@@ -196,6 +220,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void paint(long now){
         boolean fresh=heartFresh(now);
         value.setText(fresh?String.valueOf(bpm):"--");
+        rawView.setText("Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+(rawAccuracy==-999?"--":Integer.toString(rawAccuracy))+"\n"+rawNote);
         sensorStatus.setText(sensorMessage+(registered&&!fresh?" • brak świeżej próbki":""));
         status.setText(ready?(fresh?"Połączono • wysyłam puls":"Połączono • brak ważnego BPM"):message);
         counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\nHR ACK: "+acked+" (BPM: "+validAck+")"+(ready?"\nOstatni ACK: "+(lastSent==0?"brak":lastSent+" BPM"):""));

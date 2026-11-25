@@ -10,6 +10,8 @@ public final class HrPacketTest {
         if(!HrPacket.usable(120,1)||HrPacket.usable(120,0)||HrPacket.usable(120,-1)||HrPacket.usable(Float.NaN,3)||HrPacket.usable(300,3))throw new AssertionError("accuracy");
         if(!HrPacket.sensorFresh(120,1000,46000,true)||HrPacket.sensorFresh(120,1000,46001,true)||HrPacket.sensorFresh(120,1000,7501,false))throw new AssertionError("on change");
         if(HrPacket.sampleTime(0,10000,9000)!=10000||HrPacket.sampleTime(50000,10000,9000)!=10000||HrPacket.sampleTime(1000,10000,9000)!=-1||HrPacket.sampleTime(9500,10000,9000)!=9500)throw new AssertionError("timestamp");
+        if(HrPacket.sampleTimeWithUptime(99000,200000,100000,198000)!=199000||HrPacket.sampleTimeWithUptime(1000,200000,100000,198000)!=-1||HrPacket.sampleTimeWithUptime(199000,200000,100000,198000)!=199000)throw new AssertionError("uptime");
+        if(!HrPacket.plausible(85)||HrPacket.usable(85,0)||HrPacket.usable(85,-1))throw new AssertionError("raw must not be transmitted as reliable");
         System.out.println("PASS: HR encoding, ranges, wrap and freshness");
     }
     static void expect(byte[] a,byte[] b){if(!Arrays.equals(a,b))throw new AssertionError(Arrays.toString(a));}

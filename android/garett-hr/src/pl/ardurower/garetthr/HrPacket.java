@@ -6,8 +6,18 @@ final class HrPacket {
     static boolean fresh(int bpm, long sampleMs, long nowMs) {
         return validBpm(bpm) && sampleMs >= 0 && nowMs >= sampleMs && nowMs-sampleMs <= 6500;
     }
-    static boolean usable(float value,int accuracy){
-        return accuracy>0 && Float.isFinite(value) && value>=35 && value<=240;
+    static boolean plausible(float value){return Float.isFinite(value)&&value>=35&&value<=240;}
+    static boolean usable(float value,int accuracy){return accuracy>0&&plausible(value);}
+    static long sampleTimeWithUptime(long stamp,long elapsed,long uptime,long registeredAt){
+        long normal=sampleTime(stamp,elapsed,registeredAt);
+        if(normal>=0)return normal;
+        // Some old vendor HALs use CLOCK_MONOTONIC rather than BOOTTIME.
+        // Translate only if the original timestamp is near current uptime.
+        if(stamp>0&&uptime>=stamp&&uptime-stamp<=6500&&elapsed>=uptime){
+            long corrected=stamp+(elapsed-uptime);
+            if(corrected>=registeredAt-1000&&corrected<=elapsed)return corrected;
+        }
+        return -1;
     }
     // Some vendor HALs report zero or a different epoch. Only a newly
     // delivered valid event may use receipt time; never refresh on BLE writes.
