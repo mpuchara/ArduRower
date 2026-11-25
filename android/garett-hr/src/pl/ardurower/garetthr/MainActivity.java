@@ -332,8 +332,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         status.setText(label);
         status.setTextColor(delivered?0xff56dec5:0xffe9bd71);
         if(advanced.getVisibility()==View.VISIBLE){
-            rawView.setText("Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+rawAccuracy+"\\n"+rawNote+"\\n"+sensorMessage);
-            counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\\nHR ACK: "+acked+" (BPM: "+validAck+")\\nOstatni ACK: "+(lastAckBpm==0?"brak":lastAckBpm+" BPM")+"\\n"+message);
+            rawView.setText("Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+rawAccuracy+"\n"+rawNote+"\n"+sensorMessage);
+            counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\nHR ACK: "+acked+" (BPM: "+validAck+")\nOstatni ACK: "+(lastAckBpm==0?"brak":lastAckBpm+" BPM")+"\n"+message);
             if(details.getVisibility()==View.VISIBLE)listSensors();
         }
     }
