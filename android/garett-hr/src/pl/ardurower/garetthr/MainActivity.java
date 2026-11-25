@@ -30,6 +30,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Button connect;
     private SensorManager sensors;
     private Sensor heart;
+    private final java.util.ArrayList<Sensor> heartSensors=new java.util.ArrayList<>();
+    private int heartIndex=0,rawAccuracy=-999,rawEvents=0,validEvents=0,invalidEvents=0,regAttempts=0;
+    private long registeredAt=-1,lastEventAt=-1,lastGoodAt=-1,nextSensorAttempt=0,rawTimestamp=-1;
+    private float rawBpm=Float.NaN;
+    private boolean permissionAsked=false;
+    private String registrationNote="",rawNote="Brak zdarzeń";
     private BluetoothAdapter adapter;
     private BluetoothLeScanner scanner;
     private BluetoothGatt gatt;
@@ -47,6 +53,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             else if(gatt==null && !scanning && now>=nextAttempt){startScan();}
             else if(ready && !pending && now-writeAt>=1000){send(now);}
         }
+        maintainHeart(now);
         paint(now);
         h.postDelayed(this,250);
     }};
@@ -54,14 +61,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         sensors=(SensorManager)getSystemService(SENSOR_SERVICE);
-        heart=sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE);
+        discoverHeartSensors();
         BluetoothManager m=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);
         adapter=m==null?null:m.getAdapter();
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);root.setPadding(12,8,12,8);root.setBackgroundColor(0xff07111d);
         scroll.addView(root);setContentView(scroll);
-        add(root,"ArduRower HR",20,Color.WHITE);
+        add(root,"ArduRower HR 0.1.1",20,Color.WHITE);
         value=add(root,"--",58,0xffff627e);
         add(root,"BPM",16,0xffc0cbd9);
         sensorStatus=add(root,"",14,0xffc0cbd9);
@@ -70,6 +77,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         connect=new Button(this);connect.setText("Połącz");root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
         connect.setOnClickListener(v->{if(wanted){wanted=false;stopScan();closeGatt();message="Rozłączono";}else{
             wanted=true;nextAttempt=0;askPermissions();}paint(SystemClock.elapsedRealtime());});
+        Button restart=new Button(this);restart.setText("Uruchom pomiar ponownie");root.addView(restart,new LinearLayout.LayoutParams(-1,-2));
+        restart.setOnClickListener(v->{if(!granted(Manifest.permission.BODY_SENSORS)){requestPermissions(new String[]{Manifest.permission.BODY_SENSORS},7);return;}restartHeart(false);});
+        Button next=new Button(this);next.setText("Zmień czujnik HR");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
+        next.setOnClickListener(v->restartHeart(true));
         Button diag=new Button(this);diag.setText("Czujniki / diagnostyka");root.addView(diag,new LinearLayout.LayoutParams(-1,-2));
         details=add(root,"",12,0xffc0cbd9);details.setGravity(Gravity.START);details.setVisibility(android.view.View.GONE);
         diag.setOnClickListener(v->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);if(show)listSensors();});
@@ -78,49 +89,118 @@ public final class MainActivity extends Activity implements SensorEventListener 
         TextView t=new TextView(this);t.setGravity(Gravity.CENTER);t.setText(s);t.setTextSize(sp);t.setTextColor(color);
         root.addView(t,new LinearLayout.LayoutParams(-1,-2));return t;
     }
-    @Override protected void onStart(){super.onStart();active=true;startHeart();askPermissions();h.removeCallbacks(ticker);h.post(ticker);}
-    @Override protected void onStop(){active=false;h.removeCallbacks(ticker);stopScan();closeGatt();
-        if(sensors!=null)sensors.unregisterListener(this);registered=false;invalidateHeart();super.onStop();}
+    @Override protected void onStart(){super.onStart();active=true;discoverHeartSensors();startHeart();if(!permissionAsked){permissionAsked=true;askPermissions();}h.removeCallbacks(ticker);h.post(ticker);}
+    @Override protected void onResume(){super.onResume();if(active&&!registered&&granted(Manifest.permission.BODY_SENSORS)){discoverHeartSensors();startHeart();}}
+    @Override public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(hasFocus&&active&&!registered&&granted(Manifest.permission.BODY_SENSORS)){discoverHeartSensors();startHeart();}}
+    @Override protected void onStop(){active=false;h.removeCallbacks(ticker);stopScan();closeGatt();stopHeart();super.onStop();}
     private boolean granted(String p){return checkSelfPermission(p)==PackageManager.PERMISSION_GRANTED;}
     private void askPermissions(){
         java.util.ArrayList<String> needed=new java.util.ArrayList<>();
-        if(heart!=null&&!granted(Manifest.permission.BODY_SENSORS))needed.add(Manifest.permission.BODY_SENSORS);
+        if(!granted(Manifest.permission.BODY_SENSORS))needed.add(Manifest.permission.BODY_SENSORS);
         if(wanted&&!granted(Manifest.permission.ACCESS_FINE_LOCATION))needed.add(Manifest.permission.ACCESS_FINE_LOCATION);
         if(!needed.isEmpty())requestPermissions(needed.toArray(new String[0]),7);
     }
-    @Override public void onRequestPermissionsResult(int req,String[] p,int[] result){super.onRequestPermissionsResult(req,p,result);startHeart();nextAttempt=0;}
+    @Override public void onRequestPermissionsResult(int req,String[] p,int[] result){super.onRequestPermissionsResult(req,p,result);if(granted(Manifest.permission.BODY_SENSORS)){discoverHeartSensors();startHeart();}nextAttempt=0;}
+    private void addHeart(Sensor sensor){if(sensor!=null&&!heartSensors.contains(sensor))heartSensors.add(sensor);}
+    private void discoverHeartSensors(){
+        if(sensors==null||registered)return;
+        heartSensors.clear();
+        try{
+            addHeart(sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE,false));
+            addHeart(sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE,true));
+            for(Sensor x:sensors.getSensorList(Sensor.TYPE_HEART_RATE))addHeart(x);
+        }catch(RuntimeException e){registrationNote="Lista HR: "+e.getClass().getSimpleName();}
+        if(heartIndex>=heartSensors.size())heartIndex=0;
+        heart=heartSensors.isEmpty()?null:heartSensors.get(heartIndex);
+    }
+    private void stopHeart(){
+        if(sensors!=null)try{sensors.unregisterListener(this);}catch(RuntimeException ignored){}
+        registered=false;registeredAt=-1;lastEventAt=-1;lastGoodAt=-1;invalidateHeart();
+    }
+    private void restartHeart(boolean next){
+        stopHeart();discoverHeartSensors();
+        if(next&&!heartSensors.isEmpty()){heartIndex=(heartIndex+1)%heartSensors.size();heart=heartSensors.get(heartIndex);}
+        nextSensorAttempt=0;startHeart();
+    }
+    private void maintainHeart(long now){
+        if(!active||!granted(Manifest.permission.BODY_SENSORS))return;
+        if(!registered){if(now>=nextSensorAttempt){discoverHeartSensors();startHeart();}return;}
+        // Try another standard HR sensor if the current source does not produce
+        // a valid reading even after a full optical warm-up. Do not re-register
+        // during the first 60 seconds. A valid on-change value does not require
+        // new events every second.
+        long reference=lastGoodAt>=0?lastGoodAt:registeredAt;
+        if(reference>=0 && now-reference>=60000 && (lastGoodAt<0||!heartFresh(now))){
+            restartHeart(heartSensors.size()>1);
+        }
+    }
+    private boolean heartFresh(long now){
+        return registered&&HrPacket.sensorFresh(bpm,sampled,now,heart!=null&&heart.getReportingMode()==Sensor.REPORTING_MODE_ON_CHANGE);
+    }
     private void startHeart(){
         if(!active||registered)return;
-        if(heart==null){sensorMessage="Brak TYPE_HEART_RATE";return;}
+        long now=SystemClock.elapsedRealtime();
+        nextSensorAttempt=now+10000;
         if(!granted(Manifest.permission.BODY_SENSORS)){sensorMessage="Brak zgody na pulsometr";return;}
-        try {registered=sensors.registerListener(this,heart,SensorManager.SENSOR_DELAY_NORMAL);
-            sensorMessage=registered?"Czekam na puls":"Czujnik nie uruchomił się";
-        }catch(RuntimeException e){sensorMessage="Błąd czujnika: "+e.getClass().getSimpleName();}
+        if(heart==null){sensorMessage="Brak publicznego czujnika HR";return;}
+        try {
+            regAttempts++;
+            // Explicit Handler, zero batching, request immediate events.
+            registered=sensors.registerListener(this,heart,SensorManager.SENSOR_DELAY_FASTEST,0,h);
+            registeredAt=registered?now:-1;
+            rawNote="Czekam na zdarzenia";rawBpm=Float.NaN;rawAccuracy=-999;rawTimestamp=-1;
+            registrationNote=registered?"Rejestracja OK":"registerListener=false";
+            sensorMessage=registered?"Pomiar: przyłóż zegarek do skóry":"Czujnik nie uruchomił się";
+            if(!registered&&!heartSensors.isEmpty()){heartIndex=(heartIndex+1)%heartSensors.size();heart=heartSensors.get(heartIndex);}
+        }catch(RuntimeException e){registrationNote=e.getClass().getSimpleName();sensorMessage="Błąd czujnika: "+registrationNote;}
     }
     private void invalidateHeart(){bpm=0;sampled=-1;}
     @Override public void onSensorChanged(SensorEvent event){
-        if(!active||event.sensor.getType()!=Sensor.TYPE_HEART_RATE)return;
-        samples++;
-        if(event.values.length==0 || event.accuracy<=0 || !Float.isFinite(event.values[0]) || event.values[0]<35 || event.values[0]>240){
-            invalidateHeart();sensorMessage="Brak wiarygodnego pulsu";return;
+        if(!active||!registered||event.sensor!=heart)return;
+        long now=SystemClock.elapsedRealtime();
+        samples++;rawEvents++;lastEventAt=now;rawAccuracy=event.accuracy;
+        rawBpm=event.values.length>0?event.values[0]:Float.NaN;
+        rawTimestamp=event.timestamp/1000000L;
+        if(!HrPacket.usable(rawBpm,rawAccuracy)){
+            invalidEvents++;invalidateHeart();
+            rawNote=rawAccuracy<0?"Brak kontaktu":rawAccuracy==0?"Niewiarygodna dokładność":"BPM poza zakresem";
+            sensorMessage=rawNote;return;
         }
-        bpm=Math.round(event.values[0]);sampled=event.timestamp/1000000L;
-        if(sampled>SystemClock.elapsedRealtime()||sampled<0){invalidateHeart();return;}
+        long stamp=HrPacket.sampleTime(rawTimestamp,now,registeredAt);
+        if(stamp<0){invalidEvents++;invalidateHeart();rawNote="Stara próbka (timestamp)";sensorMessage=rawNote;return;}
+        bpm=Math.round(rawBpm);sampled=stamp;lastGoodAt=now;validEvents++;
+        rawNote=rawTimestamp<=0||rawTimestamp>now+1000?"OK; czas odbioru (zegar HAL)":"OK";
         sensorMessage="Czujnik: "+event.sensor.getName();
     }
-    @Override public void onAccuracyChanged(Sensor sensor,int accuracy){if(accuracy<=0)invalidateHeart();}
+    @Override public void onAccuracyChanged(Sensor sensor,int accuracy){
+        if(!active||sensor!=heart)return;
+        rawAccuracy=accuracy;
+        if(accuracy<=0){invalidateHeart();rawNote=accuracy<0?"Brak kontaktu":"Niewiarygodna dokładność";sensorMessage=rawNote;}
+    }
     private void listSensors(){
         StringBuilder b=new StringBuilder("Android "+android.os.Build.VERSION.RELEASE+" / API "+android.os.Build.VERSION.SDK_INT+"\n"+android.os.Build.MODEL+"\nPuls: "+sensorMessage+"\n");
-        if(sensors!=null)for(Sensor s:sensors.getSensorList(Sensor.TYPE_ALL))b.append(s.getName()).append(" / ").append(s.getVendor()).append(" / ").append(s.getType()).append(" / ").append(s.getStringType()).append('\n');
+        long now=SystemClock.elapsedRealtime();
+        b.append("BODY_SENSORS: ").append(granted(Manifest.permission.BODY_SENSORS)).append("\n");
+        b.append("HR standard: ").append(heartSensors.size()).append("; wybrany: ").append(heartIndex+1).append("\n");
+        b.append("Rejestracja: ").append(registrationNote).append("; próby: ").append(regAttempts).append("\n");
+        if(heart!=null)b.append(heart.getName()).append(" / ").append(heart.getVendor()).append(" / tryb ").append(heart.getReportingMode()).append(" / wake=").append(heart.isWakeUpSensor()).append("\n");
+        b.append("Surowy BPM: ").append(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm)).append(" / accuracy: ").append(rawAccuracy==-999?"--":Integer.toString(rawAccuracy)).append("\n");
+        b.append("Zdarzenia: ").append(rawEvents).append(" / ważne: ").append(validEvents).append(" / odrzucone: ").append(invalidEvents).append("\n");
+        b.append("Ostatnie: ").append(rawNote).append("\n");
+        b.append("Wiek zdarzenia: ").append(lastEventAt<0?"--":Long.toString((now-lastEventAt)/1000)+" s").append("\n");
+        b.append("Czas HAL: ").append(rawTimestamp).append(" / zegar: ").append(now).append("\n");
+        b.append("Wszystkie czujniki:\n");
+        if(sensors!=null)for(Sensor s:sensors.getSensorList(Sensor.TYPE_ALL))b.append(s.getName()).append(" / ").append(s.getVendor()).append(" / ").append(s.getType()).append(" / ").append(s.getStringType()).append(" / tryb ").append(s.getReportingMode()).append('\n');
         details.setText(b.toString());
     }
     private void paint(long now){
-        boolean fresh=HrPacket.fresh(bpm,sampled,now);
+        boolean fresh=heartFresh(now);
         value.setText(fresh?String.valueOf(bpm):"--");
         sensorStatus.setText(sensorMessage+(registered&&!fresh?" • brak świeżej próbki":""));
-        status.setText(message);
+        status.setText(ready?(fresh?"Połączono • wysyłam puls":"Połączono • brak ważnego BPM"):message);
         counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\nHR ACK: "+acked+" (BPM: "+validAck+")"+(ready?"\nOstatni ACK: "+(lastSent==0?"brak":lastSent+" BPM"):""));
         connect.setText(wanted?"Rozłącz":"Połącz");
+        if(details.getVisibility()==android.view.View.VISIBLE)listSensors();
     }
     private void startScan(){
         if(!active||!wanted||scanning||gatt!=null)return;
@@ -198,7 +278,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     };
     private void send(long now){
         if(gatt==null||tx==null||!ready||pending)return;
-        int measured=HrPacket.fresh(bpm,sampled,now)?bpm:0;
+        int measured=heartFresh(now)?bpm:0;
         byte[] packet=HrPacket.encode(seq,measured);
         try{
             tx.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
