@@ -1,12 +1,22 @@
-# ArduRower HR — Garett Essa 2 AI 4G (0.1.4)
-Pierwsza wersja diagnostyczna, tylko fizyczny pomiar HR i wysyłanie do CYD 0.09.38 przez istniejący WatchHrBridge. Nie modyfikuje firmware ani Garmin IQ.
+# ArduRower HR — Garett Essa 2 AI 4G (0.1.5)
+Aplikacja do przesyłania pulsu przez istniejący WatchHrBridge. Użytkownik potwierdził prawidłowy puls na fizycznym Garett i ekranie CYD w 0.1.4. Dekoder producenta nie jest oficjalnie udokumentowany; zachowano wszystkie filtry i walidację. Nie do zastosowań medycznych.
 
-Android 8.1: min API 26, target 27, compile 35, pojedynczy DEX, Java, bez JNI i Internetu, podpis APK v1. Wzorzec: Espen/android/ala-robot/watch. Budowa: Android SDK platform 35, build-tools 35.0.0, JDK 17, bash android/garett-hr/build.sh. Domyślny klucz testowy generowany lokalnie; kolejne aktualizacje wymagają tego samego klucza (ustaw HR_KEYSTORE i HR_KEYSTORE_PASSWORD). Klucza nie publikujemy.
+## Obsługa
+1. Wypakuj APK z artefaktu Actions. Z uwagi na zmienny podpis testowy może być konieczne odinstalowanie starszej wersji.
+2. Włącz Bluetooth i lokalizację systemową (wymagana dla BLE na Androidzie 8.1; nie odczytujemy lokalizacji). Przy pierwszym uruchomieniu przyznaj uprawnienia czujnika i lokalizacji.
+3. Włącz ArduRower, wybierz profil i trening. Nie łącz równocześnie pola Garmin.
+4. Otwórz ArduRower HR. Pomiar FASTEST, dekoder Garett i wyszukiwanie BLE startują automatycznie. Naciśnij Połącz ponownie tylko przy problemie.
+5. Puls na ekranie, animacja serca zgodna z BPM, wykres ostatnich 60 sekund (brak danych = przerwa). Wykres próbkowany co sekundę z aktualnego ważnego odczytu, nie jest EKG.
+6. Po 15 s bez dotyku aplikacja ustawia jasność 6% i zatrzymuje ciągłą animację. Dotyk przywraca systemową jasność; transmisja trwa podczas przygaszenia. Ekran pozostaje włączony, ponieważ opuszczenie Activity lub fizyczne wygaszenie może zatrzymać pomiar/BLE. Nie dodano usługi w tle. Zachowanie na Omnia OS i oszczędność energii wymagają testu.
+7. Ustawienia i diagnostyka ukrywają tryby pomiaru, dekoder, liczniki i rozłączanie. Status wysyłania wymaga niedawnego potwierdzenia zapisu GATT z ważnym BPM. Nie jest to niezależne potwierdzenie odbioru na CYD.
 
-Instalacja: pobierz ZIP artefaktu Actions, wypakuj APK i prześlij na zegarek zwykłą metodą używaną z Alą. Nie potrzebujesz ADB. Włącz Bluetooth i lokalizację systemową (wymóg skanowania Android 8.1; aplikacja nie odczytuje lokalizacji), przyznaj uprawnienia. Załóż zegarek, otwórz aplikację, sprawdź BPM i listę czujników. Włącz CYD, wybierz użytkownika i trening, wyłącz pole Garmin na czas próby. Naciśnij Połącz. FTMS i HR ACK powinny rosnąć. Potwierdź BPM na ekranie CYD; ACK oznacza potwierdzony zapis GATT, nie niezależny dowód przyjęcia przez aplikację CYD. Przy braku ważnej próbki wysyłany jest jawny brak HR. Zegarek ma pozostać na ekranie aplikacji; opuszczenie ekranu zamyka BLE, a CYD wygasza HR po ok. 6,5 s.
+## Budowa
+Android 8.1: min API 26, target 27, compile 35, pojedynczy DEX, Java, bez JNI i Internetu, podpis v1. Android SDK 35, build-tools 35.0.0, JDK 17, bash android/garett-hr/build.sh. Podpis testowy generowany na runnerze; dla stabilnych aktualizacji HR_KEYSTORE i HR_KEYSTORE_PASSWORD. Nie publikować klucza.
 
-Brak TYPE_HEART_RATE lub brak świeżych próbek: otwórz Czujniki / diagnostyka i sfotografuj listę. Nie ma obejścia uprawnień ani sztucznego BPM. Dostęp do fizycznego czujnika nie został potwierdzony. Brak zapisu historii, serwera i aplikacji treningowej — zakres celowo ograniczony. 
+## Regresja
+Nie zmieniono firmware, Garmin IQ, pakietu BLE, dekodera ani zasad ważności pomiaru. Testy obejmują przykłady Garetta, zakres, dokładność, czas, pakiet HR i bufor wykresu. Test fizyczny nowej wersji nadal konieczny.
 
+## Historia
 ## 0.1.3 — pomiar HR
 Obsługa wszystkich standardowych wariantów czujnika HR, także wake-up; ręczny restart i wybór, ponowna próba po 60 s bez ważnego pomiaru. Zdarzenia on-change ważne maksymalnie 45 s, ciągłe 6,5 s; brak kontaktu lub niewiarygodna dokładność unieważnia odczyt natychmiast. Surowe BPM, accuracy, timestamp, rejestracja i liczniki widoczne na żywo w diagnostyce. Nie wysyłamy próbek oznaczonych jako niewiarygodne. Zegar HAL z oczywistym błędem korzysta z czasu odbioru nowego zdarzenia, stare poprawnie datowane zdarzenia odrzucane. Bez publicznego dostępu do fizycznego HR potrzebny będzie udokumentowany interfejs producenta. Test sprzętowy konieczny.
 

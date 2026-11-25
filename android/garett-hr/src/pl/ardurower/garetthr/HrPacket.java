@@ -13,8 +13,8 @@ final class HrPacket {
     }
     // Observed Garett layout hypothesis: [oxygen-like, HR-like, upper, lower].
     // Only recognize the observed structured range, never reinterpret ordinary
-    // BPM, no-contact events or arbitrary invalid floats. User confirmation
-    // is required separately before any candidate is transmitted.
+    // BPM, no-contact events or arbitrary invalid floats. Garett mode is enabled by default after the user's hardware trial.
+    // The signature and accuracy checks remain mandatory.
     static int packedBpm(float value,int accuracy){
         if(accuracy<=0||!Float.isFinite(value)||plausible(value)||value<1e12f)return 0;
         int bits=Float.floatToRawIntBits(value);

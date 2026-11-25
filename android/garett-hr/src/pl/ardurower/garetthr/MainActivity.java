@@ -12,7 +12,10 @@ import android.bluetooth.*;
 import android.bluetooth.le.*;
 import android.hardware.*;
 import android.location.LocationManager;
-import android.graphics.Color;
+import android.graphics.*;
+import android.view.View;
+import android.view.MotionEvent;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.WindowManager;
 import android.widget.*;
@@ -28,6 +31,45 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private final Handler h=new Handler(Looper.getMainLooper());
     private TextView value,status,counts,sensorStatus,details,rawView;
     private Button connect;
+    private LinearLayout advanced;
+    private HeartView heartView;
+    private TrendView trendView;
+    private final PulseHistory history=new PulseHistory();
+    private long lastTouch=0,lastChartSecond=-1,lastAckAt=-1;
+    private int lastAckBpm=0;
+    private boolean dimmed=false;
+    private static final long DIM_AFTER_MS=15000;
+    private static final float DIM_LEVEL=0.06f;
+    private int dp(float v){return Math.round(v*getResources().getDisplayMetrics().density);}
+    private void setDim(boolean dim){
+        if(dimmed==dim)return;
+        dimmed=dim;
+        WindowManager.LayoutParams p=getWindow().getAttributes();
+        p.screenBrightness=dim?DIM_LEVEL:WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(p);
+        if(heartView!=null)heartView.invalidate();
+    }
+    @Override public boolean dispatchTouchEvent(MotionEvent e){
+        lastTouch=SystemClock.elapsedRealtime();
+        setDim(false);
+        return super.dispatchTouchEvent(e);
+    }
+    private void reconnect(){
+        wanted=true;stopScan();closeGatt();
+        message="Ponowne łączenie";
+        nextAttempt=SystemClock.elapsedRealtime()+800;
+        askPermissions();
+        paint(SystemClock.elapsedRealtime());
+    }
+    private GradientDrawable rounded(int color,int radius){
+        GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;
+    }
+    private Button action(LinearLayout parent,String label,int background){
+        Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextSize(15);
+        b.setTextColor(Color.WHITE);b.setBackground(rounded(background,14));b.setMinHeight(dp(46));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(46));lp.topMargin=dp(8);
+        parent.addView(b,lp);return b;
+    }
     private SensorManager sensors;
     private Sensor heart;
     private final java.util.ArrayList<Sensor> heartSensors=new java.util.ArrayList<>();
@@ -38,12 +80,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private long lastAnyEvent=-1,lastPlausibleAt=-1;
     private final java.util.ArrayDeque<String> recent=new java.util.ArrayDeque<>();
     private boolean slowSampling=false;
-    private boolean packedConfirmed=false,packedReading=false;
+    private boolean packedConfirmed=true,packedReading=false;
     private int packedCandidate=0;
     private int packedCount=0;
     private Button packedButton;
     private void refreshPackedButton(){
-        packedButton.setText(packedConfirmed?"Tryb Garett: WYŁĄCZ":"Tryb Garett: potwierdź BPM");
+        packedButton.setText(packedConfirmed?"Tryb Garett: włączony":"Tryb Garett: wyłączony");
     }
     private void recordRaw(String reason,long now){
         rawNote=reason;
@@ -56,10 +98,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private BluetoothLeScanner scanner;
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic tx;
-    private boolean active,wanted,scanning,ready,pending,registered;
+    private boolean active,scanning,ready,pending,registered;
+    private boolean wanted=true;
     private long sampled=-1,deadline=0,nextAttempt=0,writeAt=0;
     private int bpm=0,seq=0,rx=0,acked=0,validAck=0,samples=0,lastSent=0;
-    private String message="Rozłączono", sensorMessage="Sprawdzanie";
+    private String message="Szukam komputerka", sensorMessage="Sprawdzanie";
     private final Runnable ticker=new Runnable(){public void run(){
         if(!active)return;
         long now=SystemClock.elapsedRealtime();
@@ -70,6 +113,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
             else if(ready && !pending && now-writeAt>=1000){send(now);}
         }
         maintainHeart(now);
+        setDim(now-lastTouch>=DIM_AFTER_MS);
+        long second=now/1000;
+        if(second!=lastChartSecond){
+            history.add(second,heartFresh(now)?bpm:0);lastChartSecond=second;
+            if(!dimmed)trendView.invalidate();
+        }
         paint(now);
         h.postDelayed(this,250);
     }};
@@ -84,42 +133,64 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);root.setPadding(12,8,12,8);root.setBackgroundColor(0xff07111d);
         scroll.addView(root);setContentView(scroll);
-        add(root,"ArduRower HR 0.1.4",20,Color.WHITE);
-        value=add(root,"--",58,0xffff627e);
-        add(root,"BPM",16,0xffc0cbd9);
-        sensorStatus=add(root,"",14,0xffc0cbd9);
-        rawView=add(root,"Surowy HR: --",14,0xffffc66d);
-        status=add(root,message,16,0xff56dec5);
-        counts=add(root,"",13,0xffc0cbd9);
-        connect=new Button(this);connect.setText("Połącz");root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
-        connect.setOnClickListener(v->{if(wanted){wanted=false;stopScan();closeGatt();message="Rozłączono";}else{
-            wanted=true;nextAttempt=0;askPermissions();}paint(SystemClock.elapsedRealtime());});
-        packedButton=new Button(this);root.addView(packedButton,new LinearLayout.LayoutParams(-1,-2));
+        TextView heading=add(root,"ArduRower",19,Color.WHITE);
+        heading.setTypeface(null,android.graphics.Typeface.BOLD);
+        LinearLayout pulseRow=new LinearLayout(this);
+        pulseRow.setGravity(Gravity.CENTER);pulseRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pulseLp=new LinearLayout.LayoutParams(-1,dp(76));pulseLp.topMargin=dp(5);
+        root.addView(pulseRow,pulseLp);
+        heartView=new HeartView();pulseRow.addView(heartView,new LinearLayout.LayoutParams(dp(54),dp(62)));
+        value=new TextView(this);value.setText("--");value.setTextSize(58);value.setTextColor(Color.WHITE);
+        value.setGravity(Gravity.CENTER_VERTICAL);value.setTypeface(null,android.graphics.Typeface.BOLD);
+        pulseRow.addView(value,new LinearLayout.LayoutParams(-2,-1));
+        add(root,"uderzeń/min",13,0xffa7bac9);
+        sensorStatus=add(root,"Mierzę puls…",13,0xffa7bac9);
+        trendView=new TrendView();LinearLayout.LayoutParams trendLp=new LinearLayout.LayoutParams(-1,dp(74));trendLp.topMargin=dp(9);
+        root.addView(trendView,trendLp);
+        add(root,"Ostatnia minuta",11,0xffa7bac9);
+        status=add(root,message,15,0xff56dec5);
+        status.setPadding(0,dp(8),0,0);
+        connect=action(root,"Połącz ponownie",0xff185e59);
+        connect.setOnClickListener(v->reconnect());
+        TextView settings=add(root,"Ustawienia i diagnostyka",12,0xff98aec0);
+        settings.setPadding(0,dp(14),0,dp(10));settings.setMinHeight(dp(44));settings.setClickable(true);
+        advanced=new LinearLayout(this);advanced.setOrientation(LinearLayout.VERTICAL);
+        root.addView(advanced,new LinearLayout.LayoutParams(-1,-2));advanced.setVisibility(View.GONE);
+        settings.setOnClickListener(v->{
+            boolean show=advanced.getVisibility()!=View.VISIBLE;
+            advanced.setVisibility(show?View.VISIBLE:View.GONE);
+            settings.setText(show?"Ukryj ustawienia":"Ustawienia i diagnostyka");
+            if(show)listSensors();
+        });
+        add(advanced,"ArduRower HR 0.1.5 • pomiar sportowy",12,0xffa7bac9);
+        rawView=add(advanced,"Surowy HR: --",12,0xffffc66d);
+        counts=add(advanced,"",12,0xffc0cbd9);
+        packedButton=action(advanced,"",0xff293c50);
         refreshPackedButton();
         packedButton.setOnClickListener(v->{
-            if(packedConfirmed){packedConfirmed=false;invalidateHeart();refreshPackedButton();return;}
-            new android.app.AlertDialog.Builder(this).setTitle("Eksperymentalny dekoder Garett")
-                .setMessage("Porównaj kandydat BPM z oficjalną aplikacją zegarka (najlepiej przy kilku różnych wartościach tętna). Potwierdź tylko jeśli wartości są zgodne. Format producenta nie jest jeszcze udokumentowany. Nie do zastosowań medycznych.")
-                .setNegativeButton("Anuluj",null)
-                .setPositiveButton("Potwierdzam",(d,w)->{packedConfirmed=true;invalidateHeart();refreshPackedButton();})
-                .show();
+            packedConfirmed=!packedConfirmed;invalidateHeart();refreshPackedButton();
         });
-        Button restart=new Button(this);restart.setText("Uruchom pomiar ponownie");root.addView(restart,new LinearLayout.LayoutParams(-1,-2));
+        Button restart=action(advanced,"Uruchom pomiar ponownie",0xff293c50);
         restart.setOnClickListener(v->{if(!granted(Manifest.permission.BODY_SENSORS)){requestPermissions(new String[]{Manifest.permission.BODY_SENSORS},7);return;}restartHeart(false);});
-        Button next=new Button(this);next.setText(slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
+        Button next=action(advanced,slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki",0xff293c50);
         next.setOnClickListener(v->{slowSampling=!slowSampling;next.setText(slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki");restartHeart(false);});
-        Button diag=new Button(this);diag.setText("Czujniki / diagnostyka");root.addView(diag,new LinearLayout.LayoutParams(-1,-2));
-        details=add(root,"",12,0xffc0cbd9);details.setGravity(Gravity.START);details.setVisibility(android.view.View.GONE);
-        diag.setOnClickListener(v->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);if(show)listSensors();});
+        Button disconnect=action(advanced,"Rozłącz",0xff293c50);
+        disconnect.setOnClickListener(v->{wanted=false;stopScan();closeGatt();message="Rozłączono";paint(SystemClock.elapsedRealtime());});
+        details=add(advanced,"",12,0xffc0cbd9);details.setGravity(Gravity.START);
+        details.setVisibility(View.GONE);
+        Button diag=action(advanced,"Szczegóły czujnika",0xff293c50);
+        diag.setOnClickListener(v->{boolean show=details.getVisibility()!=View.VISIBLE;details.setVisibility(show?View.VISIBLE:View.GONE);if(show)listSensors();});
+        lastTouch=SystemClock.elapsedRealtime();
+
     }
     private TextView add(LinearLayout root,String s,int sp,int color){
         TextView t=new TextView(this);t.setGravity(Gravity.CENTER);t.setText(s);t.setTextSize(sp);t.setTextColor(color);
         root.addView(t,new LinearLayout.LayoutParams(-1,-2));return t;
     }
-    @Override protected void onStart(){super.onStart();active=true;discoverHeartSensors();startHeart();if(!permissionAsked){permissionAsked=true;askPermissions();}h.removeCallbacks(ticker);h.post(ticker);}
+    @Override protected void onStart(){super.onStart();active=true;wanted=true;nextAttempt=0;lastTouch=SystemClock.elapsedRealtime();setDim(false);discoverHeartSensors();startHeart();if(!permissionAsked){permissionAsked=true;askPermissions();}h.removeCallbacks(ticker);h.post(ticker);}
     @Override protected void onResume(){super.onResume();if(active&&!registered&&granted(Manifest.permission.BODY_SENSORS)){discoverHeartSensors();startHeart();}}
     @Override public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(hasFocus&&active&&!registered&&granted(Manifest.permission.BODY_SENSORS)){discoverHeartSensors();startHeart();}}
-    @Override protected void onStop(){active=false;h.removeCallbacks(ticker);stopScan();closeGatt();stopHeart();super.onStop();}
+    @Override protected void onStop(){active=false;h.removeCallbacks(ticker);stopScan();closeGatt();stopHeart();setDim(false);history.clear();lastChartSecond=-1;super.onStop();}
     private boolean granted(String p){return checkSelfPermission(p)==PackageManager.PERMISSION_GRANTED;}
     private void askPermissions(){
         java.util.ArrayList<String> needed=new java.util.ArrayList<>();
@@ -198,7 +269,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             long stamp=HrPacket.sampleTimeWithUptime(rawTimestamp,now,SystemClock.uptimeMillis(),registeredAt);
             if(stamp<0){invalidEvents++;badTime++;invalidateHeart();recordRaw("Garett: stara próbka",now);sensorMessage=rawNote;return;}
             bpm=packedCandidate;sampled=stamp;lastGoodAt=now;validEvents++;packedReading=true;
-            recordRaw("Garett: dekodowany BPM (test)",now);sensorMessage="Garett: tryb eksperymentalny";return;
+            recordRaw("Garett: dekodowany BPM (test)",now);sensorMessage="Garett: dekoder zweryfikowany w próbie użytkownika";return;
         }
         if(packedCandidate>0){invalidEvents++;invalidateHeart();recordRaw("Garett: kandydat "+packedCandidate+" BPM",now);sensorMessage="Potwierdź format po porównaniu";return;}
         if(!HrPacket.usable(rawBpm,rawAccuracy)){
@@ -248,12 +319,74 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void paint(long now){
         boolean fresh=heartFresh(now);
         value.setText(fresh?String.valueOf(bpm):"--");
-        rawView.setText(packedCandidate>0?"Kandydat BPM: "+packedCandidate+" (Garett)\n"+HrPacket.bytes(rawBpm)+" | a="+rawAccuracy+"\n"+(packedConfirmed?"Tryb testowy włączony":"Porównaj z fabryczną apką"):"Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+(rawAccuracy==-999?"--":Integer.toString(rawAccuracy))+"\n"+rawNote);
-        sensorStatus.setText(sensorMessage+(registered&&!fresh?" • brak świeżej próbki":""));
-        status.setText(ready?(fresh?(packedReading?"Połączono • HR test Garett":"Połączono • wysyłam puls"):"Połączono • brak ważnego BPM"):message);
-        counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\nHR ACK: "+acked+" (BPM: "+validAck+")"+(ready?"\nOstatni ACK: "+(lastSent==0?"brak":lastSent+" BPM"):""));
-        connect.setText(wanted?"Rozłącz":"Połącz");
-        if(details.getVisibility()==android.view.View.VISIBLE)listSensors();
+        sensorStatus.setText(fresh?"Puls zmierzony":!granted(Manifest.permission.BODY_SENSORS)?"Zezwól na pomiar pulsu":"Mierzę puls…");
+        heartView.setPulse(fresh?bpm:0);
+        boolean delivered=ready&&fresh&&lastAckBpm>0&&lastAckAt>=0&&now-lastAckAt<=3500;
+        String label;
+        if(delivered)label="Połączono • puls wysyłany";
+        else if(ready)label=fresh?"Połączono • wysyłam…":"Połączono • mierzę puls";
+        else if(!wanted)label="Rozłączono";
+        else if(adapter==null||!adapter.isEnabled()||!granted(Manifest.permission.ACCESS_FINE_LOCATION)||message.contains("lokalizacj"))label=message;
+        else if(gatt!=null)label="Łączę z komputerkiem…";
+        else label="Szukam komputerka…";
+        status.setText(label);
+        status.setTextColor(delivered?0xff56dec5:0xffe9bd71);
+        if(advanced.getVisibility()==View.VISIBLE){
+            rawView.setText("Surowy HR: "+(Float.isNaN(rawBpm)?"--":Float.toString(rawBpm))+" | a="+rawAccuracy+"\\n"+rawNote+"\\n"+sensorMessage);
+            counts.setText("Próbki HR: "+samples+" | FTMS: "+rx+"\\nHR ACK: "+acked+" (BPM: "+validAck+")\\nOstatni ACK: "+(lastAckBpm==0?"brak":lastAckBpm+" BPM")+"\\n"+message);
+            if(details.getVisibility()==View.VISIBLE)listSensors();
+        }
+    }
+    private final class HeartView extends View {
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path=new Path();
+        private int current=0;
+        HeartView(){super(MainActivity.this);}
+        void setPulse(int value){
+            if(current!=value){current=value;invalidate();}
+            else if(!dimmed&&current>0)invalidate();
+        }
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float scale=Math.min(getWidth(),getHeight())/100f;
+            float beat=1f;
+            if(current>0&&!dimmed){
+                double phase=(SystemClock.elapsedRealtime()%(60000.0/current))/(60000.0/current);
+                beat=1f+0.13f*(float)Math.exp(-Math.pow((phase-0.16)/0.11,2));
+            }
+            canvas.save();canvas.translate(getWidth()/2f,getHeight()/2f);canvas.scale(scale*beat,scale*beat);
+            path.reset();path.moveTo(0,31);
+            path.cubicTo(-11,20,-42,-1,-42,-18);
+            path.cubicTo(-42,-43,-12,-47,0,-25);
+            path.cubicTo(12,-47,42,-43,42,-18);
+            path.cubicTo(42,-1,11,20,0,31);path.close();
+            paint.setColor(current>0?0xffff627e:0xff586475);paint.setStyle(Paint.Style.FILL);
+            canvas.drawPath(path,paint);canvas.restore();
+            if(active&&current>0&&!dimmed)postInvalidateDelayed(50);
+        }
+    }
+    private final class TrendView extends View {
+        private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+        TrendView(){super(MainActivity.this);setBackground(rounded(0xff101f30,12));}
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float l=dp(9),r=getWidth()-dp(9),t=dp(9),b=getHeight()-dp(9);
+            if(r<=l||b<=t)return;
+            int[] points=history.snapshot();
+            int lo=240,hi=35,n=0;
+            for(int v:points)if(HrPacket.validBpm(v)){lo=Math.min(lo,v);hi=Math.max(hi,v);n++;}
+            p.setColor(0xff294053);p.setStrokeWidth(dp(1));canvas.drawLine(l,(t+b)/2,r,(t+b)/2,p);
+            if(n==0){p.setColor(0xff9aafbf);p.setTextSize(dp(12));p.setTextAlign(Paint.Align.CENTER);canvas.drawText("Czekam na pomiar",getWidth()/2f,(t+b)/2-dp(4),p);return;}
+            lo=Math.max(30,lo-8);hi=Math.min(250,Math.max(hi+8,lo+20));
+            p.setColor(0xffff627e);p.setStrokeWidth(dp(2));p.setStrokeCap(Paint.Cap.ROUND);
+            boolean prev=false;float px=0,py=0;
+            for(int i=0;i<points.length;i++){
+                int v=points[i];if(!HrPacket.validBpm(v)){prev=false;continue;}
+                float x=l+(r-l)*i/(points.length-1f),y=b-(b-t)*(v-lo)/(hi-lo);
+                if(prev)canvas.drawLine(px,py,x,y,p);else canvas.drawCircle(x,y,dp(2),p);
+                px=x;py=y;prev=true;
+            }
+        }
     }
     private void startScan(){
         if(!active||!wanted||scanning||gatt!=null)return;
@@ -288,7 +421,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         scanner=null;
     }
     private void closeGatt(){
-        BluetoothGatt old=gatt;gatt=null;tx=null;ready=false;pending=false;seq=0;lastSent=0;
+        BluetoothGatt old=gatt;gatt=null;tx=null;ready=false;pending=false;seq=0;lastSent=0;lastAckAt=-1;lastAckBpm=0;
         if(old!=null){try{old.disconnect();}catch(RuntimeException ignored){}try{old.close();}catch(RuntimeException ignored){}}
     }
     private void retry(String why){stopScan();closeGatt();message=why+" • ponawiam";nextAttempt=SystemClock.elapsedRealtime()+3000;}
@@ -326,7 +459,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if(g!=gatt||!HR.equals(c.getUuid())||!pending)return;
             pending=false;
             if(code!=BluetoothGatt.GATT_SUCCESS){retry("Zapis HR: "+code);return;}
-            acked++;if(lastSent!=0)validAck++;
+            acked++;lastAckBpm=lastSent;lastAckAt=SystemClock.elapsedRealtime();if(lastSent!=0)validAck++;
         });}
     };
     private void send(long now){

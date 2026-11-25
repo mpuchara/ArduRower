@@ -24,9 +24,9 @@ jobs:
         run: bash android/garett-hr/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ArduRower-HR-Garett-0.1.4
+          name: ArduRower-HR-Garett-0.1.5
           path: |
-            android/garett-hr/out/ArduRower-HR-Garett-0.1.4.apk
+            android/garett-hr/out/ArduRower-HR-Garett-0.1.5.apk
             android/garett-hr/out/SHA256SUMS.txt
             android/garett-hr/out/signature.txt
             android/garett-hr/out/badging.txt
