@@ -1,4 +1,4 @@
-# ArduRower HR — Garett Essa 2 AI 4G (0.1.3)
+# ArduRower HR — Garett Essa 2 AI 4G (0.1.4)
 Pierwsza wersja diagnostyczna, tylko fizyczny pomiar HR i wysyłanie do CYD 0.09.38 przez istniejący WatchHrBridge. Nie modyfikuje firmware ani Garmin IQ.
 
 Android 8.1: min API 26, target 27, compile 35, pojedynczy DEX, Java, bez JNI i Internetu, podpis APK v1. Wzorzec: Espen/android/ala-robot/watch. Budowa: Android SDK platform 35, build-tools 35.0.0, JDK 17, bash android/garett-hr/build.sh. Domyślny klucz testowy generowany lokalnie; kolejne aktualizacje wymagają tego samego klucza (ustaw HR_KEYSTORE i HR_KEYSTORE_PASSWORD). Klucza nie publikujemy.
@@ -15,3 +15,6 @@ Wersja 0.1.3 zachowuje ostatni surowy odczyt i osiem zdarzeń, zlicza osobno bra
 
 ## Garett 0.1.3
 Observed floats 9.753404E20 and 2.4268218E20 represent bits 62537E45 / 61527E45, bytes 98/83/126/69 and 97/82/126/69. Second byte is the candidate BPM. The interpretation is experimental and not vendor-confirmed. Main screen shows candidate and bytes; standard BPM still works. Compare several readings with the official app before enabling the explicit test-mode button. Confirmation is session-only; no packed samples are transmitted before confirmation. Accuracy <=0, out-of-signature packets, stale timestamps are still rejected. No medical use. No CYD changes.
+
+## 0.1.4 — szybki pomiar domyślny
+Po uruchomieniu aplikacja rejestruje czujnik z SENSOR_DELAY_FASTEST. Nadal można przełączyć na interwał 1 s. Na fizycznym Garett użytkownik uzyskał w trybie szybkim kandydatów BPM zbliżonych do odczytu Garmin. Dekoder eksperymentalny nadal wymaga potwierdzenia, transmisja BLE i firmware bez zmian.

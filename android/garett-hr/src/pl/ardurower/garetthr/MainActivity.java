@@ -37,7 +37,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private int noContact=0,unreliable=0,badValue=0,badTime=0,uptimeAdjusted=0,accuracyCallback=-999;
     private long lastAnyEvent=-1,lastPlausibleAt=-1;
     private final java.util.ArrayDeque<String> recent=new java.util.ArrayDeque<>();
-    private boolean slowSampling=true;
+    private boolean slowSampling=false;
     private boolean packedConfirmed=false,packedReading=false;
     private int packedCandidate=0;
     private int packedCount=0;
@@ -84,7 +84,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);root.setPadding(12,8,12,8);root.setBackgroundColor(0xff07111d);
         scroll.addView(root);setContentView(scroll);
-        add(root,"ArduRower HR 0.1.3",20,Color.WHITE);
+        add(root,"ArduRower HR 0.1.4",20,Color.WHITE);
         value=add(root,"--",58,0xffff627e);
         add(root,"BPM",16,0xffc0cbd9);
         sensorStatus=add(root,"",14,0xffc0cbd9);
@@ -106,7 +106,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
         Button restart=new Button(this);restart.setText("Uruchom pomiar ponownie");root.addView(restart,new LinearLayout.LayoutParams(-1,-2));
         restart.setOnClickListener(v->{if(!granted(Manifest.permission.BODY_SENSORS)){requestPermissions(new String[]{Manifest.permission.BODY_SENSORS},7);return;}restartHeart(false);});
-        Button next=new Button(this);next.setText("Tryb pomiaru: 1 s");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
+        Button next=new Button(this);next.setText(slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki");root.addView(next,new LinearLayout.LayoutParams(-1,-2));
         next.setOnClickListener(v->{slowSampling=!slowSampling;next.setText(slowSampling?"Tryb pomiaru: 1 s":"Tryb pomiaru: szybki");restartHeart(false);});
         Button diag=new Button(this);diag.setText("Czujniki / diagnostyka");root.addView(diag,new LinearLayout.LayoutParams(-1,-2));
         details=add(root,"",12,0xffc0cbd9);details.setGravity(Gravity.START);details.setVisibility(android.view.View.GONE);
